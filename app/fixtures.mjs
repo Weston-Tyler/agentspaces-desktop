@@ -1,0 +1,83 @@
+export const sampleSessions = [
+  {
+    id: "sample-codex-new",
+    provider: "codex",
+    surface: "CLI / desktop",
+    account: "sample-private",
+    project: "sample-research",
+    title: "API client implementation",
+    topics: ["API", "retry", "client"],
+    status: "current",
+    updatedAt: "2026-10-08T14:00:00Z",
+  },
+  {
+    id: "sample-codex-old",
+    provider: "codex",
+    surface: "CLI",
+    account: "sample-private",
+    project: "sample-research",
+    title: "Retry and idempotency research",
+    topics: ["API", "retry", "idempotency", "timeouts"],
+    status: "archived",
+    updatedAt: "2026-09-24T14:00:00Z",
+  },
+  {
+    id: "sample-claude-new",
+    provider: "claude",
+    surface: "IDE / CLI",
+    account: "sample-private",
+    project: "sample-research",
+    title: "Transport adapter implementation",
+    topics: ["API", "retry", "transport"],
+    status: "current",
+    updatedAt: "2026-10-08T13:00:00Z",
+  },
+  {
+    id: "sample-claude-old",
+    provider: "claude",
+    surface: "CLI",
+    account: "sample-private",
+    project: "sample-research",
+    title: "Artifact versioning decisions",
+    topics: ["artifact", "version", "provenance"],
+    status: "dormant",
+    updatedAt: "2026-09-19T14:00:00Z",
+  },
+  {
+    id: "sample-denied",
+    provider: "codex",
+    surface: "desktop",
+    account: "sample-work",
+    project: "sample-confidential",
+    title: "Private account boundary fixture",
+    topics: ["API"],
+    status: "archived",
+    updatedAt: "2026-09-30T14:00:00Z",
+  },
+].map((s) => ({ ...s, fixture: true, sourceVersion: "synthetic-fixture-v1" }));
+export const sampleFindings = {
+  "sample-codex-old": {
+    title: "Reconcile before retrying",
+    summary:
+      "After an ambiguous acknowledgement, reconcile the original operation identifier before retrying. A timeout alone does not establish that an effect failed.",
+    artifact: {
+      name: "retry-notes.md",
+      text: "# Retry research\n\nRetain the operation identifier. Query its recorded result after a lost acknowledgement. Retry only when the original operation is known not to have run.\n\nSynthetic sample: this is not a real historical conversation.\n",
+    },
+    sourceVersion: "synthetic-fixture-v1",
+    capturedAt: "2026-09-24T14:00:00Z",
+    expiresAt: "2027-01-01T00:00:00Z",
+  },
+  "sample-claude-old": {
+    title: "Keep original artifact references",
+    summary:
+      "A handoff carries its source session, source version and content digest. A derived summary is not the original artifact.",
+    artifact: {
+      name: "artifact-notes.md",
+      text: "# Artifact provenance\n\nReference the source session and immutable content digest. Keep private content access separate from discovery.\n\nSynthetic sample.\n",
+    },
+    sourceVersion: "synthetic-fixture-v1",
+    capturedAt: "2026-09-19T14:00:00Z",
+    expiresAt: "2027-01-01T00:00:00Z",
+  },
+};

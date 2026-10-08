@@ -24,6 +24,8 @@ dist/
 build/
 target/
 coverage/
+.playwright-cli/
+output/
 
 # Editor and OS metadata
 .idea/

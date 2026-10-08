@@ -2,7 +2,15 @@
 
 AgentSpaces Desktop is a planned local application that connects work across native AI tools. Users keep working in their existing applications while approved threads share findings, reference artifacts, and request bounded follow-up work through AgentSpaces.
 
-Status: repository foundation and product direction. There is no executable application, installer, connected account, or qualified native integration in this repository yet.
+Status: local Windows source alpha. The repository now has an executable Electron companion, a loopback background service, permissioned session discovery/retrieval, read-only Codex/Claude adapters, scoped MCP tools, and bounded tests. A real upstream Java/TypeScript fabric proof uses synthetic native session/execution payloads. No private histories or model execution were enrolled during this build; there is no signed installer or released distribution.
+
+## Run the source alpha
+
+Requires Node 24+. In this checkout, run npm ci, npm run check, and npm test. Then npm run desktop opens the native companion; npm start opens the standalone loopback preview on port 43127. Closing the native window hides it to its tray; tray Quit stops its owned runtime.
+
+Start in an empty workspace or explicitly open the synthetic sample. Same-tool rediscovery is as important as cross-tool handoff. Setup supports explicit project/tool/host discovery, including Linux remote over an existing SSH connection and this Windows/local workstation device. Metadata, content access, sharing/retrieval and execution remain distinct grants.
+
+Read [the alpha guide](docs/alpha-guide.md), [the product brief](docs/product-brief.md), and [compatibility boundaries](docs/compatibility.md) before connecting native sessions. Account boundary labels are user-configured scopes, not verified provider account identity. Native inference remains unavailable.
 
 ## Intended experience
 

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AgentSpaces Desktop</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="/"
+        ><span class="mark"><i></i><i></i><i></i></span
+        ><span>AgentSpaces<small>DESKTOP</small></span></a
+      >
+      <div class="workspace-label">YOUR WORKSPACE</div>
+      <nav aria-label="Primary">
+        <button data-page="discover" class="active">
+          <span class="navicon">⌕</span>Discover work</button
+        ><button data-page="activity">
+          <span class="navicon">≡</span>Activity</button
+        ><button data-page="permissions">
+          <span class="navicon">◇</span>Permissions</button
+        ><button data-page="usage"><span class="navicon">▥</span>Usage</button
+        ><button data-page="settings">
+          <span class="navicon">⚙</span>Setup & diagnostics
+        </button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="status-dot"></span
+        ><span
+          >Local companion<small id="sidebar-mode">Windows alpha</small></span
+        ><span class="alpha">ALPHA</span>
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div class="crumb">
+          Workspace <span>/</span> <b id="crumb">Discover work</b>
+        </div>
+        <div class="header-right">
+          <span id="mode-pill" class="pill">Empty workspace</span
+          ><span class="local-label">On this device</span>
+        </div>
+      </header>
+      <section class="page-heading">
+        <div>
+          <div class="eyebrow">NATIVE TOOLS. SHARED CONTEXT.</div>
+          <h1 id="page-title">Find the work you already did.</h1>
+          <p id="page-description">
+            Rediscover useful research and artifacts across your permitted
+            sessions.
+          </p>
+        </div>
+        <button id="sample" class="secondary">Open sample workspace</button>
+      </section>
+      <div id="notice" role="status" hidden></div>
+      <div id="view"></div>
+      <footer>
+        <span>Local-first · Permissions stay explicit</span
+        ><span id="footer-fabric">Fabric disconnected</span>
+      </footer>
+    </main>
+    <dialog id="detail">
+      <div class="dialog-head">
+        <span class="eyebrow">SESSION & PROVENANCE</span
+        ><button
+          id="close-detail"
+          aria-label="Close details"
+          class="icon-button"
+        >
+          ×
+        </button>
+      </div>
+      <div id="detail-content"></div>
+    </dialog>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
