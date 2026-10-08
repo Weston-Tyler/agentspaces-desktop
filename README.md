@@ -10,6 +10,8 @@ The Connected Work page now includes Connect Everything for selected native tool
 
 Requires Node 24+. In this checkout, run npm ci, npm run check, and npm test. Then npm run desktop opens the native companion; npm start opens the standalone loopback preview on port 43127. Closing the native window hides it to its tray; tray Quit stops its owned runtime.
 
+On Windows, scripts/Open-Desktop.ps1 starts the background companion if needed and opens the desktop window on that same workspace. A desktop shortcut can target this script. The source desktop also attaches to an existing verified source-preview runtime by default, preserving its discovered threads. Quitting an attached window leaves that background runtime running. This is a source launcher, not a packaged installer.
+
 The Discussions page brings multiple source threads into a shared conversation with stable mentions, a provider-grouped reply selector, message ancestry and source attribution. Scoped MCP participants can read and contribute while running in their native tools. Automatic native wake is unavailable; selected native requests display that boundary. The multi-participant dialogue demo is synthetic, bounded and makes no model calls. See [discussions and routing](docs/discussions.md).
 
 Native chat is the default view. Open the installed Codex or Claude Code CLI locally or on remote and sign in through its own native flow. AgentSpaces does not request a provider key or copy login credentials. For selected Claude threads, a prepared MCP channel can forward discussion mentions and return replies into the group after native preview consent. See [native companion setup and proof limits](docs/native-companion.md).

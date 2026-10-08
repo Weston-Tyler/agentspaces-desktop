@@ -1,7 +1,8 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, session } from "electron";
 import { startServer } from "./server.mjs";
 import { join } from "node:path";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 if (process.env.AGENTSPACES_DESKTOP_STATE) {
   mkdirSync(process.env.AGENTSPACES_DESKTOP_STATE, { recursive: true });
   app.setPath("userData", process.env.AGENTSPACES_DESKTOP_STATE);
@@ -19,7 +20,16 @@ else {
   app
     .whenReady()
     .then(async () => {
-      companion = await startServer({
+      const sourceRuntime = fileURLToPath(new URL("../.local/runtime.json", import.meta.url));
+      const sharedRuntime = process.env.AGENTSPACES_DESKTOP_RUNTIME ?? (!process.env.AGENTSPACES_DESKTOP_STATE && existsSync(sourceRuntime) ? sourceRuntime : null);
+      if (sharedRuntime) {
+        const runtime = JSON.parse(readFileSync(sharedRuntime, "utf8"));
+        if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(runtime.address)) throw new Error("Invalid companion address");
+        const health = await fetch(runtime.address + "/api/health", { headers: { Authorization: "Bearer " + runtime.admin }, signal: AbortSignal.timeout(3000) }).then(r => r.json());
+        if (health.instance !== runtime.instance || health.pid !== runtime.pid) throw new Error("Companion runtime identity mismatch");
+        // An attached desktop window does not own the background process.
+        companion = { address: runtime.address, close: async () => {} };
+      } else companion = await startServer({
         root: join(app.getPath("userData"), "alpha-state"),
         port: 0,
       });

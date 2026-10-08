@@ -19,7 +19,7 @@ let state,
     query: "",
     provider: "all",
     status: "all",
-    project: "sample-research",
+    project: "all",
   };
 const $ = (s) => document.querySelector(s),
   esc = (s) =>
@@ -166,8 +166,8 @@ function render() {
     settings: settings,
   }[page]();
   if (page === "discover" && state.projects.length) {
-    if (!state.projects.some((p) => p.id === filters.project))
-      filters.project = state.projects[0].id;
+    if (filters.project !== "all" && !state.projects.some((p) => p.id === filters.project))
+      filters.project = "all";
     showResults();
   }
   if (page === "settings") nativeControls(state, { api, notice });
@@ -201,7 +201,7 @@ function empty(title, text, button = "") {
   return `<div class="empty"><div class="empty-symbol">⌕</div><h2>${esc(title)}</h2><p>${esc(text)}</p>${button}</div>`;
 }
 function discovery() {
-  return `${stats()}<div class="panel"><div class="panel-title"><div><h2>Your session library</h2><p>Find by topic, native tool, project or session state.</p></div><span class="tag">Metadata first</span></div>${state.projects.length ? `<div class="searchbar"><input id="search" aria-label="Search permitted work" placeholder="Search research, decisions, artifacts…" value="${esc(filters.query)}"><select id="provider" aria-label="Tool"><option value="all">All native tools</option><option value="codex" ${filters.provider === "codex" ? "selected" : ""}>Codex</option><option value="claude" ${filters.provider === "claude" ? "selected" : ""}>Claude Code</option></select><select id="status" aria-label="Session state">${["all", "current", "dormant", "archived"].map((v) => `<option value="${v}" ${filters.status === v ? "selected" : ""}>${v === "all" ? "All session states" : v[0].toUpperCase() + v.slice(1)}</option>`).join("")}</select><select id="project" aria-label="Project">${state.projects.map((p) => `<option value="${esc(p.id)}" ${filters.project === p.id ? "selected" : ""}>${esc(p.id)}</option>`).join("")}</select></div><div class="suggestions">Try a topic <button data-action="topic" data-value="retry">retry</button><button data-action="topic" data-value="artifact">artifact</button><span>Content stays locked until you allow it.</span></div><div id="results"></div>` : empty("Useful context, without starting over.", "Choose a project to discover native session metadata, or explore an explicitly synthetic sample. Nothing has been enrolled.", `<button class="primary" data-page="settings">Set up native discovery</button> <button class="secondary" data-action="sample">Explore sample</button>`)}<div class="info-line">Archived and dormant work can be retrieved without waking a session. Discovery does not grant access to private content or authorize execution.</div></div>`;
+  return `${stats()}<div class="panel"><div class="panel-title"><div><h2>Your session library</h2><p>Find by topic, native tool, project or session state.</p></div><span class="tag">Metadata first</span></div>${state.projects.length ? `<div class="searchbar"><input id="search" aria-label="Search permitted work" placeholder="Search research, decisions, artifacts…" value="${esc(filters.query)}"><select id="provider" aria-label="Tool"><option value="all">All native tools</option><option value="codex" ${filters.provider === "codex" ? "selected" : ""}>Codex</option><option value="claude" ${filters.provider === "claude" ? "selected" : ""}>Claude Code</option></select><select id="status" aria-label="Session state">${["all", "current", "dormant", "archived"].map((v) => `<option value="${v}" ${filters.status === v ? "selected" : ""}>${v === "all" ? "All session states" : v[0].toUpperCase() + v.slice(1)}</option>`).join("")}</select><select id="project" aria-label="Project"><option value="all" ${filters.project === "all" ? "selected" : ""}>All projects</option>${state.projects.map((p) => `<option value="${esc(p.id)}" ${filters.project === p.id ? "selected" : ""}>${esc(p.id)}</option>`).join("")}</select></div><div class="suggestions">Try a topic <button data-action="topic" data-value="retry">retry</button><button data-action="topic" data-value="artifact">artifact</button><span>Content stays locked until you allow it.</span></div><div id="results"></div>` : empty("Useful context, without starting over.", "Choose a project to discover native session metadata, or explore an explicitly synthetic sample. Nothing has been enrolled.", `<button class="primary" data-page="settings">Set up native discovery</button> <button class="secondary" data-action="sample">Explore sample</button>`)}<div class="info-line">Archived and dormant work can be retrieved without waking a session. Discovery does not grant access to private content or authorize execution.</div></div>`;
 }
 let searchRevision = 0;
 async function showResults() {
