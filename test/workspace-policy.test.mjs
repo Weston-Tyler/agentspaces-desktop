@@ -77,6 +77,20 @@ test("connect-everything reads supported catalogs, both Codex archive states and
   assert.equal(e.workspace.index.sessions.length, 12);
   assert.equal(e.modelCalls, 0);
 });
+test("startup catalog-only discovery preserves native paging without touching Git or files", async () => {
+  const e = make(), calls = configure(e);
+  e.workspace.adapterFactory = () => { throw new Error("Startup must not wait for filesystem inventory"); };
+  const summary = await e.workspace.scan({ ...scope, hosts: ["local"] }, { catalogOnly: true });
+  assert.equal(calls.length, 6);
+  assert.equal(e.catalog.length, 6);
+  assert.equal(summary.counts.session, 6);
+  assert.equal(summary.errors.length, 0);
+  assert(summary.coverage[0].limits.some(limit => limit.includes("inventory has not run")));
+  assert(e.catalog.every(source => e.permissions(source).content !== true && e.permissions(source).share !== true));
+  const restored = new Engine(new Store(e.store.root), new FabricAdapter({ stateRoot: e.store.root }));
+  assert.equal(restored.catalog.length, 6);
+  assert.equal(e.modelCalls, 0);
+});
 test("a repeated native cursor terminates visibly without discarding discovered older work", async () => {
   const e = make();
   configure(e, { repeat: true });

@@ -239,7 +239,7 @@ export class WorkspaceMap {
       active: true,
     };
   }
-  async scan(input, { continuePages = false } = {}) {
+  async scan(input, { continuePages = false, catalogOnly = false } = {}) {
     if (continuePages && this.index?.fixture)
       throw new Error(
         "Fixture metadata never triggers a native discovery pass",
@@ -369,6 +369,10 @@ export class WorkspaceMap {
       for (const host of profile.hosts) {
         if (this.cancelled)
           throw new Error("Inventory cancelled; previous index preserved");
+        if (catalogOnly) {
+          graphs.push({ host, nodes: [], edges: [], cursor: null, coverage: { roots: [], directories: 0, files: 0, excluded: 0, errors: [], limits: ["Thread catalog only; repository and file inventory has not run"] } });
+          continue;
+        }
         this.progress = {
           stage: "repositories, worktrees and files",
           host,

@@ -15,7 +15,7 @@ try {
       port: Number(process.env.AGENTSPACES_PORT ?? 43127),
     });
     console.log(
-      `AgentSpaces Desktop local alpha: ${app.address}\nEmpty workspace. Sample data requires an explicit action. Native execution is disabled.`,
+      `AgentSpaces Desktop local alpha: ${app.address}\nNative thread discovery restores the saved connection or starts automatically. Provider sign-in and approvals stay with native tools.`,
     );
     for (const sig of ["SIGINT", "SIGTERM"])
       process.once(sig, () => app.close().then(() => process.exit(0)));

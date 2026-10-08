@@ -13,7 +13,7 @@ let state,
   page =
     new URL(location.href).searchParams.get("view") === "advanced"
       ? "advanced"
-      : "native",
+      : new URL(location.href).searchParams.get("view") === "native" ? "native" : "discover",
   selected = null,
   filters = {
     query: "",
@@ -77,6 +77,22 @@ function notice(message, error = false) {
 async function refresh() {
   state = await api("state");
   render();
+  scheduleDiscoveryPoll();
+}
+let discoveryPoll = null;
+function scheduleDiscoveryPoll() {
+  clearTimeout(discoveryPoll);
+  if (!state.workspace?.running && state.desktopStartup?.status !== "discovering") return;
+  discoveryPoll = setTimeout(async () => {
+    try {
+      state = await api("state");
+      // Keep a running terminal intact while its source list updates.
+      if (page === "native" && document.querySelector("#view .xterm"))
+        window.dispatchEvent(new CustomEvent("agentspaces-catalog", { detail: state }));
+      else render();
+      scheduleDiscoveryPoll();
+    } catch { notice("Local companion is reconnecting. Your saved threads remain on this device.", true); }
+  }, 1500);
 }
 const titles = {
   native: ["Native chat", "Sign in with your native tools.", "Use Codex or Claude Code directly. Their native account, conversation and approval controls stay with them."],
@@ -96,9 +112,9 @@ const titles = {
     "Find sessions, compare worktrees, and trace documents and work artifacts back to their sources.",
   ],
   discover: [
-    "Discover work",
-    "Find the work you already did.",
-    "Rediscover useful research and artifacts across your permitted sessions.",
+    "Your threads",
+    "Your Codex and Claude threads.",
+    "Browse your connected native threads by topic, tool or project.",
   ],
   activity: [
     "Activity",
@@ -139,13 +155,14 @@ function render() {
         ? "Connected work map"
         : state.mode === "native-read-only"
           ? "Native metadata · read only"
-          : "Empty workspace";
+          : state.workspace?.running ? "Finding your local threads…" : "Your workspace";
   $("#mode-pill").className =
     "pill" + (state.mode === "fixture" ? " sample" : "");
   $("#sample").textContent =
     state.mode === "fixture"
       ? "Reload sample workspace"
       : "Open sample workspace";
+  $("#sample").hidden = !state.demoAvailable;
   $("#footer-fabric").textContent =
     state.fabric.status === "connected"
       ? "Verified loopback fabric connection"
@@ -181,7 +198,7 @@ function render() {
       notice(error.message, true),
     );
   if (page === "workspace") {
-    $("#view").replaceChildren(workspacePage(state.workspace));
+    $("#view").replaceChildren(workspacePage({ ...state.workspace, demoAvailable: state.demoAvailable }));
     workspaceHydrate(api).catch((error) => notice(error.message, true));
   }
   if (page === "workspace" && state.workspace.profile?.active) {
@@ -325,7 +342,7 @@ document.addEventListener("click", async (event) => {
   try {
     if (b.dataset.page) {
       page = b.dataset.page;
-      render();
+      await refresh();
       return;
     }
     const a = b.dataset.action;

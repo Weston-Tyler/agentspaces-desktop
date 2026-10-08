@@ -34,7 +34,7 @@ export function routerText() {
     "Managed companion guidance, version 1. Native and repository instructions still control the work.",
     "",
     "## Find and reuse connected work",
-    "Open AgentSpaces Desktop on the owning device. Connected work maps permitted native sessions, repository/worktree ancestry, Markdown links and work artifacts. Search before repeating research. Discovery and thread references do not grant transcript access or permission to execute.",
+    "Open AgentSpaces Desktop on the owning device. Your threads restores the saved native metadata connection automatically; first use discovers local native catalogs without transcript reads or Git/file inventory. Revoked scopes stay revoked. Connected work maps permitted sessions, repository/worktree ancestry, Markdown links and artifacts. Search before repeating research. Discovery and thread references do not grant transcript access or permission to execute. Normal runtimes do not allow sample data to replace native connections.",
     "",
     "## Shared discussions",
     "A discussion can reference multiple Codex and Claude Code threads. Mentions use the discussion’s stable aliases, for example @codex1 and @claude1. The reply selector groups threads by app. A group reference is not a command to resume a native session.",

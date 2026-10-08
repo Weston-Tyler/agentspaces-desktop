@@ -116,6 +116,19 @@ export function mountNativeChat(root, state, { api, notice }) {
     cwd.value = s.cwd ?? "";
     reference.append(el("p", s.title), el("p", "Source " + (s.nativeThreadId ?? s.id) + " · " + (s.host ?? "local"), "fineprint"), el("p", "This is a reference. Opening chat starts native interaction without automatically resuming this source. Connector attribution is locally bound; native source identity remains self-reported.", "fineprint"));
   };
+  const updateCatalog = event => {
+    state.sessions = event.detail.sessions;
+    const selected = source.value;
+    source.replaceChildren();
+    const placeholder = el("option", "Choose a discovered source thread"); placeholder.value = ""; source.append(placeholder);
+    for (const s of state.sessions ?? []) {
+      if (s.fixture) continue;
+      const option = el("option", s.title + " · " + s.provider + " · " + (s.host ?? "local"));
+      option.value = s.id; source.append(option);
+    }
+    source.value = selected;
+  };
+  window.addEventListener("agentspaces-catalog", updateCatalog);
   const channelButton = button("Connect selected Claude thread via channel", async () => {
     const s = state.sessions.find((s) => s.id === source.value);
     if (!s || s.provider !== "claude") throw new Error("Select a discovered Claude Code thread first");
@@ -147,6 +160,7 @@ export function mountNativeChat(root, state, { api, notice }) {
   function dispose() {
     if (disposed) return;
     disposed = true; observer.disconnect(); resize.disconnect();
+    window.removeEventListener("agentspaces-catalog", updateCatalog);
     closeTerminal().catch(() => {});
   }
   return dispose;

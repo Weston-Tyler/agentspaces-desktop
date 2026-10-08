@@ -15,6 +15,7 @@ import { WebSocketServer } from "ws";
 import { NativeTerminals } from "./native-terminal.mjs";
 import { NativeConnections } from "./native-connections.mjs";
 import { ChannelHub } from "./channel-hub.mjs";
+import { ensureDesktopDiscovery } from "./desktop-discovery.mjs";
 const ui = fileURLToPath(new URL("../ui/", import.meta.url));
 const staticFiles = {
   "/": "index.html",
@@ -37,12 +38,15 @@ export async function startServer({
   engine: provided,
   terminals: providedTerminals,
   remoteInstall,
+  desktopDiscovery = !provided,
+  allowDemo = false,
 } = {}) {
   const store = provided?.store ?? new Store(root),
     fabric = provided?.fabric ?? new FabricAdapter({ stateRoot: root }),
     engine = provided ?? new Engine(store, fabric);
   protectStateDirectory(root);
   if (!provided) await engine.initialize();
+  const desktopStartup = desktopDiscovery ? ensureDesktopDiscovery(engine) : null;
   const session = randomBytes(32).toString("hex"),
     admin = randomBytes(32).toString("hex"),
     instance = randomBytes(16).toString("hex");
@@ -131,7 +135,7 @@ export async function startServer({
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/state" && !connector) {
-        json(res, 200, engine.snapshot());
+        json(res, 200, { ...engine.snapshot(), demoAvailable: allowDemo, desktopStartup: desktopStartup ? { ready: desktopStartup.ready, status: desktopStartup.status, retryRequired: desktopStartup.retryRequired } : null });
         return;
       }
       if (req.method !== "POST") {
@@ -301,9 +305,11 @@ export async function startServer({
           result = engine.discussions.contribute(data, connector);
           break;
         case "/api/sample":
+          if (!allowDemo) throw new Error("Sample data is available only in a separate demo runtime");
           result = engine.loadSample();
           break;
         case "/api/workspace/sample":
+          if (!allowDemo) throw new Error("Sample data is available only in a separate demo runtime");
           result = await loadWorkspaceFixture(engine);
           break;
         case "/api/workspace/connect":
@@ -448,6 +454,7 @@ export async function startServer({
     { mode: 0o600 },
   );
   async function close() {
+    if (engine.workspace.running) engine.workspace.cancel();
     terminals.closeAll();
     for (const ws of sockets.clients) ws.terminate();
     sockets.close();
@@ -459,5 +466,5 @@ export async function startServer({
       if (current.instance === instance) unlinkSync(runtimePath);
     }
   }
-  return { server, engine, store, address, instance, admin, close, terminals, channels, connections };
+  return { server, engine, store, address, instance, admin, close, terminals, channels, connections, desktopDiscovery: desktopStartup };
 }

@@ -14,7 +14,9 @@ On Windows, scripts/Open-Desktop.ps1 starts the background companion if needed a
 
 The Discussions page brings multiple source threads into a shared conversation with stable mentions, a provider-grouped reply selector, message ancestry and source attribution. Scoped MCP participants can read and contribute while running in their native tools. Automatic native wake is unavailable; selected native requests display that boundary. The multi-participant dialogue demo is synthetic, bounded and makes no model calls. See [discussions and routing](docs/discussions.md).
 
-Native chat is the default view. Open the installed Codex or Claude Code CLI locally or on remote and sign in through its own native flow. AgentSpaces does not request a provider key or copy login credentials. For selected Claude threads, a prepared MCP channel can forward discussion mentions and return replies into the group after native preview consent. See [native companion setup and proof limits](docs/native-companion.md).
+The desktop opens on Your threads. Startup restores the saved native metadata connection immediately; first use automatically discovers local Codex and Claude thread metadata without waiting for repository/file indexing. A revoked connection stays revoked. Sample reset controls are excluded from the normal runtime; demos require a separate explicitly enabled runtime.
+
+Open Native chat to use the installed Codex or Claude Code CLI locally or on remote and sign in through its own native flow. AgentSpaces does not request a provider key or copy login credentials. For selected Claude threads, a prepared MCP channel can forward discussion mentions and return replies into the group after native preview consent. See [native companion setup and proof limits](docs/native-companion.md).
 
 Advanced answering retains the bounded general/topic synthesis path. Its Claude adapter uses optional API environment credentials; that separate mode is not required for native chat. See [advanced questions and proof boundaries](docs/native-questions.md) and the [workflow direction](docs/ask-and-workflows.md).
 

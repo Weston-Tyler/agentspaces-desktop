@@ -155,8 +155,8 @@ export function workspacePage(summary) {
   setup.append(form);
   root.append(setup);
   const controls = el("div", undefined, "actions");
+  if (summary?.demoAvailable) controls.append(action("Explore synthetic work map", "workspace-sample"));
   controls.append(
-    action("Explore synthetic work map", "workspace-sample"),
     action("Refresh granted scope", "workspace-refresh"),
     action("Continue remaining inventory", "workspace-continue"),
     action("Cancel inventory", "workspace-cancel"),
