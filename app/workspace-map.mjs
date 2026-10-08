@@ -370,7 +370,10 @@ export class WorkspaceMap {
         if (this.cancelled)
           throw new Error("Inventory cancelled; previous index preserved");
         if (catalogOnly) {
-          graphs.push({ host, nodes: [], edges: [], cursor: null, coverage: { roots: [], directories: 0, files: 0, excluded: 0, errors: [], limits: ["Thread catalog only; repository and file inventory has not run"] } });
+          const retain = this.index?.profile?.active && !this.index.fixture && this.index.profile.account === profile.account && JSON.stringify(this.index.profile.roots) === JSON.stringify(profile.roots);
+          const prior = retain ? previousHostGraph(this.index, host) : { nodes: [], edges: [] };
+          const nodes = prior.nodes.filter(node => !node.path || !scopePathExcluded(node.path, host, profile.exclusions[host] ?? [])), ids = new Set(nodes.map(node => node.id));
+          graphs.push({ host, nodes, edges: prior.edges.filter(edge => ids.has(edge.from) && ids.has(edge.to)), cursor: retain ? this.index.filesystemCursors?.[host] ?? null : null, coverage: { roots: [], directories: 0, files: 0, excluded: 0, errors: [], limits: [nodes.length ? "Native metadata refreshed; file index retains its prior captured revisions" : "Thread catalog only; repository and file inventory has not run"] } });
           continue;
         }
         this.progress = {

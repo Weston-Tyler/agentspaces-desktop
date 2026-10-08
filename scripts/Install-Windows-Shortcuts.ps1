@@ -5,8 +5,13 @@ $shortcutArguments = '-NoProfile -WindowStyle Hidden -File "' + (Join-Path $PSSc
 $shortcutIcon = Join-Path $shortcutProductRoot 'assets/agentspaces.ico'
 if (-not (Test-Path -LiteralPath $shortcutIcon)) { throw 'AgentSpaces desktop icon is missing.' }
 $shortcutShell = New-Object -ComObject WScript.Shell
-foreach ($shortcutFolder in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
-    $shortcutPath = Join-Path $shortcutFolder 'AgentSpaces Desktop.lnk'
+foreach ($shortcutEntry in @(
+    @{ Folder=[Environment]::GetFolderPath('Desktop'); Name='AgentSpaces Desktop.lnk'; Script='Open-Desktop.ps1' },
+    @{ Folder=[Environment]::GetFolderPath('Programs'); Name='AgentSpaces Desktop.lnk'; Script='Open-Desktop.ps1' },
+    @{ Folder=[Environment]::GetFolderPath('Startup'); Name='AgentSpaces Background.lnk'; Script='Start-Background.ps1' }
+)) {
+    $shortcutArguments = '-NoProfile -WindowStyle Hidden -File "' + (Join-Path $PSScriptRoot $shortcutEntry.Script) + '"'
+    $shortcutPath = Join-Path $shortcutEntry.Folder $shortcutEntry.Name
     $shortcut = $shortcutShell.CreateShortcut($shortcutPath)
     if ((Test-Path -LiteralPath $shortcutPath) -and ($shortcut.TargetPath -ne $shortcutTarget -or $shortcut.Arguments -ne $shortcutArguments)) {
         throw "Existing unrelated shortcut preserved: $shortcutPath"

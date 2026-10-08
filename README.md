@@ -1,110 +1,75 @@
 # AgentSpaces Desktop
 
-AgentSpaces Desktop is a local source application that connects work across native AI tools. Users keep working in their existing applications while approved threads share findings, reference artifacts, and request bounded follow-up work through AgentSpaces.
+**One workspace for your Codex and Claude threads, repositories, worktrees and documents.**
 
-Status: local Windows source alpha. The companion now supports real bounded native questions, full-catalog topic lookup, selected shared findings/files, cited answers, scoped MCP discussions and workspace mapping. Five authorized live Codex questions exercised general/topic answers and two owned read-only native threads with original-thread continuity. Owning Java/TypeScript signed targeted-work proofs retain their exact scopes; arbitrary existing-thread broadcast and live Claude answering remain gated. There is no signed installer or released distribution.
+Ask “What have we done on retry handling?” AgentSpaces Desktop finds relevant permitted work, includes useful context and returns an answer with sources. Bring thread agents into a group chat and see their replies together. The local companion keeps running in the background while you work in your native applications.
 
-## Run the source alpha
+Use your existing native tool logins. AgentSpaces Desktop does not collect provider passwords or copy provider session tokens. Optional API answering is a separate advanced connection.
 
-The Connected Work page now includes Connect Everything for selected native tools/hosts, automatic workspace discovery, a searchable session/repository/worktree/document/artifact map, exact-file inspection and deterministic worktree comparisons. Read [the work-map guide](docs/workspace-map.md) for broad lookup policies, coverage/continuation and evidence limits. This does not wake native models or authorize automatic merges, publication, archival or deletion.
+**Source alpha:** Windows desktop and a Linux remote target have been exercised. This is not a signed installer or public release. An open-source license has not been selected; see [release readiness](docs/open-source-readiness.md).
 
-Requires Node 24+. In this checkout, run npm ci, npm run check, and npm test. Then npm run desktop opens the native companion; npm start opens the standalone loopback preview on port 43127. Closing the native window hides it to its tray; tray Quit stops its owned runtime.
+## See the experience
 
-On Windows, scripts/Open-Desktop.ps1 starts the background companion if needed and opens the desktop window on that same workspace. A desktop shortcut can target this script. The source desktop also attaches to an existing verified source-preview runtime by default, preserving its discovered threads. Quitting an attached window leaves that background runtime running. This is a source launcher, not a packaged installer.
+![One question box and a cited topic answer using fictional demonstration work](docs/images/ask.png)
 
-Run scripts/Install-Windows-Shortcuts.ps1 to add branded AgentSpaces Desktop shortcuts to the Windows desktop and Start menu. The launcher uses the actual Windows desktop path, including OneDrive redirection. The native window uses the AgentSpaces icon and app identity. macOS desktop packaging and a native Mac acceptance run remain unqualified.
+*Ask without choosing a provider, host or individual sources. Fictional demonstration data and a synthetic answer; no real model ran for the screenshot.*
 
-The Discussions page brings multiple source threads into a shared conversation with stable mentions, a provider-grouped reply selector, message ancestry and source attribution. Scoped MCP participants can read and contribute while running in their native tools. Automatic native wake is unavailable; selected native requests display that boundary. The multi-participant dialogue demo is synthetic, bounded and makes no model calls. See [discussions and routing](docs/discussions.md).
+![Group chat with fictional Codex and Claude thread agents, mentions and attributed replies](docs/images/group-chat.png)
 
-The desktop opens on Your threads. Startup restores the saved native metadata connection immediately; first use automatically discovers local Codex and Claude thread metadata without waiting for repository/file indexing. A revoked connection stays revoked. Sample reset controls are excluded from the normal runtime; demos require a separate explicitly enabled runtime.
+*Bring multiple thread agents into one chat. Synthetic demonstration, not proof of live native replies.*
 
-Open Native chat to use the installed Codex or Claude Code CLI locally or on remote and sign in through its own native flow. AgentSpaces does not request a provider key or copy login credentials. For selected Claude threads, a prepared MCP channel can forward discussion mentions and return replies into the group after native preview consent. See [native companion setup and proof limits](docs/native-companion.md).
+![Connected work map linking fictional threads, repositories, worktrees and documents](docs/images/connected-work.png)
 
-Advanced answering retains the bounded general/topic synthesis path. Its Claude adapter uses optional API environment credentials; that separate mode is not required for native chat. See [advanced questions and proof boundaries](docs/native-questions.md) and the [workflow direction](docs/ask-and-workflows.md).
+*Trace work back to its sources and compare worktrees. All illustrated projects, threads and paths are fictional.*
 
-Run npm run setup to install the local router guidance. Setup also offers preview/install for local and remote accounts, preserving existing global Codex/Claude instructions and saving exact backups. This installs guidance, not credentials or a native execution controller. Additional accounts/hosts need their own supported instruction entry point.
+Follow the [walkthrough](docs/walkthrough.md). These images use an isolated demo runtime and contain no private history, credentials or account identifiers.
 
-Start in an empty workspace or explicitly open the synthetic sample. Same-tool rediscovery is as important as cross-tool handoff. Setup supports explicit project/tool/host discovery, including Linux remote over an existing SSH connection and this Windows/local workstation device. Metadata, content access, sharing/retrieval and execution remain distinct grants.
+## Run on Windows
 
-Read [the alpha guide](docs/alpha-guide.md), [the product brief](docs/product-brief.md), and [compatibility boundaries](docs/compatibility.md) before connecting native sessions. Account boundary labels are user-configured scopes, not verified provider account identity. Fresh native Ask inference is version/authentication/grant/budget gated; original-thread execution has separate qualification.
+Install Node.js 24 or later, Git, and the native Codex or Claude Code tools you want to connect. From this checkout:
 
-## Intended experience
+~~~powershell
+npm ci
+npm run check
+npm test
+npm run desktop
+~~~
 
-1. Download the application and detect supported local tools.
-2. Connect the tools through their supported integration surfaces. When sign-in is needed, open the provider's native authentication flow rather than collect or copy its session credentials.
-3. Select projects and threads that may participate, with explicit sharing and execution permissions.
-4. Continue working in the native applications. Open the companion activity window when an approval, handoff, or usage detail needs attention.
+Sign in through each native tool’s own flow. Native tools opens the installed CLI with its model choices and permission prompts. The application never answers those approvals for you.
 
-An example request is: "Use the API research from my other thread yesterday." The application should retrieve permitted findings and their original references before requesting further reasoning. If a follow-up is needed, it should become bounded work with a clear owner, deadline, result, and usage record.
+For desktop, Start menu and background startup shortcuts:
 
-The initial native targets are Codex and Claude Code. Consumer web conversations, additional agent frameworks, and cross-device participation are later capabilities, dependent on supported interfaces and access permissions.
+~~~powershell
+powershell -NoProfile -File scripts/Install-Windows-Shortcuts.ps1
+~~~
 
-## Framework ownership
+The shortcuts launch this source checkout; they are not a packaged installer. The [walkthrough](docs/walkthrough.md) explains background startup and stopping the owned service.
 
-[AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) remains the coordination framework and authority for shared work, leases, results, and participant discovery. This application will consume reviewed, pinned upstream dependencies rather than maintain a permanent framework fork.
+## What you can do
 
-The [ecosystem assessment](docs/ecosystem-reuse.md) maps model-wire, Spring AI, Micronaut/MCP, specifications and additional bindings to this product. Shared conversation records are directly relevant; framework chat memory and MCP bridges do not establish original native-session wake control.
+- **Ask:** enter a question. An available native Codex connection answers with a bounded set of relevant permitted findings and text files. Inspect sources and scan limits below the answer.
+- **Group chats:** choose source threads, then use mentions or the reply selector. Connected Claude participants use their provider-approved native channel. The scoped Codex headless conversation route has fixture coverage; it does not establish arbitrary-thread live control.
+- **Your threads:** discover native threads and inspect access permissions. Metadata discovery does not imply transcript access.
+- **Connected work:** find related repositories, worktrees, Markdown and artifacts; inspect exact indexed bytes and compare ancestry and changes.
+- **Native tools:** use the unmodified interactive CLI for sign-in, chat and native approvals. Optional advanced answering remains separate.
 
-Reusable framework fixes belong upstream. A temporary fork is appropriate only for an explicitly tracked upstream dependency gap. Local indexes and caches must remain derived views, not a second work registry.
+Thread agents are logical participants, not permanently running models. Idle discovery and retrieval do not poll models. Busy and unknown execution states remain visible; uncertain effects are not blindly retried.
 
-This application is independent of Monkey World and other company products. Its optional shared discussion interface is owned here; it does not introduce a parallel AgentSpaces work registry or scheduler or change another product’s deployment.
+## How it connects
 
-## Proposed application boundaries
+The Electron desktop and local loopback service share one owner-private workspace. Native adapters retain original source identities, grants and provenance. The derived work map links existing work; it is not a new work registry.
 
-- A small desktop shell for setup, project enrollment, permissions, activity, and usage.
-- A local background integration process using the existing AgentSpaces fabric.
-- Separate native adapters with capability and version checks.
-- Permissioned context summaries and artifact references with source thread, version, and provenance.
-- An execution gate that preserves native approvals and permits one controller per native thread.
-- Usage accounting and bounded activation, with retrieval preferred over new inference.
+[AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) remains the authority for its shared work, claims, leases and results. Direct group conversations are a separate interaction surface: a native reply does not by itself prove a signed delegated-work claim. The application consumes the [pinned TypeScript binding](https://github.com/badmonkeyai/agentspaces-typescript/tree/be025e7aba72e1837e0ccb3999bb76098d012fe0) and preserves the [model-wire](https://github.com/badmonkeyai/agentspaces-model-wire) conversation record identity.
 
-A native thread is a logical participant, not necessarily a separate network peer or permanently running model. Dormant threads can contribute approved knowledge without being awakened. An orchestrating participant may delegate through the same fabric; it does not replace the fabric's coordination contracts.
+Exact dependency versions are recorded in [package.json](package.json) and [package-lock.json](package-lock.json). Native version and capability checks are separate. Supported source hosts currently include this device and the documented SSH target remote; arbitrary-host onboarding is not implemented.
 
-## Privacy and execution controls
+## Guides and qualification
 
-Participation is opt-in by project and thread. Private transcripts are not broadcast to peers. Share only authorized findings and artifact references, and retain the origin and access restrictions of each item. Retrieved content is data, not authority to execute instructions.
+- [Walkthrough](docs/walkthrough.md): install, ask, create a group and inspect work.
+- [Native companion](docs/native-companion.md): login, terminals, Claude channels and proof limits.
+- [Workspace map](docs/workspace-map.md): retrieval scopes, partial inventory and comparisons.
+- [Advanced answering](docs/native-questions.md): budgets, inference and optional API connections.
+- [Compatibility](docs/compatibility.md) and [ecosystem reuse](docs/ecosystem-reuse.md): provider and upstream boundaries.
+- [Open-source readiness](docs/open-source-readiness.md): license, privacy, packaging and qualification gates.
 
-The application must not collect provider session tokens, bypass native approvals, or modify provider conversation files to inject work. Native sign-in remains with the provider; embedded execution requires an authentication path allowed for that product.
-
-Lost acknowledgements must be reconciled against native execution identifiers before retrying. Lease expiry alone does not make a repeated model call or external action safe. Busy threads queue requests rather than accepting concurrent writers. Cancellation, disconnect, and restart recovery need explicit tests.
-
-Keep idle coordination free of model calls. Report recorded usage separately from estimates and provider billing. Subscription allowances are not expanded by connecting tools; budgets must include any explicit model-backed maintenance or execution tests.
-
-## Native integration qualification
-
-Provider capabilities and authentication rules are release-specific. Supported tool access does not automatically imply native session control, complete application feature parity, or access to every account conversation.
-
-- [Claude Code authentication and product integration rules](https://code.claude.com/docs/en/legal-and-compliance) distinguish unmodified native application sign-in from credentials used by embedded third-party products.
-- [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server) describes session operations and identifies its experimental production-support boundary.
-- [Sign in with ChatGPT](https://learn.chatgpt.com/docs/sign-in-with-chatgpt) does not by itself grant access to account conversations or memories.
-
-Prefer supported native extensions and MCP integration for the first connection. Treat autonomous session control as a separately qualified capability, not an implied consequence of installing the bridge.
-
-## First acceptance milestone
-
-On one machine, demonstrate an approved old research thread and a new thread in the other native tool:
-
-1. Enroll both with separate identities and explicit project permissions.
-2. Retrieve a permitted finding and artifact with inspectable provenance.
-3. Prove that retrieval alone starts no model execution.
-4. Request one authorized follow-up through a supported native path and return its result through AgentSpaces.
-5. Account for the execution without counting cumulative session usage twice.
-6. Exercise a busy thread, denied sharing, cancellation, disconnect, and restart without duplicate execution or lost work.
-
-Compare this flow against manual copy-and-paste and a single-tool baseline. Record supported versions, exact dependency revisions, limitations, and observed results before calling the milestone complete.
-
-## Maintenance approach
-
-Adapters should isolate provider-specific changes behind tested contracts. Scheduled compatibility checks will inspect upstream releases and documented interface changes, then exercise supported-version fixtures. Dependency updates should arrive as reviewable pull requests.
-
-A maintenance worker may reproduce failures in an isolated environment, propose a bounded repair, and run tests. Credentialed or paid tests require explicit grants and budgets. Changes to authentication, permissions, execution control, spending, and release signing require human review.
-
-Signed releases should use staged updates, preserve user state, and support rollback. Release credentials must remain separate from the permissions available to an automated repair worker. No release monitoring, CI job, maintenance worker, or updater is activated by this initial repository.
-
-## Repository and release plan
-
-Development begins in the owner's personal GitHub account. The intended later destination is the company organization, using a repository transfer rather than a duplicate repository with diverging history. The repository name is a working name.
-
-Start with a Windows alpha and qualify additional operating systems separately. Public distribution requires a license decision, dependency and redistribution review, signed packaging, tested installation and removal, a compatibility matrix, and privacy documentation.
-
-The intended end product is open source. This private foundation currently has no open-source license grant; select and approve the license before public distribution.
+Windows is the observed desktop platform. Linux has been exercised as a remote terminal and adapter target; Linux desktop parity and macOS desktop acceptance remain unqualified. Consumer ChatGPT/Claude web histories, arbitrary existing-thread broadcasts, signed distribution and automatic updates are not established by this alpha.

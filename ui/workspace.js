@@ -43,7 +43,7 @@ export function workspacePage(summary) {
   root.append(
     el(
       "p",
-      "One permissioned map of native sessions, repositories, worktrees, documents and work left behind. No model calls.",
+      "Your threads, repositories, worktrees, documents and files.",
       "map-intro",
     ),
   );
@@ -65,7 +65,7 @@ export function workspacePage(summary) {
   root.append(stats);
   const setup = el("details", undefined, "card map-setup");
   setup.open = !summary?.profile?.active;
-  setup.append(el("summary", "Find everything on my connected machines"));
+  setup.append(el("summary", "Connection settings"));
   const form = el("form");
   form.id = "workspace-scope-form";
   const domains = el("div", undefined, "permission-grid");
@@ -157,8 +157,8 @@ export function workspacePage(summary) {
   const controls = el("div", undefined, "actions");
   if (summary?.demoAvailable) controls.append(action("Explore synthetic work map", "workspace-sample"));
   controls.append(
-    action("Refresh granted scope", "workspace-refresh"),
-    action("Continue remaining inventory", "workspace-continue"),
+    action("Refresh", "workspace-refresh"),
+    action("Continue indexing", "workspace-continue"),
     action("Cancel inventory", "workspace-cancel"),
     action("Revoke broad scope", "workspace-revoke", "subtle"),
   );

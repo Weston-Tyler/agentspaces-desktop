@@ -15,25 +15,20 @@
       >
       <div class="workspace-label">YOUR WORKSPACE</div>
       <nav aria-label="Primary">
-        <button data-page="native"><span class="navicon">›</span>Native chat</button>
-        <button data-page="advanced"><span class="navicon">?</span>Advanced answering</button>
-        <button data-page="discussions">
-          <span class="navicon">#</span>Discussions
-        </button>
-        <button data-page="workspace">
-          <span class="navicon">↔</span>Connected work
-        </button>
-        <button data-page="discover" class="active">
-          <span class="navicon">⌕</span>Your threads</button
-        ><button data-page="activity">
-          <span class="navicon">≡</span>Activity</button
-        ><button data-page="permissions">
-          <span class="navicon">◇</span>Permissions</button
-        ><button data-page="usage"><span class="navicon">▥</span>Usage</button
-        ><button data-page="settings">
-          <span class="navicon">⚙</span>Setup & diagnostics
-        </button>
-      </nav>
+  <button data-page="home"><span class="navicon">?</span>Ask</button>
+  <button data-page="discussions"><span class="navicon">#</span>Group chats</button>
+  <button data-page="discover"><span class="navicon">⌕</span>Your threads</button>
+  <button data-page="workspace"><span class="navicon">↔</span>Connected work</button>
+  <details class="nav-more"><summary>More</summary>
+    <button data-page="native">Native tools</button>
+    <button data-page="advanced">Advanced answering</button>
+    <button data-page="activity">Activity</button>
+    <button data-page="permissions">Permissions</button>
+    <button data-page="usage">Usage</button>
+    <button data-page="settings">Settings</button>
+  </details>
+  <button data-page="help"><span class="navicon">ⓘ</span>How to use</button>
+</nav>
       <div class="sidebar-foot">
         <span class="status-dot"></span
         ><span
@@ -65,8 +60,8 @@
       <div id="notice" role="status" hidden></div>
       <div id="view"></div>
       <footer>
-        <span>Local-first · Permissions stay explicit</span
-        ><span id="footer-fabric">Fabric disconnected</span>
+        <span>Your connected workspace</span
+        ><span id="footer-fabric">Background service</span>
       </footer>
     </main>
     <dialog id="detail">

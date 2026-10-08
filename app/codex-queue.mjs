@@ -1,22 +1,40 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { Duplex } from "node:stream";
+import { posix } from "node:path";
 
 const fail = (code, uncertainOutcome = false, receipt = null) =>
   Object.assign(new Error(code), { code, uncertainOutcome, receipt });
+const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
+function finiteNativePolicy(sandbox, approval, reviewer, fullAccessGranted = false) {
+  if (!sandbox || typeof sandbox !== "object" || !["readOnly", "workspaceWrite", "dangerFullAccess"].includes(sandbox.type)) return false;
+  if (sandbox.type === "dangerFullAccess" && !fullAccessGranted) return false;
+  if (sandbox.networkAccess !== undefined && typeof sandbox.networkAccess !== "boolean") return false;
+  if (sandbox.type === "workspaceWrite") {
+    if (sandbox.writableRoots !== undefined && (!Array.isArray(sandbox.writableRoots) || sandbox.writableRoots.some(root => typeof root !== "string" || !posix.isAbsolute(root)))) return false;
+    if (["excludeSlashTmp", "excludeTmpdirEnvVar"].some(key => sandbox[key] !== undefined && typeof sandbox[key] !== "boolean")) return false;
+  }
+  if (!["user", "auto_review", "guardian_subagent"].includes(reviewer)) return false;
+  if (typeof approval === "string") return ["untrusted", "on-request", "never"].includes(approval);
+  const granular = approval?.granular, required = ["mcp_elicitations", "rules", "sandbox_approval"], optional = ["request_permissions", "skill_approval"];
+  return !!(granular && Object.keys(approval).length === 1 && required.every(key => typeof granular[key] === "boolean") && Object.entries(granular).every(([key, value]) => [...required, ...optional].includes(key) && typeof value === "boolean"));
+}
 export class CodexQueueAdapter {
   constructor({
     host = "remote",
     spawnProcess = spawn,
     persistReceipt,
     loadReceipt = async () => null,
+    persistPermissionProof,
+    loadPermissionProof = async () => null,
   } = {}) {
     if (host !== "remote") throw fail("shared_daemon_host_not_qualified");
-    Object.assign(this, { host, spawnProcess, persistReceipt, loadReceipt });
+    Object.assign(this, { host, spawnProcess, persistReceipt, loadReceipt, persistPermissionProof, loadPermissionProof });
     this.events = new EventEmitter();
     this.pending = new Map();
     this.proofs = new Map();
     this.inflight = new Set();
+    this.bindingThreads = new Set();
     this.nextId = 1;
   }
   async open() {
@@ -74,6 +92,11 @@ export class CodexQueueAdapter {
             : request.resolve(message.result);
         }
       } else if (message.method && message.id !== undefined) {
+        if (message.method.includes("requestApproval")) {
+          const params = message.params ?? {};
+          this.events.emit("native-attention", { host: this.host, kind: "approval-required", method: message.method, requestId: message.id,
+            nativeThreadId: params.threadId ?? null, nativeTurnId: params.turnId ?? null, action: "declined; native owner attention required" });
+        }
         const result = message.method.includes("requestApproval")
           ? { decision: "decline" }
           : undefined;
@@ -202,6 +225,33 @@ export class CodexQueueAdapter {
       ],
     };
   }
+  async bindExistingThread({ threadId, cwd, grant } = {}) {
+    const executionGranted = grant === true || grant?.execution === true;
+    const fullAccessGranted = grant?.execution === true && grant.allowFullAccess === true;
+    if (!executionGranted || !UUID.test(threadId ?? "") || typeof cwd !== "string" || !posix.isAbsolute(cwd) || cwd.includes("\0")) throw fail("existing_thread_identity_and_execution_grant_required");
+    if (this.bindingThreads.has(threadId)) throw fail("existing_thread_bind_inflight");
+    this.bindingThreads.add(threadId);
+    try {
+      const response = await this.request("thread/read", { threadId, includeTurns: false });
+      const before = response.thread;
+      if (!before || before.id !== threadId || before.cwd !== cwd) throw fail("native_existing_thread_identity_mismatch");
+      if (!before.status || !["idle", "notLoaded"].includes(before.status.type)) throw fail("native_existing_thread_busy_or_unavailable");
+      if (before.canAcceptDirectInput === false || before.ephemeral) throw fail("native_existing_thread_cannot_accept_input");
+      // A native cold resume may dispatch its prior queue. Binding must not
+      // activate unrelated messages before this exact targeted request exists.
+      const queued = await this.request("thread/queue/list", { threadId, limit: 1 });
+      if (!Array.isArray(queued.data) || queued.data.length || queued.nextCursor) throw fail("native_existing_thread_pending_queue");
+      const resumed = await this.request("thread/resume", { threadId });
+      const after = resumed.thread;
+      if (!after || after.id !== threadId || after.cwd !== cwd || resumed.cwd !== cwd || after.status?.type !== "idle" || after.ephemeral || after.canAcceptDirectInput === false) throw fail("native_existing_thread_resume_not_eligible");
+      if (!finiteNativePolicy(resumed.sandbox, resumed.approvalPolicy, resumed.approvalsReviewer, fullAccessGranted)) throw fail("native_existing_permission_policy_not_qualified");
+      const proof = { nativeThreadId: threadId, host: this.host, cwd, sandbox: structuredClone(resumed.sandbox), approvalPolicy: structuredClone(resumed.approvalPolicy), approvalsReviewer: resumed.approvalsReviewer,
+        activePermissionProfile: resumed.activePermissionProfile ?? null, fullAccessGranted, verifiedAt: new Date().toISOString(), source: "existing-native-thread-resume-response" };
+      if (this.persistPermissionProof) await this.persistPermissionProof(structuredClone(proof));
+      this.proofs.set(threadId, proof);
+      return { nativeThreadId: threadId, permissionProof: proof, limitations: ["Native configuration and approvals preserved; no policy overrides", "Native tools follow preserved policy; approval escalations are declined and report owner attention", "Persisted permission evidence requires explicit rebind after restart", "Output token ceiling is checked after completion"] };
+    } finally { this.bindingThreads.delete(threadId); }
+  }
   async eligible(threadId) {
     const response = await this.request("thread/read", {
       threadId,
@@ -215,12 +265,21 @@ export class CodexQueueAdapter {
         eligible: false,
         reason: "cold_thread_requires_native_owner_resume",
       };
-    const proof = this.proofs.get(threadId);
+    let proof = this.proofs.get(threadId);
+    if (!proof) {
+      const saved = await this.loadPermissionProof(threadId);
+      if (saved?.nativeThreadId === threadId && saved.host === this.host && saved.source === "existing-native-thread-resume-response") {
+        proof = { ...saved, requiresRebind: true }; this.proofs.set(threadId, proof);
+      }
+    }
     if (!proof)
       return {
         eligible: false,
         reason: "native_readonly_permission_not_verified",
       };
+    if (proof.requiresRebind) return { eligible: false, reason: "native_permission_proof_requires_rebind" };
+    if (proof.host !== this.host || proof.nativeThreadId !== threadId) return { eligible: false, reason: "native_permission_proof_identity_mismatch" };
+    if (proof.source === "existing-native-thread-resume-response" && !finiteNativePolicy(proof.sandbox, proof.approvalPolicy, proof.approvalsReviewer, proof.fullAccessGranted === true)) return { eligible: false, reason: "native_existing_permission_policy_not_qualified" };
     if (
       thread.cwd !== proof.cwd ||
       thread.ephemeral ||
@@ -293,7 +352,9 @@ export class CodexQueueAdapter {
     grant,
     budget,
     signal,
+    dispatchFence,
   } = {}) {
+    if (dispatchFence !== undefined && typeof dispatchFence !== "function") throw fail("invalid_dispatch_fence");
     if (grant !== true || typeof this.persistReceipt !== "function")
       throw fail("execution_grant_and_durable_receipt_required");
     if (
@@ -318,7 +379,7 @@ export class CodexQueueAdapter {
     if (existing)
       throw fail(
         "receipt_exists_reconcile_without_retry",
-        existing.status !== "completed",
+        !["completed", "not-dispatched"].includes(existing.status),
         existing,
       );
     const eligible = await this.eligible(threadId);
@@ -332,8 +393,19 @@ export class CodexQueueAdapter {
       nativeTurnId: null,
       retryAllowed: false,
       preparedAt: new Date().toISOString(),
+      permissionProof: structuredClone(eligible.permissionProof),
     };
     await this.persistReceipt({ ...receipt }); // Durable allocation before any queue mutation.
+    const checkDispatchFence = async persist => {
+      if (!dispatchFence) return;
+      let allowed = false;
+      try { allowed = (await dispatchFence()) !== false; } catch { /* Source grant details stay private. */ }
+      if (allowed) return;
+      receipt.status = "not-dispatched"; receipt.undispatched = true; receipt.retryAllowed = false;
+      try { await persist(); } catch { throw fail("receipt_persistence_failed", false, { ...receipt }); }
+      throw fail("native_dispatch_grant_revoked", false, { ...receipt });
+    };
+    await checkDispatchFence(() => this.persistReceipt({ ...receipt }));
     let usage = {
         inputTokens: null,
         outputTokens: null,
@@ -342,7 +414,8 @@ export class CodexQueueAdapter {
       },
       text = "",
       timer,
-      settled = false;
+      settled = false,
+      stopping = false;
     let saveTail = Promise.resolve();
     const save = () => {
       const copy = { ...receipt };
@@ -363,7 +436,7 @@ export class CodexQueueAdapter {
         try {
           await saveTail;
         } catch {
-          error = fail("receipt_persistence_failed", true, { ...receipt });
+          error = fail("receipt_persistence_failed", receipt.undispatched !== true, { ...receipt });
         }
         if (error) reject(error);
         else
@@ -385,7 +458,8 @@ export class CodexQueueAdapter {
           });
       };
       const stop = async (code) => {
-        if (settled) return;
+        if (settled || stopping) return;
+        stopping = true;
         let cancelled = false;
         try {
           if (receipt.nativeTurnId) {
@@ -452,7 +526,7 @@ export class CodexQueueAdapter {
       };
       const notification = (event) => {
         const p = event.params ?? {};
-        if (p.threadId !== threadId || settled) return;
+        if (p.threadId !== threadId || settled || stopping) return;
         const item = p.item;
         if (item?.type === "userMessage" && item.clientId === clientId) {
           receipt.nativeTurnId = p.turnId;
@@ -479,6 +553,7 @@ export class CodexQueueAdapter {
             };
         }
         if (
+          eligible.permissionProof.source !== "existing-native-thread-resume-response" &&
           item &&
           [
             "commandExecution",
@@ -531,6 +606,7 @@ export class CodexQueueAdapter {
         async () => {
           if (settled || signal?.aborted) return;
           try {
+            await checkDispatchFence(save);
             const response = await this.request("thread/queue/add", {
               threadId,
               clientUserMessageId: clientId,
@@ -541,14 +617,15 @@ export class CodexQueueAdapter {
                     question +
                     "\nReply within " +
                     budget.maxOutputTokens +
-                    " tokens. Do not use tools.",
+                    " tokens." + (eligible.permissionProof.source === "existing-native-thread-resume-response" ? "" : " Do not use tools."),
                 },
               ],
             });
             receipt.queuedSubmissionId = response.queuedSubmission?.id ?? null;
             if (!receipt.nativeTurnId && !settled) receipt.status = "queued";
             await save();
-          } catch {
+          } catch (error) {
+            if (error.code === "native_dispatch_grant_revoked" || receipt.undispatched === true) { await finish(error); return; }
             if (!settled) {
               receipt.status = "uncertain";
               await save().catch(() => {});

@@ -5,13 +5,18 @@ function el(tag, text, cls) {
   if (cls) n.className = cls;
   return n;
 }
+function replyLabel(status) {
+  const labels = { "connecting-native-agent": "Connecting…", "awaiting-native-reply": "Waiting for reply", "native-agent-replied": "Replied", "needs-native-attention": "Needs attention in the native app", "native-reply-uncertain": "Reply status unknown", "native-agent-unavailable": "Agent unavailable", "delivered-to-native-transport": "Message delivered" };
+  if (labels[status]) return labels[status];
+  return /blocked|unavailable|access changed/.test(status ?? "") ? "Agent is not connected" : status;
+}
 function button(text, fn, cls = "secondary") {
   const n = el("button", text, cls);
   n.type = "button";
   n.onclick = fn;
   return n;
 }
-export async function mountDiscussions(root, state, { api, notice }) {
+export async function mountDiscussions(root, state, { api, notice, demoAvailable = false }) {
   const mountId = crypto.randomUUID();
   root.dataset.discussionMount = mountId;
   let groups = [],
@@ -25,7 +30,7 @@ export async function mountDiscussions(root, state, { api, notice }) {
     }
   };
   const load = async () => {
-    groups = await api("discussions");
+    groups = (await api("discussions")).filter((g) => demoAvailable || !g.members.some((m) => m.fixture));
   };
   await load();
   if (!root.isConnected || root.dataset.discussionMount !== mountId) return;
@@ -35,8 +40,8 @@ export async function mountDiscussions(root, state, { api, notice }) {
       channels = el("aside", null, "discussion-channels"),
       main = el("section", null, "discussion-main");
     channels.append(
-      el("h2", "Discussions"),
-      button("+ New discussion", () => {
+      el("h2", "Group chats"),
+      button("+ New group chat", () => {
         activeId = null;
         render();
       }),
@@ -54,19 +59,12 @@ export async function mountDiscussions(root, state, { api, notice }) {
         el(
           "small",
           g.members.length +
-            " source threads · " +
-            (g.fixture ? "synthetic" : "native references"),
+            " thread agents" +
+            (g.fixture ? " · Demo" : ""),
         ),
       );
       channels.append(b);
     }
-    channels.append(
-      el(
-        "p",
-        "Each source keeps its native history, workspace and permissions.",
-        "discussion-note",
-      ),
-    );
     layout.append(channels, main);
     root.append(layout);
     const group = groups.find((g) => g.id === activeId);
@@ -81,21 +79,21 @@ export async function mountDiscussions(root, state, { api, notice }) {
       picker = el("div", null, "thread-picker"),
       count = el("p", null, "fineprint");
     card.append(
-      el("h2", "Start a shared discussion"),
+      el("h2", "Create a group chat"),
       el(
         "p",
-        "Choose references from discovered Codex and Claude Code threads. Adding references does not load their histories.",
+        "Bring multiple thread agents into one chat.",
       ),
     );
     title.name = "title";
     title.required = true;
     title.maxLength = 80;
-    title.placeholder = "Client design review";
-    const label = el("label", "Discussion name");
+    title.placeholder = "Name this chat";
+    const label = el("label", "Chat name");
     label.append(title);
-    query.placeholder = "Search title, tool or host";
+    query.placeholder = "Search threads";
     query.value = search;
-    query.setAttribute("aria-label", "Find source threads");
+    query.setAttribute("aria-label", "Choose thread agents");
     const pick = () => {
       picker.replaceChildren();
       for (const provider of ["codex", "claude"]) {
@@ -104,6 +102,7 @@ export async function mountDiscussions(root, state, { api, notice }) {
           .filter(
             (s) =>
               s.provider === provider &&
+              (demoAvailable || !s.fixture) &&
               [s.title, s.host, s.id]
                 .join(" ")
                 .toLowerCase()
@@ -125,11 +124,7 @@ export async function mountDiscussions(root, state, { api, notice }) {
             el("b", s.title),
             el(
               "small",
-              (s.host ?? "local") +
-                " · " +
-                (s.nativeThreadId ?? s.id) +
-                " · " +
-                (s.fixture ? "synthetic" : s.status),
+              (s.host === "remote" ? "remote" : "This device") + (s.fixture ? " · Demo" : s.status && s.status !== "unknown" ? " · " + s.status : ""),
             ),
           );
           row.append(input, caption);
@@ -138,16 +133,16 @@ export async function mountDiscussions(root, state, { api, notice }) {
       }
       count.textContent =
         chosen.size +
-        " selected · up to 60 matches per app; narrow the search for another thread.";
+        " selected · showing up to 60 matches per app.";
     };
     query.oninput = () => {
       search = query.value;
       pick();
     };
     pick();
-    const submit = el("button", "Create discussion", "primary");
+    const submit = el("button", "Create group chat", "primary");
     submit.type = "submit";
-    form.append(label, query, picker, count, submit);
+    form.append(label, el("h3", "Choose thread agents"), query, picker, count, submit);
     form.onsubmit = run(async (e) => {
       e.preventDefault();
       const g = await api("discussions/create", {
@@ -168,14 +163,14 @@ export async function mountDiscussions(root, state, { api, notice }) {
       el(
         "span",
         g.fixture
-          ? "Synthetic conversation demo"
-          : "Native references · cooperative replies",
+          ? "Demo chat"
+          : g.members.length + " thread agents",
         "tag",
       ),
     );
     const chips = el("p"),
       details = el("details");
-    details.append(el("summary", "Source threads & reply availability"));
+    details.append(el("summary", "Thread details & availability"));
     for (const m of g.members) {
       chips.append(
         el("span", "@" + m.alias + " · " + m.host, "participant-chip"),
@@ -187,18 +182,11 @@ export async function mountDiscussions(root, state, { api, notice }) {
           "small",
           m.nativeThreadId +
             " · " +
-            (m.available ? m.replyMode : "source scope unavailable"),
+            (m.available ? m.replyMode : "Unavailable: access changed"),
         ),
       );
       details.append(p);
     }
-    details.append(
-      el(
-        "p",
-        "Automatic native wake is unavailable. A configured participant can read and contribute using scoped MCP tools. Its native turn ID is self-reported.",
-        "fineprint",
-      ),
-    );
     header.append(chips, details);
     const messages = el("div", null, "discussion-messages");
     messages.setAttribute("aria-live", "polite");
@@ -206,7 +194,7 @@ export async function mountDiscussions(root, state, { api, notice }) {
       messages.append(
         el(
           "p",
-          "A source scope is unavailable. Cached conversation content is hidden.",
+          "Access to a thread changed. Restore access in Settings to view this chat.",
           "discussion-empty",
         ),
       );
@@ -214,7 +202,7 @@ export async function mountDiscussions(root, state, { api, notice }) {
       messages.append(
         el(
           "p",
-          "Start with a question. Mention the source threads you want to hear from.",
+          "Ask a question. Mention the agents you want to hear from.",
           "discussion-empty",
         ),
       );
@@ -236,8 +224,9 @@ export async function mountDiscussions(root, state, { api, notice }) {
         ),
         el("p", m.text, "message-text"),
       );
-      if (m.source)
-        content.append(
+      if (m.source) {
+        const provenance = el("details");
+        provenance.append(el("summary", "Source details"),
           el(
             "p",
             m.source.host +
@@ -250,11 +239,12 @@ export async function mountDiscussions(root, state, { api, notice }) {
             "message-provenance",
           ),
         );
-      if (m.replyTo)
-        content.append(el("small", "Reply to message " + m.replyTo));
+        if (m.replyTo) provenance.append(el("small", "Reply to message " + m.replyTo));
+        content.append(provenance);
+      }
       for (const t of m.targets ?? [])
         content.append(
-          el("div", "@" + t.alias + " · " + t.status, "reply-status"),
+          el("div", "@" + t.alias + " · " + replyLabel(t.status), "reply-status"),
         );
       row.append(avatar, content);
       messages.append(row);
@@ -298,7 +288,7 @@ export async function mountDiscussions(root, state, { api, notice }) {
         );
     };
     const targets = el("details", null, "reply-selector");
-    targets.append(el("summary", "Choose threads to reply"));
+    targets.append(el("summary", "Choose agents to reply"));
     for (const provider of ["codex", "claude"]) {
       targets.append(el("h3", provider === "codex" ? "Codex" : "Claude Code"));
       for (const m of g.members.filter((m) => m.provider === provider)) {
@@ -312,10 +302,10 @@ export async function mountDiscussions(root, state, { api, notice }) {
       }
     }
     controls.append(targets);
-    if (g.fixture) {
+    if (demoAvailable && g.fixture) {
       const roundsLabel = el(
           "label",
-          "Extra synthetic dialogue turns",
+          "Extra demo turns",
           "dialogue-budget",
         ),
         rounds = el("select");
@@ -327,16 +317,10 @@ export async function mountDiscussions(root, state, { api, notice }) {
       }
       roundsLabel.append(rounds);
       controls.append(roundsLabel);
-    } else
-      controls.append(
-        el(
-          "small",
-          "Selected native requests stay blocked; no wake is dispatched.",
-        ),
-      );
+    }
     const submit = el(
       "button",
-      g.fixture ? "Send & simulate selected replies" : "Send message",
+      g.fixture ? "Send demo message" : "Send",
       "primary",
     );
     submit.type = "submit";
@@ -347,11 +331,6 @@ export async function mountDiscussions(root, state, { api, notice }) {
       textarea,
       suggestions,
       controls,
-      el(
-        "p",
-        "Mentions and checked threads are combined. Without targets, the message stays here. No paid model calls.",
-        "fineprint",
-      ),
     );
     let deliveryId = null;
     form.onsubmit = run(async (e) => {
@@ -382,14 +361,14 @@ export async function mountDiscussions(root, state, { api, notice }) {
       return clearInterval(timer);
     if (document.hidden || !activeId) return;
     try {
-      const latest = await api("discussions"),
+      const latest = (await api("discussions")).filter((g) => demoAvailable || !g.members.some((m) => m.fixture)),
         next = latest.find((g) => g.id === activeId),
         old = groups.find((g) => g.id === activeId);
       // Preserve in-progress drafts; refresh remote contributions once composer is empty.
       if (
         !root.querySelector("#discussion-text")?.value &&
         next &&
-        (next.version !== old?.version || next.available !== old?.available)
+        (next.version !== old?.version || next.available !== old?.available || JSON.stringify(next.messages.map(m => m.targets)) !== JSON.stringify(old?.messages.map(m => m.targets)))
       ) {
         groups = latest;
         render();

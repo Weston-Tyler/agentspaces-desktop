@@ -91,6 +91,16 @@ test("startup catalog-only discovery preserves native paging without touching Gi
   assert.equal(restored.catalog.length, 6);
   assert.equal(e.modelCalls, 0);
 });
+test("native catalog refresh retains existing file context and removes newly excluded nodes", async () => {
+  const e = make(); configure(e); await e.workspace.scan({ ...scope, hosts: ["local"] }, { catalogOnly: true });
+  const folder = e.store.root;
+  e.workspace.index.nodes.push({ id: "retained", kind: "document", host: "local", path: join(folder, "public.md"), hash: "captured-bytes" }, { id: "excluded", kind: "document", host: "local", path: join(folder, "private", "note.md"), hash: "private-bytes" });
+  e.workspace.adapterFactory = () => { throw new Error("Metadata refresh must not reread files"); };
+  await e.workspace.scan({ ...scope, hosts: ["local"], exclusions: { local: [join(folder, "private")] } }, { catalogOnly: true });
+  assert(e.workspace.index.nodes.some(node => node.id === "retained"));
+  assert(!e.workspace.index.nodes.some(node => node.id === "excluded"));
+  assert(e.workspace.summary().coverage[0].limits.some(limit => limit.includes("prior captured revisions")));
+});
 test("a repeated native cursor terminates visibly without discarding discovered older work", async () => {
   const e = make();
   configure(e, { repeat: true });

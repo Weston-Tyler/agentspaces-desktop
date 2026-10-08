@@ -2,6 +2,7 @@ import { nativeControls } from "./native-controls.js";
 import { mountDiscussions } from "./discussions.js";
 import { mountAsk } from "./ask.js";
 import { mountNativeChat } from "./native-chat.js";
+import { mountHomeChat } from "./home-chat.js";
 import {
   workspacePage,
   workspaceHydrate,
@@ -13,7 +14,7 @@ let state,
   page =
     new URL(location.href).searchParams.get("view") === "advanced"
       ? "advanced"
-      : new URL(location.href).searchParams.get("view") === "native" ? "native" : "discover",
+      : new URL(location.href).searchParams.get("view") === "native" ? "native" : "home",
   selected = null,
   filters = {
     query: "",
@@ -87,7 +88,7 @@ function scheduleDiscoveryPoll() {
     try {
       state = await api("state");
       // Keep a running terminal intact while its source list updates.
-      if (page === "native" && document.querySelector("#view .xterm"))
+      if (page === "home" || (page === "native" && document.querySelector("#view .xterm")))
         window.dispatchEvent(new CustomEvent("agentspaces-catalog", { detail: state }));
       else render();
       scheduleDiscoveryPoll();
@@ -95,6 +96,8 @@ function scheduleDiscoveryPoll() {
   }, 1500);
 }
 const titles = {
+  home: ["Ask", "Ask about your work.", "Your threads, files and decisions—in one place."],
+  help: ["How to use", "Your connected workspace.", "A guide to questions, thread agents and background connections."],
   native: ["Native chat", "Sign in with your native tools.", "Use Codex or Claude Code directly. Their native account, conversation and approval controls stay with them."],
   advanced: [
     "Ask",
@@ -102,9 +105,9 @@ const titles = {
     "Choose an answering service and include permitted findings, decisions and artifacts when they help.",
   ],
   discussions: [
-    "Discussions",
-    "Bring your threads into one conversation.",
-    "Reference several native threads, mention participants, and follow their contributions together.",
+    "Group chats",
+    "Chat with your thread agents.",
+    "Bring Codex and Claude agents together.",
   ],
   workspace: [
     "Connected work map",
@@ -138,6 +141,7 @@ const titles = {
   ],
 };
 function render() {
+  $("#view").dataset.homeChatMount = "";
   $("#view").dataset.nativeChatMount = "";
   $("#view").dataset.askMount = "";
   $("#view").dataset.discussionMount = "";
@@ -163,15 +167,13 @@ function render() {
       ? "Reload sample workspace"
       : "Open sample workspace";
   $("#sample").hidden = !state.demoAvailable;
-  $("#footer-fabric").textContent =
-    state.fabric.status === "connected"
-      ? "Verified loopback fabric connection"
-      : "Fabric disconnected";
+  $("#footer-fabric").textContent = "Background service running";
   $("#sidebar-mode").textContent =
     state.mode === "fixture"
       ? "Synthetic sample workspace"
       : state.localOS + " alpha";
   $("#view").innerHTML = {
+    home: () => "",
     native: () => "",
     advanced: () => "",
     discussions: () => "",
@@ -181,6 +183,7 @@ function render() {
     permissions: permissions,
     usage: usage,
     settings: settings,
+    help: helpPage,
   }[page]();
   if (page === "discover" && state.projects.length) {
     if (filters.project !== "all" && !state.projects.some((p) => p.id === filters.project))
@@ -188,13 +191,14 @@ function render() {
     showResults();
   }
   if (page === "settings") nativeControls(state, { api, notice });
+  if (page === "home") mountHomeChat($("#view"), { api, notice });
   if (page === "native") mountNativeChat($("#view"), state, { api, notice });
   if (page === "advanced")
     mountAsk($("#view"), { api, notice }).catch((error) =>
       notice(error.message, true),
     );
   if (page === "discussions")
-    mountDiscussions($("#view"), state, { api, notice }).catch((error) =>
+    mountDiscussions($("#view"), state, { api, notice, demoAvailable: state.demoAvailable }).catch((error) =>
       notice(error.message, true),
     );
   if (page === "workspace") {
@@ -303,6 +307,9 @@ function usage() {
     .join(
       "",
     )}</div><p class="fineprint">${esc(state.usage.scope)}</p></div><div class="card"><h3>Retrieval and execution have different costs.</h3><p>Metadata search and finding retrieval invoke no model. This is observed companion behavior, not a measured claim about savings or provider billing.</p></div>`;
+}
+function helpPage() {
+  return `<section class="card"><h2>Ask a question</h2><p>Write your question on Ask. The app searches your connected work and includes relevant threads and files automatically. Sources appear beneath the answer. You can also ask a general question.</p><h2>Bring thread agents into one chat</h2><p>Create a group chat, choose multiple Codex or Claude thread agents, and send a message. Mention an agent or select it under Choose agents to reply. Replies return to that group with their original thread references.</p><h2>Background connections</h2><p>The Windows background service starts at sign-in and stays running when the desktop window closes. It discovers threads and indexes work without polling models. Each native thread is a logical agent; discovering it does not mean its model is permanently running.</p><p>Codex group delivery uses the shared native daemon on remote and preserves the original thread and native policies. Busy owners and existing queued work are refused during first connection. Claude uses its native channel and requires the channel confirmation in Claude. A missing connector is shown as unavailable rather than replaced with a simulated answer.</p><h2>Your native controls</h2><p>Native sign-in, repository instructions and approvals remain with the native tools. Requests needing unsupported approval interaction stop for attention; the service never silently approves them. Revoked sources and excluded locations stay excluded. Source account labels are local scopes, not independently verified provider identity.</p><h2>Limits and coverage</h2><p>Questions and targeted Codex group replies use a 90-second timeout and request an 800-token answer. Provider usage still applies; this is not a guaranteed billing cap. Uncertain requests are not automatically retried. Sources and coverage show what was included and what indexing has not yet reached.</p><p>Windows desktop and remote Linux access are the exercised platforms. Mac packaging and native acceptance remain unverified. Source discovery, transport fixtures and a live model reply are distinct kinds of evidence.</p></section>`;
 }
 function settings() {
   return `<div class="two-col"><div><div class="card"><h2>Native tools</h2><p>Detected through their version commands. Account state and credentials have not been inspected.</p>${state.tools.map((t) => `<div class="tool-card"><div class="provider-mark ${t.provider === "claude" ? "claude" : ""}">${t.provider === "codex" ? "C" : "A"}</div><div><h3>${t.provider === "codex" ? "Codex" : "Claude Code"}</h3><small>${esc(t.installed ? t.version : "Not detected")}</small></div><span class="tag">${t.versionMatches ? "Version matched" : t.installed ? "Unqualified version" : "Unavailable"}</span></div>${t.installed ? `<p class="fineprint">Sign in using your unmodified native tool:</p><p><code>${esc(t.nativeSignInCommand)}</code></p>` : ""}`).join("")}<p class="fineprint">No credential collection. MCP configuration is provided for review; native configuration is never silently changed.</p></div><div class="card"><h2>Discover Codex metadata</h2><p>Explicitly authorize discovery for one local project and one account boundary. Uses the installed experimental app-server locally, with read-only methods. Conversation content stays locked.</p><form id="native-form"><label>Project label<input name="id" required placeholder="my-project"></label><label>Absolute project folder<input name="path" required placeholder="C:\\workspaces\\my-project"></label><label>Account boundary label<input name="account" required placeholder="personal or company-work"></label><label class="check-row"><input name="archived" type="checkbox">Discover archived metadata instead of current/dormant</label><button class="primary" type="submit">Authorize this metadata discovery</button></form><p class="fineprint">Reads up to 50 records. Claude Code history discovery needs a supported SDK adapter and is unavailable in this build.</p></div></div><div><div class="card"><h2>AgentSpaces fabric</h2><p>${esc(state.fabric.reason)}</p><div class="detail-meta"><b>Connection</b><span>${esc(state.fabric.status)}</span><b>Binding</b><span>${esc(state.fabric.binding.slice(0, 12))}</span><b>Scope</b><span>Literal loopback only</span></div><form id="fabric-form"><label>Loopback seed port<input name="port" type="number" min="1" max="65535" required placeholder="7500"></label><label>Self-certifying group ID<input name="groupId" required placeholder="Verified upstream group ID"></label><button class="secondary" type="submit">Connect local seed</button></form><button class="subtle" data-action="disconnect">Disconnect fabric</button><p class="fineprint">Uses the upstream peer and verified founding document. Sealed spaces, remote artifact exchange and native execution remain unqualified. Connection alone is not an end-to-end handoff proof.</p></div><div class="card"><h2>Development status</h2><p>Windows source alpha. Native tool detection is real; sample sessions are synthetic. The companion starts no model and edits no native histories.</p><p class="fineprint">Signed installers, updates, privacy review and additional operating systems are release gates.</p></div></div></div>`;

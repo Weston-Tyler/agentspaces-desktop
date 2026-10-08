@@ -1,5 +1,5 @@
 import http from "node:http";
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
@@ -16,6 +16,9 @@ import { NativeTerminals } from "./native-terminal.mjs";
 import { NativeConnections } from "./native-connections.mjs";
 import { ChannelHub } from "./channel-hub.mjs";
 import { ensureDesktopDiscovery } from "./desktop-discovery.mjs";
+import { connectAllOwnedWork } from "./connect-all.mjs";
+import { CodexDiscussionHub } from "./codex-discussions.mjs";
+import { routeConversation } from "./conversation-routing.mjs";
 const ui = fileURLToPath(new URL("../ui/", import.meta.url));
 const staticFiles = {
   "/": "index.html",
@@ -26,6 +29,7 @@ const staticFiles = {
   "/discussions.js": "discussions.js",
   "/ask.js": "ask.js",
   "/native-chat.js": "native-chat.js",
+  "/home-chat.js": "home-chat.js",
 };
 const vendorFiles = {
   "/vendor/xterm.js": fileURLToPath(new URL("../node_modules/@xterm/xterm/lib/xterm.js", import.meta.url)),
@@ -40,6 +44,7 @@ export async function startServer({
   remoteInstall,
   desktopDiscovery = !provided,
   allowDemo = false,
+  codexAdapterFactory,
 } = {}) {
   const store = provided?.store ?? new Store(root),
     fabric = provided?.fabric ?? new FabricAdapter({ stateRoot: root }),
@@ -47,6 +52,11 @@ export async function startServer({
   protectStateDirectory(root);
   if (!provided) await engine.initialize();
   const desktopStartup = desktopDiscovery ? ensureDesktopDiscovery(engine) : null;
+  let connectedWork = null;
+  if (desktopDiscovery && store.data.desktopPreferences?.connectAll) {
+    if (engine.workspace.running) desktopStartup.promise.then(() => { connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts }); });
+    else connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts });
+  }
   const session = randomBytes(32).toString("hex"),
     admin = randomBytes(32).toString("hex"),
     instance = randomBytes(16).toString("hex");
@@ -54,6 +64,7 @@ export async function startServer({
   let closing = false;
   const activeAnswers = new Map();
   const channels = new ChannelHub(engine);
+  const codexAgents = new CodexDiscussionHub(engine, { adapterFactory: codexAdapterFactory, onContribution: (group, message) => routeConversation(engine, { codexAgents, channels }, group, message) });
   let connections;
   const terminals = providedTerminals ?? new NativeTerminals({ resolveLaunch: options => connections.resolveLaunch(options) });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 65536, perMessageDeflate: false });
@@ -135,7 +146,7 @@ export async function startServer({
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/state" && !connector) {
-        json(res, 200, { ...engine.snapshot(), demoAvailable: allowDemo, desktopStartup: desktopStartup ? { ready: desktopStartup.ready, status: desktopStartup.status, retryRequired: desktopStartup.retryRequired } : null });
+        json(res, 200, { ...engine.snapshot(), demoAvailable: allowDemo, connectedWork: connectedWork ? { status: connectedWork.status, stage: connectedWork.stage, partial: connectedWork.partial } : null, desktopPreferences: { connectAll: !!store.data.desktopPreferences?.connectAll }, desktopStartup: desktopStartup ? { ready: desktopStartup.ready, status: desktopStartup.status, retryRequired: desktopStartup.retryRequired } : null });
         return;
       }
       if (req.method !== "POST") {
@@ -218,6 +229,7 @@ export async function startServer({
         case "/api/native/channel/reply":
           if (!connector) throw new Error("Participant-bound native channel capability required");
           result = channels.reply(data, connector);
+          { const group = engine.discussions.group(data.discussionId); await routeConversation(engine, { codexAgents, channels }, group, group.messages.find(message => message.deliveryId === data.deliveryId)); }
           break;
         case "/api/ask/providers":
           result = await detectAnswerProviders({ host: data.host ?? "local" });
@@ -281,17 +293,16 @@ export async function startServer({
         case "/api/discussions/create":
           result = engine.discussions.create(data);
           break;
+        case "/api/desktop/connect-all":
+          if (data.nativePolicyGranted === true) { store.data.desktopPreferences ??= {}; store.data.desktopPreferences.allowNativeFullAccess = true; store.save(); }
+          connectedWork = connectAllOwnedWork(engine, { hosts: data.hosts ?? ["local", "remote"] });
+          result = { status: connectedWork.status, stage: connectedWork.stage, partial: connectedWork.partial };
+          break;
         case "/api/discussions/post":
           result = engine.discussions.post(data);
           {
             const group = engine.discussions.group(data.id), message = group.messages.find(item => item.deliveryId === data.deliveryId);
-            if (message) for (const target of message.targets) {
-              if (!channels.isConnected(target.sessionId)) continue;
-              try {
-                const delivery = await channels.deliver({ sessionId: target.sessionId, discussionId: group.id, messageId: message.id, text: message.text, requestId: createHash("sha256").update(group.id + message.id + target.sessionId).digest("hex") });
-                target.status = delivery.status;
-              } catch (error) { target.status = "native channel unavailable: " + error.message; }
-            }
+            await routeConversation(engine, { codexAgents, channels }, group, message);
             store.save(); result = engine.discussions.view(group);
           }
           break;
@@ -303,6 +314,7 @@ export async function startServer({
           break;
         case "/api/discussions/contribute":
           result = engine.discussions.contribute(data, connector);
+          { const group = engine.discussions.group(data.id); await routeConversation(engine, { codexAgents, channels }, group, group.messages.find(message => message.deliveryId === data.deliveryId)); }
           break;
         case "/api/sample":
           if (!allowDemo) throw new Error("Sample data is available only in a separate demo runtime");
@@ -454,6 +466,7 @@ export async function startServer({
     { mode: 0o600 },
   );
   async function close() {
+    codexAgents.close();
     if (engine.workspace.running) engine.workspace.cancel();
     terminals.closeAll();
     for (const ws of sockets.clients) ws.terminate();
@@ -466,5 +479,5 @@ export async function startServer({
       if (current.instance === instance) unlinkSync(runtimePath);
     }
   }
-  return { server, engine, store, address, instance, admin, close, terminals, channels, connections, desktopDiscovery: desktopStartup };
+  return { server, engine, store, address, instance, admin, close, terminals, channels, connections, codexAgents, desktopDiscovery: desktopStartup };
 }
