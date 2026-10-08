@@ -1,6 +1,7 @@
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve, posix } from "node:path";
+import { hostOS } from "./platform.mjs";
 const exec = promisify(execFile);
 export const compatibility = { codex: "0.162.0-alpha.2", claude: "2.1.113" };
 export function openNativeSignIn(provider, host = "local") {
@@ -59,7 +60,7 @@ export async function detectTools(host = "local") {
         return {
           provider,
           host,
-          os: host === "remote" ? "Linux" : "Windows",
+          os: hostOS(host),
           installed: true,
           version,
           qualifiedVersion: pin,

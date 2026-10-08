@@ -9,6 +9,7 @@ import { FabricAdapter } from "./fabric.mjs";
 import { openNativeSignIn } from "./native.mjs";
 import { protectStateDirectory } from "./state-security.mjs";
 import { loadWorkspaceFixture } from "./workspace-fixture.mjs";
+import { installHostRouter } from "./router-install.mjs";
 const ui = fileURLToPath(new URL("../ui/", import.meta.url));
 const staticFiles = {
   "/": "index.html",
@@ -16,6 +17,7 @@ const staticFiles = {
   "/app.js": "app.js",
   "/native-controls.js": "native-controls.js",
   "/workspace.js": "workspace.js",
+  "/discussions.js": "discussions.js",
 };
 export async function startServer({
   root = resolve(".local"),
@@ -114,6 +116,14 @@ export async function startServer({
       if (req.method !== "POST") {
         if (
           req.method === "GET" &&
+          url.pathname === "/api/discussions" &&
+          !connector
+        ) {
+          json(res, 200, engine.discussions.list());
+          return;
+        }
+        if (
+          req.method === "GET" &&
           url.pathname === "/api/workspace" &&
           !connector
         ) {
@@ -147,6 +157,9 @@ export async function startServer({
           "/api/retrieve",
           "/api/workspace/search",
           "/api/workspace/inspect",
+          "/api/discussions/context",
+          "/api/discussions/discover",
+          "/api/discussions/contribute",
         ].includes(url.pathname)
       )
         throw new Error("Connector capability denied");
@@ -160,6 +173,34 @@ export async function startServer({
         throw new Error("Connector has no granted workspace scope");
       let result;
       switch (url.pathname) {
+        case "/api/router/install":
+          if (typeof data.dryRun !== "boolean")
+            throw new Error("Choose preview or installation explicitly");
+          result = await installHostRouter(data.host, data.dryRun);
+          if (!data.dryRun)
+            store.audit("Agent router installed", {
+              host: data.host,
+              files: result.files.map((f) => ({
+                path: f.path,
+                afterHash: f.afterHash,
+              })),
+            });
+          break;
+        case "/api/discussions/create":
+          result = engine.discussions.create(data);
+          break;
+        case "/api/discussions/post":
+          result = engine.discussions.post(data);
+          break;
+        case "/api/discussions/context":
+          result = engine.discussions.context(data.id, connector);
+          break;
+        case "/api/discussions/discover":
+          result = engine.discussions.discover(data, connector);
+          break;
+        case "/api/discussions/contribute":
+          result = engine.discussions.contribute(data, connector);
+          break;
         case "/api/sample":
           result = engine.loadSample();
           break;

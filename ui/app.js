@@ -1,4 +1,5 @@
 import { nativeControls } from "./native-controls.js";
+import { mountDiscussions } from "./discussions.js";
 import {
   workspacePage,
   workspaceHydrate,
@@ -73,6 +74,11 @@ async function refresh() {
   render();
 }
 const titles = {
+  discussions: [
+    "Discussions",
+    "Bring your threads into one conversation.",
+    "Reference several native threads, mention participants, and follow their contributions together.",
+  ],
   workspace: [
     "Connected work map",
     "See how your work connects.",
@@ -105,6 +111,7 @@ const titles = {
   ],
 };
 function render() {
+  $("#view").dataset.discussionMount = "";
   const t = titles[page];
   $("#crumb").textContent = t[0];
   $("#page-title").textContent = t[1];
@@ -131,8 +138,11 @@ function render() {
       ? "Verified loopback fabric connection"
       : "Fabric disconnected";
   $("#sidebar-mode").textContent =
-    state.mode === "fixture" ? "Synthetic sample workspace" : "Windows alpha";
+    state.mode === "fixture"
+      ? "Synthetic sample workspace"
+      : state.localOS + " alpha";
   $("#view").innerHTML = {
+    discussions: () => "",
     workspace: () => "",
     discover: discovery,
     activity: activity,
@@ -145,7 +155,11 @@ function render() {
       filters.project = state.projects[0].id;
     showResults();
   }
-  if (page === "settings") nativeControls(state);
+  if (page === "settings") nativeControls(state, { api, notice });
+  if (page === "discussions")
+    mountDiscussions($("#view"), state, { api, notice }).catch((error) =>
+      notice(error.message, true),
+    );
   if (page === "workspace") {
     $("#view").replaceChildren(workspacePage(state.workspace));
     workspaceHydrate(api).catch((error) => notice(error.message, true));

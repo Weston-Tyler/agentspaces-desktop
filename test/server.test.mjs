@@ -148,7 +148,7 @@ test("real MCP SDK transport retrieves a fixture finding without invoking a mode
     }),
   );
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 4);
+  assert.equal(tools.tools.length, 7);
   const discovered = await client.callTool({
     name: "discover_permitted_work",
     arguments: { query: "retry", provider: "codex", status: "archived" },
@@ -163,6 +163,55 @@ test("real MCP SDK transport retrieves a fixture finding without invoking a mode
   });
   assert.equal(JSON.parse(retrieved.content[0].text).handoff.modelCalls, 0);
   assert.equal(app.engine.modelCalls, 0);
+  app.engine.grant("sample-codex-new", { content: true, share: true });
+  const group = app.engine.discussions.create({
+    title: "MCP discussion",
+    sessionIds: ["sample-codex-old", "sample-codex-new"],
+  });
+  const groupList = await client.callTool({
+    name: "discover_group_discussions",
+    arguments: { query: "MCP" },
+  });
+  assert.equal(JSON.parse(groupList.content[0].text)[0].id, group.id);
+  const context = await client.callTool({
+    name: "read_group_discussion",
+    arguments: { id: group.id },
+  });
+  assert.equal(JSON.parse(context.content[0].text).id, group.id);
+  const contribution = await client.callTool({
+    name: "contribute_to_discussion",
+    arguments: {
+      id: group.id,
+      text: "Fixture MCP contribution",
+      nativeTurnId: "reported-turn",
+      deliveryId: "mcp-delivery-0001",
+    },
+  });
+  assert.equal(
+    JSON.parse(contribution.content[0].text).messages[0].source.sessionId,
+    "sample-codex-new",
+  );
+  app.engine.grant("sample-codex-old", { share: false });
+  assert.deepEqual(
+    JSON.parse(
+      (
+        await client.callTool({
+          name: "discover_group_discussions",
+          arguments: {},
+        })
+      ).content[0].text,
+    ),
+    [],
+  );
+  assert.equal(
+    (
+      await client.callTool({
+        name: "read_group_discussion",
+        arguments: { id: group.id },
+      })
+    ).isError,
+    true,
+  );
 });
 test("workspace MCP lookup and artifact read enforce the bound broad scope", async (t) => {
   const app = await setup(t);

@@ -1,4 +1,4 @@
-export function nativeControls(state) {
+export function nativeControls(state, { api, notice }) {
   const form = document.querySelector("#native-form");
   if (!form) return;
   form.closest(".card").querySelector("h2").textContent =
@@ -11,7 +11,7 @@ export function nativeControls(state) {
       "host",
       "Host",
       [
-        ["local", "Local workstation / this Windows device"],
+        ["local", "This device / " + state.localOS],
         ["remote", "remote / Linux over SSH"],
       ],
     ],
@@ -63,8 +63,10 @@ export function nativeControls(state) {
     const tool = state.tools[index];
     const caption = card.querySelector("small");
     caption.textContent +=
-      tool.host === "remote" ? " · remote / Linux" : " · this device / Windows";
-    if (tool.installed) {
+      tool.host === "remote"
+        ? " · remote / Linux"
+        : " · this device / " + state.localOS;
+    if (tool.installed && state.localOS === "Windows") {
       const button = document.createElement("button");
       button.className = "subtle";
       button.type = "button";
@@ -75,4 +77,40 @@ export function nativeControls(state) {
       card.after(button);
     }
   });
+  const router = document.createElement("div");
+  router.className = "card";
+  const heading = document.createElement("h2");
+  heading.textContent = "Agent router instructions";
+  const text = document.createElement("p");
+  text.textContent =
+    "Install a durable AgentSpaces router and managed pointers in this account’s Codex and Claude global instructions. Existing guidance is preserved and backed up. New sessions can discover it; open sessions must read it explicitly. This does not configure MCP credentials or enable native wake.";
+  const result = document.createElement("p");
+  result.className = "fineprint";
+  router.append(heading, text);
+  for (const host of ["local", "remote"])
+    for (const dryRun of [true, false]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary";
+      button.textContent =
+        (dryRun ? "Preview router on " : "Install router on ") + host;
+      button.onclick = async () => {
+        button.disabled = true;
+        try {
+          const value = await api("router/install", { host, dryRun });
+          result.textContent =
+            (dryRun ? "Preview: " : "Verified installation: ") +
+            value.files
+              .map((f) => f.path + (f.changed ? " (updated)" : " (unchanged)"))
+              .join(" · ");
+        } catch (error) {
+          notice(error.message, true);
+        } finally {
+          button.disabled = false;
+        }
+      };
+      router.append(button);
+    }
+  router.append(result);
+  form.closest(".two-col").append(router);
 }

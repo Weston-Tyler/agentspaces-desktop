@@ -6,6 +6,8 @@ import { usageSummary } from "./usage.mjs";
 import { TYPES } from "./fabric.mjs";
 import { ClaudeReadAdapter } from "./claude-adapter.mjs";
 import { WorkspaceMap } from "./workspace-map.mjs";
+import { Discussions } from "./discussions.mjs";
+import { hostOS } from "./platform.mjs";
 const hash = (s) => createHash("sha256").update(s).digest("hex");
 export class Engine {
   constructor(
@@ -31,6 +33,7 @@ export class Engine {
     this.fabricProject = null;
     this.published = store.data.published ?? {};
     this.workspace = new WorkspaceMap(this);
+    this.discussions = new Discussions(this);
   }
   async initialize() {
     this.tools = await detectTools();
@@ -486,6 +489,7 @@ export class Engine {
   }
   snapshot() {
     return {
+      localOS: hostOS("local"),
       mode: this.mode,
       tools: this.tools,
       projects: Object.values(this.store.data.projects),

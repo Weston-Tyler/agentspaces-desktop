@@ -12,6 +12,7 @@
     "postinstall": "node scripts/build-fabric.mjs",
     "start": "node app/cli.mjs serve",
     "desktop": "electron .",
+    "setup": "node scripts/install-router.mjs local install",
     "test": "node --test test/*.test.mjs",
     "check": "node scripts/check.mjs",
     "mcp": "node app/mcp.mjs",

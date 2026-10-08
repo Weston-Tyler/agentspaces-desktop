@@ -1,7 +1,8 @@
 import { readFileSync, existsSync, writeFileSync, renameSync } from "node:fs";
-import { join, posix, win32 } from "node:path";
+import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { WorkspaceAdapter } from "./workspace-adapter.mjs";
+import { hostPaths, normalizeHostPath } from "./platform.mjs";
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 function previousHostGraph(index, host) {
   const nodes = index.nodes.filter(
@@ -20,13 +21,9 @@ export function scopePathExcluded(path, host, exclusions = []) {
     /(?:^|[\\/])patent[ _-]?foundations(?:[\\/]|$)/i.test(path)
   )
     return true;
-  const norm = (p) =>
-    (host === "remote"
-      ? posix.normalize(p)
-      : win32.normalize(p).toLowerCase()
-    ).replace(/[\\/]$/, "");
+  const norm = (p) => normalizeHostPath(p, host);
   const actual = norm(path),
-    sep = host === "remote" ? "/" : "\\";
+    sep = hostPaths(host).sep;
   return exclusions.some(
     (p) => actual === norm(p) || actual.startsWith(norm(p) + sep),
   );
@@ -82,10 +79,7 @@ export function mapSessions(graph, sessions) {
       fixture: !!s.fixture,
     };
     nodes.push(node);
-    const norm = (value) =>
-      s.host === "remote"
-        ? posix.normalize(value).replace(/\/$/, "")
-        : win32.normalize(value).toLowerCase().replace(/\\$/, "");
+    const norm = (value) => normalizeHostPath(value, s.host);
     const path = norm(s.cwd ?? "");
     const tree = s.cwd
       ? trees.find(
@@ -93,7 +87,7 @@ export function mapSessions(graph, sessions) {
             w.host === s.host &&
             (path === norm(w.path) ||
               path.startsWith(
-                norm(w.path) + (s.host === "remote" ? "/" : "\\"),
+                norm(w.path) + hostPaths(s.host).sep,
               )),
         )
       : null;
@@ -228,7 +222,7 @@ export class WorkspaceMap {
       for (const path of [...(exclusions[host] ?? []), ...(roots[host] ?? [])])
         if (
           typeof path !== "string" ||
-          !(host === "remote" ? posix.isAbsolute(path) : win32.isAbsolute(path))
+          !hostPaths(host).isAbsolute(path)
         )
           throw new Error(
             "Workspace roots/exclusions must be absolute on their host",

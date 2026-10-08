@@ -10,6 +10,10 @@ The Connected Work page now includes Connect Everything for selected native tool
 
 Requires Node 24+. In this checkout, run npm ci, npm run check, and npm test. Then npm run desktop opens the native companion; npm start opens the standalone loopback preview on port 43127. Closing the native window hides it to its tray; tray Quit stops its owned runtime.
 
+The Discussions page brings multiple source threads into a shared conversation with stable mentions, a provider-grouped reply selector, message ancestry and source attribution. Scoped MCP participants can read and contribute while running in their native tools. Automatic native wake is unavailable; selected native requests display that boundary. The multi-participant dialogue demo is synthetic, bounded and makes no model calls. See [discussions and routing](docs/discussions.md).
+
+Run npm run setup to install the local router guidance. Setup also offers preview/install for local and remote accounts, preserving existing global Codex/Claude instructions and saving exact backups. This installs guidance, not credentials or a native execution controller. Additional accounts/hosts need their own supported instruction entry point.
+
 Start in an empty workspace or explicitly open the synthetic sample. Same-tool rediscovery is as important as cross-tool handoff. Setup supports explicit project/tool/host discovery, including Linux remote over an existing SSH connection and this Windows/local workstation device. Metadata, content access, sharing/retrieval and execution remain distinct grants.
 
 Read [the alpha guide](docs/alpha-guide.md), [the product brief](docs/product-brief.md), and [compatibility boundaries](docs/compatibility.md) before connecting native sessions. Account boundary labels are user-configured scopes, not verified provider account identity. Native inference remains unavailable.
@@ -29,9 +33,11 @@ The initial native targets are Codex and Claude Code. Consumer web conversations
 
 [AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) remains the coordination framework and authority for shared work, leases, results, and participant discovery. This application will consume reviewed, pinned upstream dependencies rather than maintain a permanent framework fork.
 
+The [ecosystem assessment](docs/ecosystem-reuse.md) maps model-wire, Spring AI, Micronaut/MCP, specifications and additional bindings to this product. Shared conversation records are directly relevant; framework chat memory and MCP bridges do not establish original native-session wake control.
+
 Reusable framework fixes belong upstream. A temporary fork is appropriate only for an explicitly tracked upstream dependency gap. Local indexes and caches must remain derived views, not a second work registry.
 
-This application is independent of Monkey World and other company products. It does not require a chatroom interface or changes to their deployments.
+This application is independent of Monkey World and other company products. Its optional shared discussion interface is owned here; it does not introduce a parallel AgentSpaces work registry or scheduler or change another product’s deployment.
 
 ## Proposed application boundaries
 
