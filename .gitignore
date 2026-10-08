@@ -1,0 +1,32 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+auth.json
+credentials.json
+
+# Private runtime state
+.local/
+.state/
+sessions/
+transcripts/
+exports/
+logs/
+*.log
+
+# Dependencies and build artifacts
+node_modules/
+.venv/
+__pycache__/
+dist/
+build/
+target/
+coverage/
+
+# Editor and OS metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
