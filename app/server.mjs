@@ -11,6 +11,10 @@ import { protectStateDirectory } from "./state-security.mjs";
 import { loadWorkspaceFixture } from "./workspace-fixture.mjs";
 import { installHostRouter } from "./router-install.mjs";
 import { detectAnswerProviders } from "./answer-provider.mjs";
+import { WebSocketServer } from "ws";
+import { NativeTerminals } from "./native-terminal.mjs";
+import { NativeConnections } from "./native-connections.mjs";
+import { ChannelHub } from "./channel-hub.mjs";
 const ui = fileURLToPath(new URL("../ui/", import.meta.url));
 const staticFiles = {
   "/": "index.html",
@@ -20,11 +24,19 @@ const staticFiles = {
   "/workspace.js": "workspace.js",
   "/discussions.js": "discussions.js",
   "/ask.js": "ask.js",
+  "/native-chat.js": "native-chat.js",
+};
+const vendorFiles = {
+  "/vendor/xterm.js": fileURLToPath(new URL("../node_modules/@xterm/xterm/lib/xterm.js", import.meta.url)),
+  "/vendor/fit.js": fileURLToPath(new URL("../node_modules/@xterm/addon-fit/lib/addon-fit.js", import.meta.url)),
+  "/vendor/xterm.css": fileURLToPath(new URL("../node_modules/@xterm/xterm/css/xterm.css", import.meta.url)),
 };
 export async function startServer({
   root = resolve(".local"),
   port = 43127,
   engine: provided,
+  terminals: providedTerminals,
+  remoteInstall,
 } = {}) {
   const store = provided?.store ?? new Store(root),
     fabric = provided?.fabric ?? new FabricAdapter({ stateRoot: root }),
@@ -37,6 +49,10 @@ export async function startServer({
   const cookies = new Set([session]);
   let closing = false;
   const activeAnswers = new Map();
+  const channels = new ChannelHub(engine);
+  let connections;
+  const terminals = providedTerminals ?? new NativeTerminals({ resolveLaunch: options => connections.resolveLaunch(options) });
+  const sockets = new WebSocketServer({ noServer: true, maxPayload: 65536, perMessageDeflate: false });
   const json = (res, status, value) => {
     res.writeHead(status, {
       "Content-Type": "application/json",
@@ -50,12 +66,13 @@ export async function startServer({
       json(res, 403, { error: "Host denied" });
       return;
     }
+    const styleNonce = randomBytes(24).toString("base64");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'nonce-" + styleNonce + "'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'",
     );
     if (
       (req.headers.origin && req.headers.origin !== `http://${expected}`) ||
@@ -71,13 +88,13 @@ export async function startServer({
       res.end();
       return;
     }
-    if (staticFiles[url.pathname] && req.method === "GET") {
+    if ((staticFiles[url.pathname] || vendorFiles[url.pathname]) && req.method === "GET") {
       if (url.pathname === "/")
         res.setHeader(
           "Set-Cookie",
           `as_session=${session}; HttpOnly; SameSite=Strict; Path=/`,
         );
-      const file = staticFiles[url.pathname];
+      const file = staticFiles[url.pathname] ?? vendorFiles[url.pathname];
       res.setHeader(
         "Content-Type",
         file.endsWith(".css")
@@ -86,7 +103,8 @@ export async function startServer({
             ? "text/javascript"
             : "text/html",
       );
-      res.end(readFileSync(join(ui, file)));
+      const bytes = readFileSync(vendorFiles[url.pathname] ?? join(ui, file));
+      res.end(url.pathname === "/" ? bytes.toString("utf8").replace("<head>", '<head><meta name="terminal-style-nonce" content="' + styleNonce + '">') : bytes);
       return;
     }
     const cookie = /\bas_session=([a-f0-9]+)/.exec(
@@ -163,6 +181,7 @@ export async function startServer({
           "/api/discussions/context",
           "/api/discussions/discover",
           "/api/discussions/contribute",
+          "/api/native/channel/reply",
         ].includes(url.pathname)
       )
         throw new Error("Connector capability denied");
@@ -176,6 +195,26 @@ export async function startServer({
         throw new Error("Connector has no granted workspace scope");
       let result;
       switch (url.pathname) {
+        case "/api/native/terminal/open":
+          if (data.connectionId && data.ownerConfirmedAvailable !== true) throw new Error("Confirm that other native controllers are closed before resuming the selected thread");
+          result = await terminals.create(data);
+          break;
+        case "/api/native/terminal/close":
+          terminals.close(data.id); result = { status: "closed" };
+          break;
+        case "/api/native/terminal/list":
+          result = terminals.list();
+          break;
+        case "/api/native/channel/prepare":
+          result = await connections.prepare(data);
+          break;
+        case "/api/native/channel/status":
+          result = { connected: channels.isConnected(data.sessionId), nativeIdentityVerified: false, mode: "native-interactive-channel" };
+          break;
+        case "/api/native/channel/reply":
+          if (!connector) throw new Error("Participant-bound native channel capability required");
+          result = channels.reply(data, connector);
+          break;
         case "/api/ask/providers":
           result = await detectAnswerProviders({ host: data.host ?? "local" });
           break;
@@ -240,6 +279,17 @@ export async function startServer({
           break;
         case "/api/discussions/post":
           result = engine.discussions.post(data);
+          {
+            const group = engine.discussions.group(data.id), message = group.messages.find(item => item.deliveryId === data.deliveryId);
+            if (message) for (const target of message.targets) {
+              if (!channels.isConnected(target.sessionId)) continue;
+              try {
+                const delivery = await channels.deliver({ sessionId: target.sessionId, discussionId: group.id, messageId: message.id, text: message.text, requestId: createHash("sha256").update(group.id + message.id + target.sessionId).digest("hex") });
+                target.status = delivery.status;
+              } catch (error) { target.status = "native channel unavailable: " + error.message; }
+            }
+            store.save(); result = engine.discussions.view(group);
+          }
           break;
         case "/api/discussions/context":
           result = engine.discussions.context(data.id, connector);
@@ -354,11 +404,43 @@ export async function startServer({
       });
     }
   });
+  server.on("upgrade", (req, socket, head) => {
+    const expected = "127.0.0.1:" + server.address().port;
+    const deny = () => { socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); socket.destroy(); };
+    if (closing || req.headers.host !== expected || (req.headers.origin && req.headers.origin !== "http://" + expected) || req.headers["sec-fetch-site"] === "cross-site") return deny();
+    const path = new URL(req.url, "http://" + expected).pathname;
+    if (path === "/api/native/channel") {
+      try {
+        const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
+        const binding = engine.connector(token); channels.validate(binding);
+        if (channels.isConnected(binding.sessionId)) return deny();
+        sockets.handleUpgrade(req, socket, head, ws => {
+          const connected = channels.connect(binding, params => new Promise((yes, no) => ws.send(JSON.stringify(params), error => error ? no(error) : yes())));
+          ws.on("close", connected.close); ws.on("error", connected.close);
+        });
+      } catch { deny(); }
+      return;
+    }
+    const match = /^\/api\/native\/terminal\/([a-f0-9-]+)$/.exec(path);
+    const cookie = /\bas_session=([a-f0-9]+)/.exec(req.headers.cookie ?? "")?.[1];
+    if (!match || req.headers.origin !== "http://" + expected || !cookies.has(cookie)) return deny();
+    try {
+      terminals.get(match[1]);
+      sockets.handleUpgrade(req, socket, head, ws => {
+        const id = match[1]; let detach;
+        try { detach = terminals.attach(id, { onData: data => { if (ws.bufferedAmount > 262144) return false; ws.send(JSON.stringify({ type: "output", data })); return true; }, onExit: event => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: "exit", exitCode: event.exitCode ?? null })); ws.close(); } }); }
+        catch { ws.close(1008, "Terminal already attached or closed"); return; }
+        ws.on("message", bytes => { try { const value = JSON.parse(bytes); if (value.type === "input") terminals.write(id, value.data); else if (value.type === "resize") terminals.resize(id, value.cols, value.rows); else throw new Error(); } catch { ws.close(1008, "Invalid native terminal message"); } });
+        ws.on("close", () => detach?.()); ws.on("error", () => detach?.());
+      });
+    } catch { deny(); }
+  });
   await new Promise((yes, no) => {
     server.once("error", no);
     server.listen(port, "127.0.0.1", yes);
   });
   const address = `http://127.0.0.1:${server.address().port}`;
+  connections = new NativeConnections(engine, { root, address, remoteInstall });
   const runtimePath = join(root, "runtime.json");
   writeFileSync(
     runtimePath,
@@ -366,6 +448,9 @@ export async function startServer({
     { mode: 0o600 },
   );
   async function close() {
+    terminals.closeAll();
+    for (const ws of sockets.clients) ws.terminate();
+    sockets.close();
     for (const abort of activeAnswers.values()) abort.abort();
     fabric.close();
     await new Promise((r) => server.close(r));
@@ -374,5 +459,5 @@ export async function startServer({
       if (current.instance === instance) unlinkSync(runtimePath);
     }
   }
-  return { server, engine, store, address, instance, admin, close };
+  return { server, engine, store, address, instance, admin, close, terminals, channels, connections };
 }

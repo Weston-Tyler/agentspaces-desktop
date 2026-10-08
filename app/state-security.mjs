@@ -9,7 +9,7 @@ export function protectStateDirectory(directory) {
     throw new Error("Refusing a filesystem root as application state");
   mkdirSync(root, { recursive: true });
   const allowed =
-    /^(settings\.json|runtime\.json|workspace-index\.json(?:\.tmp)?|founding\.cbor(?:\.tmp)?|fabric-keys|agent-keys|effect-receipts|stdout\.log|stderr\.log|settings\.json\.\d+\.tmp)$/;
+    /^(settings\.json|runtime\.json|workspace-index\.json(?:\.tmp)?|founding\.cbor(?:\.tmp)?|fabric-keys|agent-keys|effect-receipts|native-connections|stdout\.log|stderr\.log|settings\.json\.\d+\.tmp)$/;
   if (readdirSync(root).some((name) => !allowed.test(name)))
     throw new Error(
       "State directory contains unrelated files; choose an application-owned directory",

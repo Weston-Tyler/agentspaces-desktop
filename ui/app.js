@@ -1,6 +1,7 @@
 import { nativeControls } from "./native-controls.js";
 import { mountDiscussions } from "./discussions.js";
 import { mountAsk } from "./ask.js";
+import { mountNativeChat } from "./native-chat.js";
 import {
   workspacePage,
   workspaceHydrate,
@@ -10,9 +11,9 @@ import {
 } from "./workspace.js";
 let state,
   page =
-    new URL(location.href).searchParams.get("view") === "ask"
-      ? "ask"
-      : "discover",
+    new URL(location.href).searchParams.get("view") === "advanced"
+      ? "advanced"
+      : "native",
   selected = null,
   filters = {
     query: "",
@@ -78,7 +79,8 @@ async function refresh() {
   render();
 }
 const titles = {
-  ask: [
+  native: ["Native chat", "Sign in with your native tools.", "Use Codex or Claude Code directly. Their native account, conversation and approval controls stay with them."],
+  advanced: [
     "Ask",
     "Ask a question. Bring your work with you.",
     "Choose an answering service and include permitted findings, decisions and artifacts when they help.",
@@ -120,6 +122,7 @@ const titles = {
   ],
 };
 function render() {
+  $("#view").dataset.nativeChatMount = "";
   $("#view").dataset.askMount = "";
   $("#view").dataset.discussionMount = "";
   const t = titles[page];
@@ -152,7 +155,8 @@ function render() {
       ? "Synthetic sample workspace"
       : state.localOS + " alpha";
   $("#view").innerHTML = {
-    ask: () => "",
+    native: () => "",
+    advanced: () => "",
     discussions: () => "",
     workspace: () => "",
     discover: discovery,
@@ -167,7 +171,8 @@ function render() {
     showResults();
   }
   if (page === "settings") nativeControls(state, { api, notice });
-  if (page === "ask")
+  if (page === "native") mountNativeChat($("#view"), state, { api, notice });
+  if (page === "advanced")
     mountAsk($("#view"), { api, notice }).catch((error) =>
       notice(error.message, true),
     );

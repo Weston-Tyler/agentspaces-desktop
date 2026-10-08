@@ -1195,3 +1195,9 @@ pre {
     grid-template-columns: 1fr;
   }
 }
+.native-terminal { margin-top:18px; padding:12px; border-radius:9px; background:#111822; min-height:400px; }
+.native-reference { padding:10px 0; overflow-wrap:anywhere; font-size:12px; color:#66758c; }
+.native-chat .actions { display:flex; flex-wrap:wrap; gap:10px; }
+.native-chat .xterm { height:430px; }
+.native-chat .xterm-viewport { border-radius:6px; }
+[hidden] { display: none !important; }

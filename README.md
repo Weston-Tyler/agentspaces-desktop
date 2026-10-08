@@ -12,7 +12,9 @@ Requires Node 24+. In this checkout, run npm ci, npm run check, and npm test. Th
 
 The Discussions page brings multiple source threads into a shared conversation with stable mentions, a provider-grouped reply selector, message ancestry and source attribution. Scoped MCP participants can read and contribute while running in their native tools. Automatic native wake is unavailable; selected native requests display that boundary. The multi-participant dialogue demo is synthetic, bounded and makes no model calls. See [discussions and routing](docs/discussions.md).
 
-Open the Ask page for general questions or a topic lookup followed by selected-source synthesis. See [native questions and proof boundaries](docs/native-questions.md) and the [Ask workflow direction](docs/ask-and-workflows.md). OpenAI answering uses the native Codex sign-in; Claude answering requires provider-permitted API environment credentials. Source references and fresh answering are distinct from original-thread fan-out.
+Native chat is the default view. Open the installed Codex or Claude Code CLI locally or on remote and sign in through its own native flow. AgentSpaces does not request a provider key or copy login credentials. For selected Claude threads, a prepared MCP channel can forward discussion mentions and return replies into the group after native preview consent. See [native companion setup and proof limits](docs/native-companion.md).
+
+Advanced answering retains the bounded general/topic synthesis path. Its Claude adapter uses optional API environment credentials; that separate mode is not required for native chat. See [advanced questions and proof boundaries](docs/native-questions.md) and the [workflow direction](docs/ask-and-workflows.md).
 
 Run npm run setup to install the local router guidance. Setup also offers preview/install for local and remote accounts, preserving existing global Codex/Claude instructions and saving exact backups. This installs guidance, not credentials or a native execution controller. Additional accounts/hosts need their own supported instruction entry point.
 

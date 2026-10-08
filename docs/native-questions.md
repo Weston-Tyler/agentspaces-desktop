@@ -1,10 +1,10 @@
 # Native questions and targeted queue qualification
 
-The Ask page answers ordinary questions and questions using selected permitted work. The answering service is independent of source providers. An OpenAI answer can cite a Claude finding, for example, without waking the historical source.
+Advanced answering answers ordinary questions and questions using selected permitted work. The answering service is independent of source providers. An OpenAI answer can cite a Claude finding, for example, without waking the historical source. The default Native chat view uses the native provider login; see native-companion.md.
 
 ## Use the source alpha
 
-Open the companion’s Ask page, or the loopback URL with ?view=ask. Choose OpenAI through native Codex or Claude through provider-permitted API, select local or remote, and enter the question. General question submits no history. Use connected work searches the full permitted session catalog and derived work map; choose shared findings or readable indexed files before Ask. Locked metadata and non-file map objects remain references rather than implicit content grants.
+Open Advanced answering, or the loopback URL with ?view=advanced. Choose OpenAI through native Codex or Claude through provider-permitted API, select local or remote, and enter the question. General question submits no history. Use connected work searches the full permitted session catalog and derived work map; choose shared findings or readable indexed files before Ask. Locked metadata and non-file map objects remain references rather than implicit content grants.
 
 The request contains an explicit execution grant, stable delivery identifier and positive time/input/output/token bounds. The owner’s Ask button supplies the displayed limits. Native Codex uses existing native sign-in; Claude requires ANTHROPIC_API_KEY in the native helper’s environment plus a positive API cost budget and runs in bare mode. No key is collected, copied into instructions, passed in the prompt or logged. The current local/remote API environment is absent, so Claude readiness is unavailable. Its consumer subscription is not used as an embedded API credential. Credential configuration must occur in a protected environment on the selected host, not in chat or source.
 

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>AgentSpaces Desktop</title>
     <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/vendor/xterm.css" />
   </head>
   <body>
     <aside class="sidebar">
@@ -14,7 +15,8 @@
       >
       <div class="workspace-label">YOUR WORKSPACE</div>
       <nav aria-label="Primary">
-        <button data-page="ask"><span class="navicon">?</span>Ask</button>
+        <button data-page="native"><span class="navicon">›</span>Native chat</button>
+        <button data-page="advanced"><span class="navicon">?</span>Advanced answering</button>
         <button data-page="discussions">
           <span class="navicon">#</span>Discussions
         </button>
@@ -80,6 +82,8 @@
       </div>
       <div id="detail-content"></div>
     </dialog>
+    <script src="/vendor/xterm.js"></script>
+    <script src="/vendor/fit.js"></script>
     <script type="module" src="/app.js"></script>
   </body>
 </html>
