@@ -12,6 +12,8 @@ Requires Node 24+. In this checkout, run npm ci, npm run check, and npm test. Th
 
 The Discussions page brings multiple source threads into a shared conversation with stable mentions, a provider-grouped reply selector, message ancestry and source attribution. Scoped MCP participants can read and contribute while running in their native tools. Automatic native wake is unavailable; selected native requests display that boundary. The multi-participant dialogue demo is synthetic, bounded and makes no model calls. See [discussions and routing](docs/discussions.md).
 
+The accepted [Ask and workflow direction](docs/ask-and-workflows.md) covers general questions, topic-wide retrieval and questions to matching threads, plus workflows grounded in public user requests. This is product research and requirements; model-backed general answering and automatic native fan-out remain future qualification work.
+
 Run npm run setup to install the local router guidance. Setup also offers preview/install for local and remote accounts, preserving existing global Codex/Claude instructions and saving exact backups. This installs guidance, not credentials or a native execution controller. Additional accounts/hosts need their own supported instruction entry point.
 
 Start in an empty workspace or explicitly open the synthetic sample. Same-tool rediscovery is as important as cross-tool handoff. Setup supports explicit project/tool/host discovery, including Linux remote over an existing SSH connection and this Windows/local workstation device. Metadata, content access, sharing/retrieval and execution remain distinct grants.

@@ -1,0 +1,41 @@
+# Ask about connected work and workflow research
+
+Accepted product direction and public-request research, 2026-10-08. This document extends the existing desktop product requirements. It does not establish implemented model answering, native wake, new account connections or a second coordination system.
+
+## General questions and topic questions
+
+The owner wants to choose either OpenAI/ChatGPT or Claude for general questions and questions such as “Everything we have done on topic X.” Keep the selected answering service separate from the source providers: a Claude answer can use permitted Codex findings and vice versa. An ordinary general question need not involve repository editing or session fan-out.
+
+The source alpha currently connects native Codex/Claude Code catalogs and bounded findings, not every ChatGPT/Claude consumer-web conversation. Provider names in the desired UX are not proof that consumer subscriptions authorize an embedded API client. Actual answering must use a qualified provider-supported connection with its own authentication, current native approvals and model budget. None was newly connected or exercised in this research slice.
+
+Proposed Ask flow:
+
+1. Enter the question and choose the answering service. Select General question, Search connected work, or Ask matching threads. Keep the plain-language question as the main interaction.
+2. Search permitted session metadata plus the existing repository/worktree/document/artifact map. Show relevance, host, native tool, working directory and source freshness. A topic may span code, research, planning and deliverables; do not assume it belongs to one repository.
+3. Retrieve granted findings/artifacts before requesting more model work. Produce a topic brief with source citations and separate decisions, implemented work, tests, integration/publication evidence, rejected approaches and open questions. Do not convert discussion or file existence into completion.
+4. In Ask matching threads, address the matched source participants with the original question and the specific information sought. Support all permitted relevant matches, not just whichever page of results is visible. Show the selected set and the allowed execution/round/token/time budget. For larger sets, use bounded upstream work batches; do not bypass the current 12-member discussion limit or create an application-owned queue.
+5. Collect replies in one discussion or derived brief, preserve source thread/host/native turn attribution, and distinguish fresh responses from retrieved historical findings. A native wake must use a qualified controller and the owning AgentSpaces work/claim/lease/result path. A blocked target is not dispatched and an unknown acknowledgement is not automatically retried.
+6. Report coverage: sources/providers/hosts searched, partial scans and pagination, excluded or revoked sources, stale captures, busy/unavailable targets and threads that did not answer. “Everything found in these permitted sources” is an evidence-bounded result; never silently claim a complete account-wide census.
+
+Current status: metadata/work-map search, bounded permitted retrieval, local discussion references and cooperative MCP contributions already exist. Automatic topic matching into a broadcast, model-backed synthesis, arbitrary-provider general answering and original-native-thread wake are not implemented. Installing the router provides discovery instructions; it does not enable those capabilities by itself.
+
+## Public requests and candidate workflows
+
+The sources below are first-person reports or feature requests, not a representative survey or proof of unresolved current product bugs. Some reports concern older versions or closed issues. Recommendations are product-design inferences from the reported pain; promotional replies and claims of third-party fixes were not used as qualification evidence.
+
+| Reported pain | Useful workflow | Evidence |
+| --- | --- | --- |
+| Older conversations are difficult to locate or search | Topic brief: find prior work, explanations, files and decisions across permitted sources | [Codex issue6410](https://github.com/openai/codex/issues/6410), opened2025-11-09, now closed; historical extension report |
+| Switching tools requires re-explaining the project | Continue anywhere: hand off goal, current revision, decisions, constraints, open questions and exact next action, with source references | [Cross-tool context request](https://www.reddit.com/r/codex/comments/1uzv7pt/how_do_you_share_codding_session_between_claude/); [Claude continuity request18417](https://github.com/anthropics/claude-code/issues/18417) |
+| Sessions become abandoned because status or questions are missed | Needs-attention inbox: show native waiting/blocked/done state, the actual question, owning host and a way back to the source session | [Managing a dozen sessions](https://www.reddit.com/r/ClaudeCode/comments/1ux4z17/how_do_you_track_multiple_claude_code_sessions/) |
+| Separate projects overlap, duplicate work or share components without visibility | Before starting work: identify existing attempts, related repositories/documents and possible reuse; label inferred similarity as suggested | [Same first-person multi-project request](https://www.reddit.com/r/ClaudeCode/comments/1ux4z17/how_do_you_track_multiple_claude_code_sessions/) |
+| Finished parallel sessions have different implementations and retain useful reasoning | Compare approaches: reference the original threads and worktrees, ask about assumptions/rejected options, display disagreements and verification evidence | [Existing-session roundtable request](https://www.reddit.com/r/codex/comments/1wgzaqd/has_anyone_made_existing_claude_code_codex/) |
+| Archiving a conversation and cleaning up its worktree/resources can be confusing | Work-left-behind audit: link thread to worktree, unique commits, dirty/untracked files, artifacts and resources; distinguish archive from cleanup and preserve recoverability | [Codex cleanup issue19480](https://github.com/openai/codex/issues/19480), older-version lifecycle report |
+
+Suggested first sequence: topic brief, needs-attention inbox, then continue-anywhere handoff. Those address retrieval, missed user attention and repeated context setup while using the current source identity/work-map foundations. Approach comparison and worktree audits build on existing mapping but require their own acceptance evidence. A useful additional owner workflow is “What actually shipped?”: compare plans/chat claims with exact repository revisions, artifacts and test/publication evidence; this recommendation follows the product’s evidence rules rather than a claim of measured online demand.
+
+## Acceptance boundaries for future implementation
+
+General answering must expose the selected service and its actual configured availability; no simulated response may appear as a native/model answer. Retrieved topic briefs cite current source versions and report contradictions and omissions. Native fan-out must enumerate the intended matches, honor sharing/account/exclusion rules and budgets, record completion/refusal/timeout without hiding targets, and never poll models while idle. Reference-only or historical retrieval remains available without waking a source.
+
+Needs-attention reads supported native status/approval signals; it does not infer “done” from inactivity or answer another session’s approval automatically. Continue-anywhere produces a reviewable handoff without copying native history files, manufacturing equivalent sessions or claiming filesystem isolation when using the same checkout. Worktree audits make no automatic deletion, acceptance or integration decision. Approach voting or consensus does not replace tests or native owner authority.

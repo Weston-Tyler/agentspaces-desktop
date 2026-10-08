@@ -24,6 +24,10 @@ The owner requested a Slack-like shared discussion referencing multiple existing
 
 Implemented: local shared conversation records, native metadata references, mention/selector resolution, scoped cooperative MCP read/contribute, portable model-wire-shaped snapshots, synthetic bounded dialogue and router installation. A router is guidance, not execution permission, model budget, automatic retroactive context injection, credential setup or a cross-device transport. Automatic native wake remains unavailable. See discussions.md for exact qualification and platform boundaries.
 
+## Accepted Ask direction and workflow research, 2026-10-08
+
+The owner requested general questions through either preferred answering service and topic-wide questions that can address relevant threads across native tools. Provider choice and source choice are separate. The intended Ask flow searches/retrieves permitted work, offers explicit fan-out to the relevant source participants and returns one attributed topic brief with coverage and missing replies. It must cover research, decisions, artifacts and implementation evidence rather than treating all work as code. See ask-and-workflows.md for the accepted intent, primary public feedback, suggested workflows and qualification boundaries. General model answering, automatic topic fan-out and native wake remain unimplemented; this records requirements and research, not a new backend connection or runtime claim.
+
 ## First proof
 
 An explicit synthetic catalog exercises same-tool rediscovery and cross-tool finding reuse without inference. Fixture mode is never displayed as a connected fabric/native session. The real adapter consumes the pinned upstream binding; connecting a seed is explicit. Native MCP tools bind one permissioned participant per connector; no inference is needed for retrieval. Per-native-session caller binding and live execution require separate qualification.
