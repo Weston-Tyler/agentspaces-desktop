@@ -10,6 +10,7 @@ import { startServer } from "../app/server.mjs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import http from "node:http";
+import { loadWorkspaceFixture } from "../app/workspace-fixture.mjs";
 async function setup(t) {
   const root = mkdtempSync(join(tmpdir(), "as-http-"));
   const engine = new Engine(
@@ -147,7 +148,7 @@ test("real MCP SDK transport retrieves a fixture finding without invoking a mode
     }),
   );
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 2);
+  assert.equal(tools.tools.length, 4);
   const discovered = await client.callTool({
     name: "discover_permitted_work",
     arguments: { query: "retry", provider: "codex", status: "archived" },
@@ -162,4 +163,42 @@ test("real MCP SDK transport retrieves a fixture finding without invoking a mode
   });
   assert.equal(JSON.parse(retrieved.content[0].text).handoff.modelCalls, 0);
   assert.equal(app.engine.modelCalls, 0);
+});
+test("workspace MCP lookup and artifact read enforce the bound broad scope", async (t) => {
+  const app = await setup(t);
+  await loadWorkspaceFixture(app.engine);
+  const connector = app.engine.issueConnector("sample-codex-new");
+  const client = new Client({ name: "workspace-fixture-test", version: "1" });
+  t.after(() => client.close());
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [resolve("app/mcp.mjs")],
+      env: {
+        ...process.env,
+        AGENTSPACES_URL: app.address,
+        AGENTSPACES_CONNECTOR_TOKEN: connector.token,
+      },
+    }),
+  );
+  const search = await client.callTool({
+    name: "search_workspace_context",
+    arguments: { query: "Architecture", kind: "document", limit: 5 },
+  });
+  const result = JSON.parse(search.content[0].text);
+  assert.equal(result.total, 2);
+  const read = await client.callTool({
+    name: "read_workspace_artifact",
+    arguments: { nodeId: result.items[0].id },
+  });
+  assert.match(
+    JSON.parse(read.content[0].text).text,
+    /Synthetic shared foundation/,
+  );
+  app.engine.workspace.revoke();
+  const denied = await client.callTool({
+    name: "search_workspace_context",
+    arguments: { query: "Architecture" },
+  });
+  assert.equal(denied.isError, true);
 });

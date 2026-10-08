@@ -5,6 +5,7 @@ import { detectTools, CodexReadAdapter } from "./native.mjs";
 import { usageSummary } from "./usage.mjs";
 import { TYPES } from "./fabric.mjs";
 import { ClaudeReadAdapter } from "./claude-adapter.mjs";
+import { WorkspaceMap } from "./workspace-map.mjs";
 const hash = (s) => createHash("sha256").update(s).digest("hex");
 export class Engine {
   constructor(
@@ -29,6 +30,7 @@ export class Engine {
     this.tools = [];
     this.fabricProject = null;
     this.published = store.data.published ?? {};
+    this.workspace = new WorkspaceMap(this);
   }
   async initialize() {
     this.tools = await detectTools();
@@ -71,11 +73,20 @@ export class Engine {
     const s = this.catalog.find((s) => s.id === id);
     if (!s) throw new Error("Unknown session; discover metadata first");
     this.project(s.project);
+    if (s.scopeId && !this.workspace.sessionAllowed(s))
+      throw new Error("Workspace scope no longer permits this session");
     return s;
+  }
+  permissions(s) {
+    if (s.scopeId && !this.workspace.sessionAllowed(s)) return {};
+    return {
+      ...this.workspace.grantFor(s),
+      ...(this.store.data.grants[s.id] ?? {}),
+    };
   }
   grant(id, changes) {
     const s = this.session(id);
-    const old = this.store.data.grants[id] ?? {};
+    const old = this.permissions(s);
     const allowed = ["enrolled", "content", "share", "retrieve"];
     const next = { ...old };
     for (const key of allowed)
@@ -91,10 +102,17 @@ export class Engine {
     }
     if ((next.content || next.share || next.retrieve) && !next.enrolled)
       throw new Error("Enroll this session before granting content access");
-    this.store.data.grants[id] = next;
+    const stored = { ...(this.store.data.grants[id] ?? {}), ...changes };
+    if (changes.enrolled === false) {
+      stored.content = false;
+      stored.share = false;
+      stored.retrieve = false;
+    }
+    if (changes.content === false) stored.share = false;
+    this.store.data.grants[id] = s.scopeId ? stored : next;
     if (!next.enrolled || !next.content) {
       this.cache.delete(id);
-      delete next.share;
+      this.store.data.grants[id].share = false;
     }
     this.store.audit("Session permissions changed", {
       sessionId: id,
@@ -108,14 +126,18 @@ export class Engine {
     provider = "all",
     status = "all",
     project = "sample-research",
+    scopeId = null,
+    limit = 100,
   } = {}) {
-    const p = this.project(project);
+    const p = project === "all" ? null : this.project(project);
     const words = String(query).toLowerCase().split(/\s+/).filter(Boolean);
     return this.catalog
       .filter(
         (s) =>
-          s.project === project &&
-          s.account === p.account &&
+          (project === "all" || s.project === project) &&
+          (!p || s.account === p.account) &&
+          (!scopeId || s.scopeId === scopeId) &&
+          (!s.scopeId || this.workspace.sessionAllowed(s)) &&
           (provider === "all" || s.provider === provider) &&
           (status === "all" || s.status === status),
       )
@@ -124,17 +146,18 @@ export class Engine {
         return {
           ...s,
           score: words.reduce((n, w) => n + (text.includes(w) ? 1 : 0), 0),
-          grants: this.store.data.grants[s.id] ?? {},
+          grants: this.permissions(s),
         };
       })
       .filter((s) => !words.length || s.score > 0)
       .sort(
         (a, b) => b.score - a.score || b.updatedAt.localeCompare(a.updatedAt),
-      );
+      )
+      .slice(0, Math.max(1, Math.min(Number(limit) || 100, 200)));
   }
   async finding(id) {
     const s = this.session(id),
-      g = this.store.data.grants[id] ?? {};
+      g = this.permissions(s);
     if (!g.enrolled || !g.content)
       throw new Error("Explicit source content grant required");
     let value = this.cache.get(id);
@@ -144,6 +167,10 @@ export class Engine {
         if (!value)
           throw new Error("No sample finding attached to this session");
       } else {
+        if (s.scopeId && !s.cwd)
+          throw new Error(
+            "Native working directory is missing; metadata retained, content lookup not qualified",
+          );
         const adapter = this.nativeFactory({
           host: s.host ?? "local",
           provider: s.provider,
@@ -188,8 +215,8 @@ export class Engine {
   async retrieve({ sourceId, requesterId }) {
     const source = this.session(sourceId),
       target = this.session(requesterId),
-      sg = this.store.data.grants[sourceId] ?? {},
-      tg = this.store.data.grants[requesterId] ?? {};
+      sg = this.permissions(source),
+      tg = this.permissions(target);
     if (
       !sg.enrolled ||
       !sg.content ||
@@ -198,7 +225,16 @@ export class Engine {
       !tg.retrieve
     )
       throw new Error("Source sharing and requester retrieval grants required");
-    if (source.project !== target.project || source.account !== target.account)
+    const broad =
+      source.scopeId &&
+      source.scopeId === target.scopeId &&
+      this.workspace.index?.profile?.policy === "local-retrieval" &&
+      this.workspace.sessionAllowed(source) &&
+      this.workspace.sessionAllowed(target);
+    if (
+      (!broad && source.project !== target.project) ||
+      source.account !== target.account
+    )
       throw new Error("Account or project boundary denied");
     let f = await this.finding(sourceId);
     let viaFabric = false;
@@ -422,7 +458,7 @@ export class Engine {
   }
   issueConnector(id) {
     const s = this.session(id),
-      g = this.store.data.grants[id];
+      g = this.permissions(s);
     if (!g?.enrolled || !g.retrieve)
       throw new Error("Enrolled retrieval participant required");
     const token = randomBytes(32).toString("hex");
@@ -430,6 +466,7 @@ export class Engine {
       sessionId: id,
       project: s.project,
       account: s.account,
+      scopeId: s.scopeId ?? null,
     };
     this.store.save();
     return { token, sessionId: id, project: s.project };
@@ -441,8 +478,8 @@ export class Engine {
     if (
       s.project !== binding.project ||
       s.account !== binding.account ||
-      !this.store.data.grants[s.id]?.enrolled ||
-      !this.store.data.grants[s.id]?.retrieve
+      !this.permissions(s).enrolled ||
+      !this.permissions(s).retrieve
     )
       throw new Error("Connector revoked");
     return binding;
@@ -456,13 +493,15 @@ export class Engine {
         .filter(
           (s) =>
             this.store.data.projects[s.project]?.metadataGrant &&
-            this.store.data.projects[s.project]?.account === s.account,
+            this.store.data.projects[s.project]?.account === s.account &&
+            (!s.scopeId || this.workspace.sessionAllowed(s)),
         )
-        .map((s) => ({ ...s, grants: this.store.data.grants[s.id] ?? {} })),
+        .map((s) => ({ ...s, grants: this.permissions(s) })),
       activity: this.store.data.audit,
       usage: usageSummary(this.store),
       modelCalls: this.modelCalls,
       fabric: this.fabric.diagnostics(),
+      workspace: this.workspace.summary(),
       nativeExecution:
         "Unavailable: separate provider qualification, grant and budget required",
     };

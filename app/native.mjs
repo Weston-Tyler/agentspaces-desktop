@@ -91,10 +91,15 @@ export async function detectTools(host = "local") {
   );
 }
 export class CodexReadAdapter {
-  constructor({ spawnProcess = spawn, host = "local" } = {}) {
+  constructor({
+    spawnProcess = spawn,
+    host = "local",
+    onDiagnostic = () => {},
+  } = {}) {
     if (!["local", "remote"].includes(host))
       throw new Error("Unsupported host");
     this.host = host;
+    this.onDiagnostic = onDiagnostic;
     this.normalize =
       host === "remote"
         ? (value) => posix.normalize(value).replace(/\/$/, "")
@@ -139,8 +144,14 @@ export class CodexReadAdapter {
         }
       }
     });
-    this.child.on("error", () => this.fail());
-    this.child.on("exit", () => this.fail());
+    this.child.on("error", () => {
+      this.onDiagnostic({ event: "processError" });
+      this.fail();
+    });
+    this.child.on("exit", (code) => {
+      this.onDiagnostic({ event: "processExit", code });
+      this.fail();
+    });
     await this.rpc("initialize", {
       clientInfo: { name: "agentspaces_desktop", version: "0.1.0-alpha.1" },
       capabilities: { experimentalApi: false },
@@ -151,12 +162,27 @@ export class CodexReadAdapter {
     if (!["initialize", "thread/list", "thread/read"].includes(method))
       throw new Error("Read-only adapter refuses this method");
     return new Promise((res, rej) => {
+      this.onDiagnostic({ event: "request", method });
       const id = ++this.id;
-      const timer = setTimeout(() => {
-        this.requests.delete(id);
-        rej(new Error("Native read timed out; no automatic retry"));
-      }, 8000);
-      this.requests.set(id, { resolve: res, reject: rej, timer });
+      const timer = setTimeout(
+        () => {
+          this.requests.delete(id);
+          this.onDiagnostic({ event: "timeout", method });
+          rej(new Error("Native read timed out; no automatic retry"));
+        },
+        method === "thread/list" ? 30000 : 8000,
+      );
+      this.requests.set(id, {
+        resolve: (value) => {
+          this.onDiagnostic({ event: "response", method });
+          res(value);
+        },
+        reject: (error) => {
+          this.onDiagnostic({ event: "rejected", method });
+          rej(error);
+        },
+        timer,
+      });
       this.child.stdin.write(JSON.stringify({ id, method, params }) + "\n");
     });
   }
@@ -164,7 +190,23 @@ export class CodexReadAdapter {
     if (!project.metadataGrant)
       throw new Error("Project metadata grant required");
     const result = await this.rpc("thread/list", {
-      cwd: project.path,
+      ...(project.allMetadataGrant ? {} : { cwd: project.path }),
+      ...(project.allMetadataGrant
+        ? {
+            sourceKinds: [
+              "cli",
+              "vscode",
+              "exec",
+              "appServer",
+              "subAgent",
+              "subAgentReview",
+              "subAgentCompact",
+              "subAgentThreadSpawn",
+              "subAgentOther",
+              "unknown",
+            ],
+          }
+        : {}),
       archived,
       limit: 50,
       cursor,
@@ -175,13 +217,15 @@ export class CodexReadAdapter {
       sessions: (result.data ?? [])
         .filter(
           (t) =>
-            t.cwd && this.normalize(t.cwd) === this.normalize(project.path),
+            project.allMetadataGrant ||
+            (t.cwd && this.normalize(t.cwd) === this.normalize(project.path)),
         )
         .map((t) => ({
           id: t.id,
           nativeThreadId: t.id,
           provider: "codex",
           host: this.host,
+          cwd: t.cwd,
           account: project.account,
           project: project.id,
           title: t.name || "Untitled native session",
@@ -190,7 +234,9 @@ export class CodexReadAdapter {
             ? "archived"
             : t.status?.type === "active"
               ? "current"
-              : "dormant",
+              : t.status?.type === "idle"
+                ? "dormant"
+                : "unknown",
           updatedAt: new Date((t.updatedAt ?? 0) * 1000).toISOString(),
           sourceVersion: String(t.updatedAt ?? ""),
           topics: [],

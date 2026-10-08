@@ -8,12 +8,14 @@ import { Engine } from "./engine.mjs";
 import { FabricAdapter } from "./fabric.mjs";
 import { openNativeSignIn } from "./native.mjs";
 import { protectStateDirectory } from "./state-security.mjs";
+import { loadWorkspaceFixture } from "./workspace-fixture.mjs";
 const ui = fileURLToPath(new URL("../ui/", import.meta.url));
 const staticFiles = {
   "/": "index.html",
   "/style.css": "style.css",
   "/app.js": "app.js",
   "/native-controls.js": "native-controls.js",
+  "/workspace.js": "workspace.js",
 };
 export async function startServer({
   root = resolve(".local"),
@@ -110,6 +112,14 @@ export async function startServer({
         return;
       }
       if (req.method !== "POST") {
+        if (
+          req.method === "GET" &&
+          url.pathname === "/api/workspace" &&
+          !connector
+        ) {
+          json(res, 200, engine.workspace.view());
+          return;
+        }
         json(res, 404, { error: "Not found" });
         return;
       }
@@ -132,17 +142,64 @@ export async function startServer({
       const data = body ? JSON.parse(body) : {};
       if (
         connector &&
-        !["/api/discover", "/api/retrieve"].includes(url.pathname)
+        ![
+          "/api/discover",
+          "/api/retrieve",
+          "/api/workspace/search",
+          "/api/workspace/inspect",
+        ].includes(url.pathname)
       )
         throw new Error("Connector capability denied");
+      if (
+        connector &&
+        url.pathname.startsWith("/api/workspace/") &&
+        (!connector.scopeId ||
+          connector.scopeId !== engine.workspace.index?.profile?.id ||
+          !engine.workspace.index?.profile?.active)
+      )
+        throw new Error("Connector has no granted workspace scope");
       let result;
       switch (url.pathname) {
         case "/api/sample":
           result = engine.loadSample();
           break;
+        case "/api/workspace/sample":
+          result = await loadWorkspaceFixture(engine);
+          break;
+        case "/api/workspace/connect":
+          result = await engine.workspace.scan(data);
+          break;
+        case "/api/workspace/continue":
+          if (!engine.workspace.index?.profile?.active)
+            throw new Error("No active workspace scope");
+          result = await engine.workspace.scan(engine.workspace.index.profile, {
+            continuePages: true,
+          });
+          break;
+        case "/api/workspace/compare":
+          result = await engine.workspace.compare(data);
+          break;
+        case "/api/workspace/search":
+          result = engine.workspace.search(data);
+          break;
+        case "/api/workspace/inspect":
+          result = await engine.workspace.inspect(data);
+          break;
+        case "/api/workspace/cancel":
+          result = engine.workspace.cancel();
+          break;
+        case "/api/workspace/revoke":
+          result = engine.workspace.revoke();
+          break;
         case "/api/discover":
           result = engine.discover(
-            connector ? { ...data, project: connector.project } : data,
+            connector
+              ? {
+                  ...data,
+                  project: connector.scopeId ? "all" : connector.project,
+                  scopeId: connector.scopeId ?? null,
+                }
+              : data,
           );
           break;
         case "/api/grant":

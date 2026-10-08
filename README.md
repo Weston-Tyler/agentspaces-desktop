@@ -6,6 +6,8 @@ Status: local Windows source alpha. The repository now has an executable Electro
 
 ## Run the source alpha
 
+The Connected Work page now includes Connect Everything for selected native tools/hosts, automatic workspace discovery, a searchable session/repository/worktree/document/artifact map, exact-file inspection and deterministic worktree comparisons. Read [the work-map guide](docs/workspace-map.md) for broad lookup policies, coverage/continuation and evidence limits. This does not wake native models or authorize automatic merges, publication, archival or deletion.
+
 Requires Node 24+. In this checkout, run npm ci, npm run check, and npm test. Then npm run desktop opens the native companion; npm start opens the standalone loopback preview on port 43127. Closing the native window hides it to its tray; tray Quit stops its owned runtime.
 
 Start in an empty workspace or explicitly open the synthetic sample. Same-tool rediscovery is as important as cross-tool handoff. Setup supports explicit project/tool/host discovery, including Linux remote over an existing SSH connection and this Windows/local workstation device. Metadata, content access, sharing/retrieval and execution remain distinct grants.

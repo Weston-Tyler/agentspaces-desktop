@@ -14,6 +14,10 @@ The owner subsequently confirmed full access for this development task and reque
 
 Private-history enrollment, account connection, native session execution and paid inference still need their specific explicit grants/budgets. Publication, push/merge, release, license/visibility change, transfer, recurring automation and shared deployment changes remain outside this lane. Tool-enforced sandbox prompts are distinct from the owner's grant.
 
+## Accepted connected-work scope, 2026-10-08
+
+The owner approved implementing Connect Everything plus codebase/worktree/document/work-artifact mapping. The first-class setup policy discovers native catalogs and locations automatically on selected machines, with broad local retrieval as an explicit option and exclusions/per-session overrides. Repository common directories, worktree comparisons, Markdown links, hashes and native working directories provide evidence. Similarity remains suggested; accepted/integrated/published/retired status is never inferred from file existence or branch age. Work left in scratch folders remains attributable material to inspect, not automatic cleanup. This is a derived view over existing owners, not another program board, work registry or orchestrator. See workspace-map.md for the implemented boundary.
+
 ## First proof
 
 An explicit synthetic catalog exercises same-tool rediscovery and cross-tool finding reuse without inference. Fixture mode is never displayed as a connected fabric/native session. The real adapter consumes the pinned upstream binding; connecting a seed is explicit. Native MCP tools bind one permissioned participant per connector; no inference is needed for retrieval. Per-native-session caller binding and live execution require separate qualification.

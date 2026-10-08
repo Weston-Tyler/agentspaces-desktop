@@ -6,7 +6,10 @@ function normalizeCwd(value) {
 }
 // Only documented read APIs are used. query(), resume and mutation APIs are never called.
 export async function readSdk(request, sdk) {
-  if (!request.project?.metadataGrant || !request.project.path)
+  if (
+    !request.project?.metadataGrant ||
+    (!request.project.path && !request.project.allMetadataGrant)
+  )
     throw new Error("Explicit project metadata grant required");
   const p = request.project;
   const offset =
@@ -16,7 +19,7 @@ export async function readSdk(request, sdk) {
   if (!Number.isSafeInteger(offset) || offset < 0)
     throw new Error("Invalid metadata cursor");
   const options = {
-    dir: p.path,
+    ...(p.allMetadataGrant ? {} : { dir: p.path }),
     includeWorktrees: false,
     includeProgrammatic: true,
     limit: 50,
@@ -30,12 +33,17 @@ export async function readSdk(request, sdk) {
     const rows = await sdk.listSessions(options);
     return {
       sessions: rows
-        .filter((s) => normalizeCwd(s.cwd) === normalizeCwd(p.path))
+        .filter(
+          (s) =>
+            p.allMetadataGrant ||
+            (s.cwd && normalizeCwd(s.cwd) === normalizeCwd(p.path)),
+        )
         .map((s) => ({
           id: s.sessionId,
           nativeThreadId: s.sessionId,
           provider: "claude",
           host: p.host ?? "local",
+          cwd: s.cwd,
           account: p.account,
           project: p.id,
           title: String(
@@ -56,6 +64,8 @@ export async function readSdk(request, sdk) {
   }
   if (request.action !== "read")
     throw new Error("Read-only helper refuses this action");
+  if (!p.path)
+    throw new Error("Content reads require the exact native working directory");
   const info = await sdk.getSessionInfo(
     request.session.nativeThreadId ?? request.session.id,
     { dir: p.path },

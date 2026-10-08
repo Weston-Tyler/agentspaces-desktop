@@ -1,4 +1,11 @@
 import { nativeControls } from "./native-controls.js";
+import {
+  workspacePage,
+  workspaceHydrate,
+  workspaceAction,
+  workspaceSubmit,
+  workspaceFilter,
+} from "./workspace.js";
 let state,
   page = "discover",
   selected = null,
@@ -66,6 +73,11 @@ async function refresh() {
   render();
 }
 const titles = {
+  workspace: [
+    "Connected work map",
+    "See how your work connects.",
+    "Find sessions, compare worktrees, and trace documents and work artifacts back to their sources.",
+  ],
   discover: [
     "Discover work",
     "Find the work you already did.",
@@ -103,9 +115,11 @@ function render() {
   $("#mode-pill").textContent =
     state.mode === "fixture"
       ? "Sample workspace · synthetic"
-      : state.mode === "native-read-only"
-        ? "Native metadata · read only"
-        : "Empty workspace";
+      : state.mode === "workspace-connected"
+        ? "Connected work map"
+        : state.mode === "native-read-only"
+          ? "Native metadata · read only"
+          : "Empty workspace";
   $("#mode-pill").className =
     "pill" + (state.mode === "fixture" ? " sample" : "");
   $("#sample").textContent =
@@ -119,6 +133,7 @@ function render() {
   $("#sidebar-mode").textContent =
     state.mode === "fixture" ? "Synthetic sample workspace" : "Windows alpha";
   $("#view").innerHTML = {
+    workspace: () => "",
     discover: discovery,
     activity: activity,
     permissions: permissions,
@@ -131,6 +146,18 @@ function render() {
     showResults();
   }
   if (page === "settings") nativeControls(state);
+  if (page === "workspace") {
+    $("#view").replaceChildren(workspacePage(state.workspace));
+    workspaceHydrate(api).catch((error) => notice(error.message, true));
+  }
+  if (page === "workspace" && state.workspace.profile?.active) {
+    $("#mode-pill").textContent = state.workspace.fixture
+      ? "Synthetic work map"
+      : "Read-only work map";
+    $("#sidebar-mode").textContent = state.workspace.fixture
+      ? "Synthetic Git worktrees"
+      : "Derived source inventory";
+  }
 }
 function stats() {
   const enrolled = state.sessions.filter((s) => s.grants.enrolled).length;
@@ -253,6 +280,7 @@ document.addEventListener("click", async (event) => {
       return;
     }
     const a = b.dataset.action;
+    if (await workspaceAction(b, { api, refresh, notice })) return;
     if (b.id === "sample" || a === "sample") {
       await api("sample", {});
       notice(
@@ -319,6 +347,10 @@ document.addEventListener("click", async (event) => {
   }
 });
 document.addEventListener("change", async (e) => {
+  if (e.target.id === "workspace-kind") {
+    workspaceFilter(e);
+    return;
+  }
   try {
     if (e.target.dataset.grant) {
       await api("grant", {
@@ -341,6 +373,10 @@ document.addEventListener("change", async (e) => {
 });
 let debounce;
 document.addEventListener("input", (e) => {
+  if (e.target.id === "workspace-search") {
+    workspaceFilter(e);
+    return;
+  }
   if (e.target.id === "search") {
     filters.query = e.target.value;
     clearTimeout(debounce);
@@ -352,6 +388,10 @@ document.addEventListener("submit", async (event) => {
   const form = event.target;
   const fields = Object.fromEntries(new FormData(form));
   try {
+    if (form.id === "workspace-scope-form") {
+      await workspaceSubmit(form, { api, refresh, notice });
+      return;
+    }
     if (form.id === "native-form") {
       await api("native/discover", {
         ...fields,
