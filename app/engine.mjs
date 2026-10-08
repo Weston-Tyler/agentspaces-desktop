@@ -8,6 +8,7 @@ import { ClaudeReadAdapter } from "./claude-adapter.mjs";
 import { WorkspaceMap } from "./workspace-map.mjs";
 import { Discussions } from "./discussions.mjs";
 import { hostOS } from "./platform.mjs";
+import { Ask } from "./ask.mjs";
 const hash = (s) => createHash("sha256").update(s).digest("hex");
 export class Engine {
   constructor(
@@ -15,6 +16,7 @@ export class Engine {
     fabric,
     {
       clock = Date.now,
+      answerFactory,
       nativeFactory = (context) =>
         context.provider === "claude"
           ? new ClaudeReadAdapter(context)
@@ -34,6 +36,7 @@ export class Engine {
     this.published = store.data.published ?? {};
     this.workspace = new WorkspaceMap(this);
     this.discussions = new Discussions(this);
+    this.ask = new Ask(this, { answerFactory });
   }
   async initialize() {
     this.tools = await detectTools();
@@ -488,7 +491,34 @@ export class Engine {
     return binding;
   }
   snapshot() {
+    const answerReceipts = Object.values(
+      this.store.data.askReceipts ?? {},
+    ).filter((receipt) => receipt.dispatchCounted);
+    const knownAnswers = answerReceipts.filter(
+      (receipt) => receipt.result?.usage?.known === true,
+    );
+    const answerUsage = {
+      requests: answerReceipts.length,
+      completed: answerReceipts.filter(
+        (receipt) => receipt.state === "completed",
+      ).length,
+      uncertain: answerReceipts.filter(
+        (receipt) => receipt.state === "uncertain",
+      ).length,
+      unknownMetrics: answerReceipts.length - knownAnswers.length,
+      reportedInputTokens: knownAnswers.reduce(
+        (sum, receipt) => sum + receipt.result.usage.inputTokens,
+        0,
+      ),
+      reportedOutputTokens: knownAnswers.reduce(
+        (sum, receipt) => sum + receipt.result.usage.outputTokens,
+        0,
+      ),
+      scope:
+        "One fresh native question receipt per request; known provider token totals only, not billing or reconstructed native turn identity",
+    };
     return {
+      answerUsage,
       localOS: hostOS("local"),
       mode: this.mode,
       tools: this.tools,
@@ -507,7 +537,7 @@ export class Engine {
       fabric: this.fabric.diagnostics(),
       workspace: this.workspace.summary(),
       nativeExecution:
-        "Unavailable: separate provider qualification, grant and budget required",
+        "Original-thread execution requires separate qualification; fresh Ask questions use version/authentication/grant/budget checks",
     };
   }
 }

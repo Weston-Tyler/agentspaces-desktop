@@ -1,5 +1,6 @@
 import { nativeControls } from "./native-controls.js";
 import { mountDiscussions } from "./discussions.js";
+import { mountAsk } from "./ask.js";
 import {
   workspacePage,
   workspaceHydrate,
@@ -8,7 +9,10 @@ import {
   workspaceFilter,
 } from "./workspace.js";
 let state,
-  page = "discover",
+  page =
+    new URL(location.href).searchParams.get("view") === "ask"
+      ? "ask"
+      : "discover",
   selected = null,
   filters = {
     query: "",
@@ -74,6 +78,11 @@ async function refresh() {
   render();
 }
 const titles = {
+  ask: [
+    "Ask",
+    "Ask a question. Bring your work with you.",
+    "Choose an answering service and include permitted findings, decisions and artifacts when they help.",
+  ],
   discussions: [
     "Discussions",
     "Bring your threads into one conversation.",
@@ -111,6 +120,7 @@ const titles = {
   ],
 };
 function render() {
+  $("#view").dataset.askMount = "";
   $("#view").dataset.discussionMount = "";
   const t = titles[page];
   $("#crumb").textContent = t[0];
@@ -142,6 +152,7 @@ function render() {
       ? "Synthetic sample workspace"
       : state.localOS + " alpha";
   $("#view").innerHTML = {
+    ask: () => "",
     discussions: () => "",
     workspace: () => "",
     discover: discovery,
@@ -156,6 +167,10 @@ function render() {
     showResults();
   }
   if (page === "settings") nativeControls(state, { api, notice });
+  if (page === "ask")
+    mountAsk($("#view"), { api, notice }).catch((error) =>
+      notice(error.message, true),
+    );
   if (page === "discussions")
     mountDiscussions($("#view"), state, { api, notice }).catch((error) =>
       notice(error.message, true),
@@ -231,7 +246,22 @@ function permissions() {
   return `<div class="card"><h2>Four deliberate permissions</h2><p>Project discovery exposes session metadata. Enrollment identifies a participant. Content access allows a bounded read. Sharing and retrieval allow a handoff within the same granted project and account.</p><p class="fineprint">Native execution is unavailable in this alpha. None of these permissions starts a model.</p></div><div class="panel"><div class="panel-title"><h2>Session grants</h2><span class="tag">Opt in individually</span></div>${state.sessions.length ? state.sessions.map(row).join("") : empty("No sessions discovered.", "Start in Setup, or open the sample workspace.")}<div class="info-line">Revoke enrollment to revoke its content, sharing, retrieval and connector access. Other account/project boundaries are denied.</div></div>`;
 }
 function usage() {
-  return `${stats()}<div class="card"><h2>Recorded provider usage</h2><p>No inference has been authorized or started by this companion. Usage metrics appear when a qualified execution adapter returns native turn records.</p><div class="usage-values">${[
+  const answers = state.answerUsage ?? {};
+  return `${stats()}<div class="card"><h2>Native Ask usage</h2><p>Question receipts retain reported metrics once per request. Missing metrics remain unknown, and these totals do not establish provider billing.</p><div class="usage-values">${[
+    ["requests", "Native requests"],
+    ["completed", "Completed"],
+    ["uncertain", "Uncertain"],
+    ["unknownMetrics", "Unknown usage"],
+    ["reportedInputTokens", "Reported input tokens"],
+    ["reportedOutputTokens", "Reported output tokens"],
+  ]
+    .map(
+      ([key, label]) =>
+        `<div><strong>${answers[key] ?? 0}</strong><span>${label}</span></div>`,
+    )
+    .join(
+      "",
+    )}</div><p class="fineprint">${esc(answers.scope)}</p></div><div class="card"><h2>Recorded native-session usage</h2><p>Historical session usage records retain their original provider and turn attribution.</p><div class="usage-values">${[
     ["input", "Input tokens"],
     ["output", "Output tokens"],
     ["cachedInput", "Cached input"],

@@ -1,8 +1,8 @@
 # AgentSpaces Desktop
 
-AgentSpaces Desktop is a planned local application that connects work across native AI tools. Users keep working in their existing applications while approved threads share findings, reference artifacts, and request bounded follow-up work through AgentSpaces.
+AgentSpaces Desktop is a local source application that connects work across native AI tools. Users keep working in their existing applications while approved threads share findings, reference artifacts, and request bounded follow-up work through AgentSpaces.
 
-Status: local Windows source alpha. The repository now has an executable Electron companion, a loopback background service, permissioned session discovery/retrieval, read-only Codex/Claude adapters, scoped MCP tools, and bounded tests. A real upstream Java/TypeScript fabric proof uses synthetic native session/execution payloads. No private histories or model execution were enrolled during this build; there is no signed installer or released distribution.
+Status: local Windows source alpha. The companion now supports real bounded native questions, full-catalog topic lookup, selected shared findings/files, cited answers, scoped MCP discussions and workspace mapping. Five authorized live Codex questions exercised general/topic answers and two owned read-only native threads with original-thread continuity. Owning Java/TypeScript signed targeted-work proofs retain their exact scopes; arbitrary existing-thread broadcast and live Claude answering remain gated. There is no signed installer or released distribution.
 
 ## Run the source alpha
 
@@ -12,13 +12,13 @@ Requires Node 24+. In this checkout, run npm ci, npm run check, and npm test. Th
 
 The Discussions page brings multiple source threads into a shared conversation with stable mentions, a provider-grouped reply selector, message ancestry and source attribution. Scoped MCP participants can read and contribute while running in their native tools. Automatic native wake is unavailable; selected native requests display that boundary. The multi-participant dialogue demo is synthetic, bounded and makes no model calls. See [discussions and routing](docs/discussions.md).
 
-The accepted [Ask and workflow direction](docs/ask-and-workflows.md) covers general questions, topic-wide retrieval and questions to matching threads, plus workflows grounded in public user requests. This is product research and requirements; model-backed general answering and automatic native fan-out remain future qualification work.
+Open the Ask page for general questions or a topic lookup followed by selected-source synthesis. See [native questions and proof boundaries](docs/native-questions.md) and the [Ask workflow direction](docs/ask-and-workflows.md). OpenAI answering uses the native Codex sign-in; Claude answering requires provider-permitted API environment credentials. Source references and fresh answering are distinct from original-thread fan-out.
 
 Run npm run setup to install the local router guidance. Setup also offers preview/install for local and remote accounts, preserving existing global Codex/Claude instructions and saving exact backups. This installs guidance, not credentials or a native execution controller. Additional accounts/hosts need their own supported instruction entry point.
 
 Start in an empty workspace or explicitly open the synthetic sample. Same-tool rediscovery is as important as cross-tool handoff. Setup supports explicit project/tool/host discovery, including Linux remote over an existing SSH connection and this Windows/local workstation device. Metadata, content access, sharing/retrieval and execution remain distinct grants.
 
-Read [the alpha guide](docs/alpha-guide.md), [the product brief](docs/product-brief.md), and [compatibility boundaries](docs/compatibility.md) before connecting native sessions. Account boundary labels are user-configured scopes, not verified provider account identity. Native inference remains unavailable.
+Read [the alpha guide](docs/alpha-guide.md), [the product brief](docs/product-brief.md), and [compatibility boundaries](docs/compatibility.md) before connecting native sessions. Account boundary labels are user-configured scopes, not verified provider account identity. Fresh native Ask inference is version/authentication/grant/budget gated; original-thread execution has separate qualification.
 
 ## Intended experience
 

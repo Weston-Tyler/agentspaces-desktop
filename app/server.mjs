@@ -10,6 +10,7 @@ import { openNativeSignIn } from "./native.mjs";
 import { protectStateDirectory } from "./state-security.mjs";
 import { loadWorkspaceFixture } from "./workspace-fixture.mjs";
 import { installHostRouter } from "./router-install.mjs";
+import { detectAnswerProviders } from "./answer-provider.mjs";
 const ui = fileURLToPath(new URL("../ui/", import.meta.url));
 const staticFiles = {
   "/": "index.html",
@@ -18,6 +19,7 @@ const staticFiles = {
   "/native-controls.js": "native-controls.js",
   "/workspace.js": "workspace.js",
   "/discussions.js": "discussions.js",
+  "/ask.js": "ask.js",
 };
 export async function startServer({
   root = resolve(".local"),
@@ -34,6 +36,7 @@ export async function startServer({
     instance = randomBytes(16).toString("hex");
   const cookies = new Set([session]);
   let closing = false;
+  const activeAnswers = new Map();
   const json = (res, status, value) => {
     res.writeHead(status, {
       "Content-Type": "application/json",
@@ -173,6 +176,52 @@ export async function startServer({
         throw new Error("Connector has no granted workspace scope");
       let result;
       switch (url.pathname) {
+        case "/api/ask/providers":
+          result = await detectAnswerProviders({ host: data.host ?? "local" });
+          break;
+        case "/api/ask/search":
+          result = engine.ask.search(data);
+          break;
+        case "/api/ask/answer": {
+          if (activeAnswers.size >= 2)
+            throw new Error(
+              "Two questions are already running; wait or cancel one",
+            );
+          if (activeAnswers.has(data.deliveryId))
+            throw new Error("This question is already running");
+          const abort = new AbortController();
+          const timeout =
+            Number.isInteger(data.budget?.timeoutMs) &&
+            data.budget.timeoutMs > 0 &&
+            data.budget.timeoutMs <= 120000
+              ? setTimeout(() => abort.abort(), data.budget.timeoutMs)
+              : null;
+          activeAnswers.set(data.deliveryId, abort);
+          const onClose = () => {
+            if (!res.writableEnded) abort.abort();
+          };
+          res.once("close", onClose);
+          try {
+            result = await engine.ask.answer(data, { signal: abort.signal });
+          } finally {
+            if (timeout) clearTimeout(timeout);
+            activeAnswers.delete(data.deliveryId);
+            res.removeListener("close", onClose);
+          }
+          break;
+        }
+        case "/api/ask/cancel":
+          if (typeof data.deliveryId !== "string")
+            throw new Error("Question delivery ID required");
+          if (activeAnswers.has(data.deliveryId)) {
+            activeAnswers.get(data.deliveryId).abort();
+            result = {
+              status: "cancellation requested",
+              outcome:
+                "Native completion must be reconciled; cancellation is not proof of no effect",
+            };
+          } else result = { status: "not running" };
+          break;
         case "/api/router/install":
           if (typeof data.dryRun !== "boolean")
             throw new Error("Choose preview or installation explicitly");
@@ -300,6 +349,8 @@ export async function startServer({
     } catch (e) {
       json(res, 400, {
         error: e instanceof SyntaxError ? "Invalid request JSON" : e.message,
+        code: e.code ?? null,
+        uncertainOutcome: e.uncertainOutcome ?? null,
       });
     }
   });
@@ -315,6 +366,7 @@ export async function startServer({
     { mode: 0o600 },
   );
   async function close() {
+    for (const abort of activeAnswers.values()) abort.abort();
     fabric.close();
     await new Promise((r) => server.close(r));
     if (existsSync(runtimePath)) {

@@ -1149,3 +1149,49 @@ pre {
     display: none;
   }
 }
+.ask-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px;
+  border: 1px solid #cdd6e3;
+  border-radius: 8px;
+  font: inherit;
+  resize: vertical;
+}
+.ask-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.ask-form button {
+  margin: 10px 10px 0 0;
+}
+.ask-candidates {
+  max-height: 360px;
+  overflow: auto;
+  margin: 18px 0;
+  padding: 14px;
+  border: 1px solid #e0e5ee;
+  border-radius: 8px;
+}
+.ask-candidates:empty {
+  display: none;
+}
+.ask-answer-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.ask-evidence {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  padding: 12px;
+  background: #f4f6fb;
+  border-radius: 6px;
+}
+@media (max-width: 850px) {
+  .ask-controls {
+    grid-template-columns: 1fr;
+  }
+}

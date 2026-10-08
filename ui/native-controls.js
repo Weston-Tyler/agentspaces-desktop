@@ -1,4 +1,12 @@
 export function nativeControls(state, { api, notice }) {
+  for (const heading of document.querySelectorAll(".card h2")) {
+    if (heading.textContent === "Development status")
+      heading.nextElementSibling.textContent =
+        "Windows source alpha. Ask can run fresh native questions under explicit limits; discovered sessions and synthetic demos retain their labels. Original native-thread execution is separately qualified.";
+    if (heading.textContent === "Native tools")
+      heading.nextElementSibling.textContent =
+        "Versions are detected using native commands. Ask readiness checks native sign-in status or API environment presence; credentials are never collected.";
+  }
   const form = document.querySelector("#native-form");
   if (!form) return;
   form.closest(".card").querySelector("h2").textContent =

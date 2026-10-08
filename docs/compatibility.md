@@ -19,6 +19,10 @@ The original native-tool rows above record the initial adapter proof boundary. S
 
 Version matches are admission checks plus fixture evidence, not blanket native feature parity. Review an exact update, inspect provider schemas, run bounded drift fixtures and then repeat the affected native acceptance check. No maintenance schedule is activated.
 
+## Bounded native E2E update, 2026-10-08
+
+Fresh Codex exec questions were exercised through the Windows-hosted browser/API and remote native binary0.161: one general answer and one two-source cited answer. The two source findings were synthetic. A shared-daemon WebSocket adapter exercised three actual turns on two owned read-only native threads, including continuity on the original A UUID. ws8.22.0 is pinned for standard transport. The native queue proof does not qualify arbitrary existing thread permissions or wire broad broadcast into the UI. Local Codex0.162 availability/authentication/flags were checked without an extra live question. Claude API-mode process contracts pass, but local/remote API environment credentials are absent and live Claude answering was not tested. See native-questions.md and the exact local E2E handoff for snapshot recovery/unknown-usage boundaries.
+
 ## Official references
 
 - [Codex app-server](https://learn.chatgpt.com/docs/app-server): local read/resume/turn interfaces; this product exposes only read methods and treats the app-server boundary as experimental.
