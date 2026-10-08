@@ -12,6 +12,8 @@ Requires Node 24+. In this checkout, run npm ci, npm run check, and npm test. Th
 
 On Windows, scripts/Open-Desktop.ps1 starts the background companion if needed and opens the desktop window on that same workspace. A desktop shortcut can target this script. The source desktop also attaches to an existing verified source-preview runtime by default, preserving its discovered threads. Quitting an attached window leaves that background runtime running. This is a source launcher, not a packaged installer.
 
+Run scripts/Install-Windows-Shortcuts.ps1 to add branded AgentSpaces Desktop shortcuts to the Windows desktop and Start menu. The launcher uses the actual Windows desktop path, including OneDrive redirection. The native window uses the AgentSpaces icon and app identity. macOS desktop packaging and a native Mac acceptance run remain unqualified.
+
 The Discussions page brings multiple source threads into a shared conversation with stable mentions, a provider-grouped reply selector, message ancestry and source attribution. Scoped MCP participants can read and contribute while running in their native tools. Automatic native wake is unavailable; selected native requests display that boundary. The multi-participant dialogue demo is synthetic, bounded and makes no model calls. See [discussions and routing](docs/discussions.md).
 
 The desktop opens on Your threads. Startup restores the saved native metadata connection immediately; first use automatically discovers local Codex and Claude thread metadata without waiting for repository/file indexing. A revoked connection stays revoked. Sample reset controls are excluded from the normal runtime; demos require a separate explicitly enabled runtime.

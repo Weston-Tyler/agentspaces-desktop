@@ -3,6 +3,9 @@ import { startServer } from "./server.mjs";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+app.setName("AgentSpaces Desktop");
+if (process.platform === "win32") app.setAppUserModelId("com.agentspaces.desktop");
+const desktopIcon = fileURLToPath(new URL("../assets/agentspaces.png", import.meta.url));
 if (process.env.AGENTSPACES_DESKTOP_STATE) {
   mkdirSync(process.env.AGENTSPACES_DESKTOP_STATE, { recursive: true });
   app.setPath("userData", process.env.AGENTSPACES_DESKTOP_STATE);
@@ -44,6 +47,7 @@ else {
             minWidth: 720,
             minHeight: 540,
             title: "AgentSpaces Desktop",
+            icon: desktopIcon,
             backgroundColor: "#f6f7f9",
             webPreferences: {
               nodeIntegration: false,
