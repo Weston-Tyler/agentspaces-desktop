@@ -134,7 +134,7 @@ server.registerTool(
   "contribute_to_discussion",
   {
     description:
-      "Post this connector participant’s contribution to a shared discussion. Native turn ID is self-reported, never independently verified. Stable delivery ID prevents duplicate posts. Does not resume or wake another native thread.",
+      "Post this connector participant’s contribution to a shared discussion. Native turn ID is self-reported, never independently verified. Stable delivery ID prevents duplicate posts. Peer mentions in an authorized owner-rooted conversation may be forwarded under its existing hop and usage limits; orphan contributions start no native model.",
     inputSchema: {
       id: z.string().uuid(),
       text: z.string().min(1).max(8000),

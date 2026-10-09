@@ -19,6 +19,7 @@ import { ensureDesktopDiscovery } from "./desktop-discovery.mjs";
 import { connectAllOwnedWork } from "./connect-all.mjs";
 import { CodexDiscussionHub } from "./codex-discussions.mjs";
 import { routeConversation } from "./conversation-routing.mjs";
+import { ParticipantConnections } from "./participant-connection.mjs";
 const ui = fileURLToPath(new URL("../ui/", import.meta.url));
 const staticFiles = {
   "/": "index.html",
@@ -45,6 +46,8 @@ export async function startServer({
   desktopDiscovery = !provided,
   allowDemo = false,
   codexAdapterFactory,
+  participantInstallRemote,
+  participantTunnelFactory,
 } = {}) {
   const store = provided?.store ?? new Store(root),
     fabric = provided?.fabric ?? new FabricAdapter({ stateRoot: root }),
@@ -65,7 +68,7 @@ export async function startServer({
   const activeAnswers = new Map();
   const channels = new ChannelHub(engine);
   const codexAgents = new CodexDiscussionHub(engine, { adapterFactory: codexAdapterFactory, onContribution: (group, message) => routeConversation(engine, { codexAgents, channels }, group, message) });
-  let connections;
+  let connections, participantConnections;
   const terminals = providedTerminals ?? new NativeTerminals({ resolveLaunch: options => connections.resolveLaunch(options) });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 65536, perMessageDeflate: false });
   const json = (res, status, value) => {
@@ -222,6 +225,9 @@ export async function startServer({
           break;
         case "/api/native/channel/prepare":
           result = await connections.prepare(data);
+          break;
+        case "/api/native/participant/prepare":
+          result = await participantConnections.prepare({ sessionId: data.sessionId });
           break;
         case "/api/native/channel/status":
           result = { connected: channels.isConnected(data.sessionId), nativeIdentityVerified: false, mode: "native-interactive-channel" };
@@ -459,6 +465,7 @@ export async function startServer({
   });
   const address = `http://127.0.0.1:${server.address().port}`;
   connections = new NativeConnections(engine, { root, address, remoteInstall });
+  participantConnections = new ParticipantConnections(engine, { root, address, installRemote: participantInstallRemote, tunnelFactory: participantTunnelFactory });
   const runtimePath = join(root, "runtime.json");
   writeFileSync(
     runtimePath,
@@ -466,6 +473,7 @@ export async function startServer({
     { mode: 0o600 },
   );
   async function close() {
+    await participantConnections.close();
     codexAgents.close();
     if (engine.workspace.running) engine.workspace.cancel();
     terminals.closeAll();
@@ -479,5 +487,5 @@ export async function startServer({
       if (current.instance === instance) unlinkSync(runtimePath);
     }
   }
-  return { server, engine, store, address, instance, admin, close, terminals, channels, connections, codexAgents, desktopDiscovery: desktopStartup };
+  return { server, engine, store, address, instance, admin, close, terminals, channels, connections, participantConnections, codexAgents, desktopDiscovery: desktopStartup };
 }

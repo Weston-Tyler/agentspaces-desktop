@@ -53,6 +53,7 @@ export function routerText() {
     "The installer adds a managed pointer in this OS account’s Codex and Claude global instruction files. Start a new native session or explicitly read this router in an already-running one. It does not retroactively inject guidance into every open thread. Other OS accounts, alternative agent homes and additional hosts require their own installation; unsupported tools need their supported instruction entry point.",
     "",
     "MCP setup is participant-specific, not a shared administrator credential. AgentSpaces Desktop’s session inspector creates a scoped connector after enrollment and retrieval grants; sharing/content grants control group access. Keep tokens in protected configuration/environment, never in this router, chat, source or logs. A loopback URL refers to that machine; remote participants need an explicitly configured supported connection. Installing guidance alone does not establish that connection.",
+    "An existing session with shell access can use the participant CLI through its own private connection instructions and exact native source UUID, without restarting or loading a model. Use discover to find shared chats, read for group context, and contribute with stdin JSON plus stable delivery and turn references. Never use another thread’s configuration or claim CLI connectivity means MCP tools or an inbound channel are loaded. Native client registration/loading is separate; new sessions do not automatically gain tools from this guidance file.",
     "",
   ].join("\n");
 }

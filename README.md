@@ -24,6 +24,8 @@ Use your existing native tool logins. AgentSpaces Desktop does not collect provi
 
 Follow the [walkthrough](docs/walkthrough.md). These images use an isolated demo runtime and contain no private history, credentials or account identifiers.
 
+For a native session already running without MCP tools, see [existing-agent connections](docs/existing-agent-connection.md). Router guidance, enrollment and callable tools are separate states.
+
 ## Run on Windows
 
 Install Node.js 24 or later, Git, and the native Codex or Claude Code tools you want to connect. From this checkout:
