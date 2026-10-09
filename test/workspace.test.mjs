@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, symlinkSync, rmSync } from "node:fs";
+import { join, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import {
@@ -14,6 +14,8 @@ import {
   parseWorktrees,
   safeRemote,
   sensitiveFileName,
+  inspectWorkspaceFile,
+  normalizePath,
 } from "../app/workspace-reader.mjs";
 import {
   scopePathExcluded,
@@ -24,6 +26,7 @@ import { Engine } from "../app/engine.mjs";
 import { Store } from "../app/store.mjs";
 import { FabricAdapter } from "../app/fabric.mjs";
 const fixture = createWorkspaceFixture();
+for (const key of ["root", "main", "feature"]) fixture[key] = realpathSync(fixture[key]);
 const scan = () =>
   scanWorkspace({
     scope: {
@@ -239,6 +242,57 @@ test("matching native cwd links sessions to the correct worktree", async () => {
     mapped.nodes.find((n) => n.id === edge.to).path,
     fixture.feature,
   );
+});
+
+test("observed parent directory aliases retain canonical worktree identity and exclusions", async t => {
+  const created = createWorkspaceFixture(), actualRoot = realpathSync(created.root), parent = mkdtempSync(join(realpathSync(tmpdir()), "as-alias-parent-"));
+  t.after(() => { rmSync(parent, { recursive: true, force: true }); rmSync(actualRoot, { recursive: true, force: true }); });
+  const link = join(parent, "alias"), aliasRoot = join(link, basename(actualRoot));
+  symlinkSync(dirname(actualRoot), link, process.platform === "win32" ? "junction" : "dir");
+  const excluded = join(actualRoot, "adapter-worktree", "hidden-research");
+  mkdirSync(excluded); writeFileSync(join(excluded, "notes.md"), "EXCLUDED-FIXTURE-TEXT");
+  const graph = await scanWorkspace({ scope: { host: "local", filesGrant: true, contentGrant: true, roots: [aliasRoot], automaticRoots: false,
+    exclusions: [join(aliasRoot, "adapter-worktree", "hidden-research")] } });
+  const main = graph.nodes.find(node => node.kind === "worktree" && normalizePath(node.path) === normalizePath(realpathSync(created.main)));
+  const feature = graph.nodes.find(node => node.kind === "worktree" && normalizePath(node.path) === normalizePath(realpathSync(created.feature)));
+  assert(main.readAllowed && feature.readAllowed); assert.equal(feature.comparisonAllowed, false);
+  assert(!graph.nodes.some(node => node.path === join(excluded, "notes.md")));
+  const mapped = mapSessions(graph, [{ id: "aliased-native", host: "local", cwd: join(aliasRoot, "adapter-worktree"), provider: "codex", nativeThreadId: "aliased-native", title: "Alias fixture" }]);
+  assert(mapped.edges.some(edge => edge.from === "session:aliased-native" && edge.to === feature.id && edge.relation === "native cwd in worktree"));
+  await assert.rejects(compareWorktrees({ left: main, right: feature }), /excluded descendants/);
+  const directLink = await scanWorkspace({ scope: { host: "local", filesGrant: true, contentGrant: true, roots: [link], automaticRoots: false } });
+  assert.equal(directLink.nodes.filter(node => node.kind !== "host").length, 0);
+  assert(directLink.coverage.symlinksSkipped >= 1, "a directly linked scope root remains refused");
+});
+
+test("a redirected granted parent alias refuses cached comparisons and artifact bytes", async t => {
+  const created = createWorkspaceFixture(), actualRoot = realpathSync(created.root), parent = mkdtempSync(join(realpathSync(tmpdir()), "as-alias-drift-"));
+  t.after(() => { rmSync(parent, { recursive: true, force: true }); rmSync(actualRoot, { recursive: true, force: true }); });
+  const link = join(parent, "alias"), aliasRoot = join(link, basename(actualRoot));
+  symlinkSync(dirname(actualRoot), link, process.platform === "win32" ? "junction" : "dir");
+  const graph = await scanWorkspace({ scope: { host: "local", filesGrant: true, contentGrant: true, roots: [aliasRoot], automaticRoots: false } });
+  const trees = graph.nodes.filter(node => node.kind === "worktree"), document = graph.nodes.find(node => node.kind === "document" && node.path.endsWith("README.md"));
+  assert.equal((await compareWorktrees({ left: trees[0], right: trees[1] })).modelCalls, 0);
+  assert((await inspectWorkspaceFile({ node: document })).text);
+  const other = join(parent, "other"); mkdirSync(join(other, basename(actualRoot)), { recursive: true });
+  rmSync(link, { recursive: true, force: true }); symlinkSync(other, link, process.platform === "win32" ? "junction" : "dir");
+  await assert.rejects(compareWorktrees({ left: trees[0], right: trees[1] }), /root alias changed/);
+  await assert.rejects(inspectWorkspaceFile({ node: document }), /root alias changed/);
+});
+
+test("new exclusions under a granted alias apply to cached canonical file paths", async t => {
+  const created = createWorkspaceFixture(), actualRoot = realpathSync(created.root), parent = mkdtempSync(join(realpathSync(tmpdir()), "as-alias-exclusion-"));
+  t.after(() => { rmSync(parent, { recursive: true, force: true }); rmSync(actualRoot, { recursive: true, force: true }); });
+  const link = join(parent, "alias"), aliasRoot = join(link, basename(actualRoot));
+  symlinkSync(dirname(actualRoot), link, process.platform === "win32" ? "junction" : "dir");
+  const graph = await scanWorkspace({ scope: { host: "local", filesGrant: true, contentGrant: true, roots: [aliasRoot], automaticRoots: false } });
+  const engine = rootEngine();
+  engine.workspace.index = { ...graph, schema: 1, sessions: [], profile: { active: true, indexFiles: true,
+    exclusions: { local: [join(aliasRoot, "research-repo", "docs")] } } };
+  const document = graph.nodes.find(node => node.kind === "document" && normalizePath(node.path) === normalizePath(join(realpathSync(created.main), "docs", "architecture.md")));
+  await assert.rejects(engine.workspace.inspect({ nodeId: document.id }), /outside workspace scope/);
+  const trees = graph.nodes.filter(node => node.kind === "worktree");
+  await assert.rejects(engine.workspace.compare({ leftId: trees[0].id, rightId: trees[1].id }), /excluded worktree paths/);
 });
 test("workspace cache corruption can be rebuilt rather than becoming authority", () => {
   const e = rootEngine();

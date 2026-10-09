@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, mkdirSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, mkdirSync, readdirSync, rmSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -8,7 +8,7 @@ import { EventEmitter } from "node:events";
 import { ParticipantConnections } from "../app/participant-connection.mjs";
 
 function fixture(t, { host = "local", installRemote, tunnelFactory, verifyLocal } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "agentspaces-participant-")); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const root = mkdtempSync(join(realpathSync(tmpdir()), "agentspaces-participant-")); t.after(() => rmSync(root, { recursive: true, force: true }));
   const source = { id: "participant-source", nativeThreadId: "00000000-0000-4000-8000-000000000001", provider: "claude", host, account: "own", project: "own-project", status: "current", fixture: false };
   const grant = { enrolled: true, retrieve: true, share: true }, store = { data: { connectors: {} }, save() {} };
   let issued = 0; const tokens = [], installs = [], tunnels = [], local = [];

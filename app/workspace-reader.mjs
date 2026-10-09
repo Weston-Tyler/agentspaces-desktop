@@ -148,13 +148,18 @@ async function optionalGit(path, args, fallback = "") {
     return fallback;
   }
 }
+async function checkScopeAliases(node) {
+  for (const alias of node.scopeAliases ?? []) {
+    if (normalizePath(await realpath(alias.requestedPath)) !== normalizePath(alias.canonicalPath)) throw new Error("Granted root alias changed; refresh inventory");
+  }
+}
 export async function scanWorkspace(request) {
   if (request.action && request.action !== "scan")
     throw new Error("Unsupported workspace read");
   const scope = request.scope ?? {};
   if (!scope.filesGrant) throw new Error("Workspace inventory grant required");
   const host = scope.host ?? "local",
-    exclusions = scope.exclusions ?? [],
+    exclusions = [...(scope.exclusions ?? [])],
     content = scope.contentGrant === true;
   const maxDirectories = Math.min(
       Number(request.maxDirectories ?? 12000),
@@ -209,7 +214,7 @@ export async function scanWorkspace(request) {
         join(homedir(), "src"),
         ...(request.cwdHints ?? []),
       ];
-  const validRoots = [];
+  const validRoots = [], scopeAliases = [];
   for (const root of [...new Set(roots)].sort()) {
     if (
       typeof root !== "string" ||
@@ -226,8 +231,15 @@ export async function scanWorkspace(request) {
         continue;
       }
       if (!s.isDirectory()) continue;
-      validRoots.push(await realpath(root));
+      const canonicalPath = await realpath(root);
+      if (excludedPath(canonicalPath, exclusions)) continue;
+      validRoots.push(canonicalPath);
+      if (normalizePath(root) !== normalizePath(canonicalPath)) scopeAliases.push({ requestedPath: resolve(root), canonicalPath });
     } catch {}
+  }
+  for (const exclusion of [...exclusions]) for (const alias of scopeAliases) {
+    if (within(exclusion, alias.requestedPath)) exclusions.push(join(alias.canonicalPath, relative(alias.requestedPath, exclusion)));
+    else if (within(alias.requestedPath, exclusion)) exclusions.push(alias.canonicalPath);
   }
   const compactRoots = validRoots.filter(
     (root) =>
@@ -277,12 +289,15 @@ export async function scanWorkspace(request) {
           coverage.excluded++;
           continue;
         }
-        const worktreeId = id("worktree", w.path);
+        const reportedPath = w.path;
         let exists = false;
         try {
           const meta = await lstat(w.path);
           exists = meta.isDirectory() && !meta.isSymbolicLink();
+          if (exists) w.path = await realpath(w.path);
         } catch {}
+        if (excludedPath(w.path, exclusions)) { coverage.excluded++; continue; }
+        const worktreeId = id("worktree", w.path);
         let changes = [];
         if (exists && !w.bare)
           changes = parseStatus(
@@ -329,10 +344,16 @@ export async function scanWorkspace(request) {
           untracked: changes.filter((c) => c.xy === "??").length,
           readAllowed: allowed(w.path),
           contentReadAllowed: content && allowed(w.path),
+          comparisonAllowed: content && allowed(w.path) && !exclusions.some(exclusion => within(exclusion, w.path)),
           observedAt: new Date().toISOString(),
           verification: "unknown",
           integration: "unknown",
         };
+        const aliases = scopeAliases.filter(alias => within(w.path, alias.canonicalPath));
+        node.pathAliases = [...new Set([
+          ...(normalizePath(reportedPath) !== normalizePath(w.path) ? [reportedPath] : []),
+          ...aliases.map(alias => join(alias.requestedPath, relative(alias.canonicalPath, w.path))),
+        ])];
         node.available = exists;
         node.trackedDocuments = tracked;
         node.readAllowed = node.readAllowed && exists;
@@ -582,6 +603,10 @@ export async function scanWorkspace(request) {
       ]),
     ).values(),
   ];
+  for (const node of nodes.values()) if (node.path) {
+    const aliases = scopeAliases.filter(alias => within(node.path, alias.canonicalPath));
+    if (aliases.length) node.scopeAliases = aliases;
+  }
   return {
     schema: 1,
     host,
@@ -604,6 +629,8 @@ export async function compareWorktrees(request) {
     throw new Error(
       "Grant read-only code/document indexing before content comparisons",
     );
+  if (left.comparisonAllowed === false || right.comparisonAllowed === false) throw new Error("Worktree comparison cannot honor excluded descendants");
+  await Promise.all([checkScopeAliases(left), checkScopeAliases(right)]);
   if (left.repositoryId !== right.repositoryId)
     throw new Error(
       "Commit ancestry requires the same observed Git repository",
@@ -707,6 +734,7 @@ export async function compareWorktrees(request) {
     local(left, a),
     local(right, b),
   ]);
+  await Promise.all([checkScopeAliases(left), checkScopeAliases(right)]);
   return {
     left: {
       id: left.id,
@@ -743,6 +771,7 @@ export async function inspectWorkspaceFile(request) {
     throw new Error(
       "Binary asset inspection requires the upstream asset path; metadata only in this alpha",
     );
+  await checkScopeAliases(node);
   const before = await lstat(node.path);
   if (before.isSymbolicLink() || !before.isFile() || before.size > 1048576)
     throw new Error("File changed or exceeds the read bound");
@@ -752,6 +781,7 @@ export async function inspectWorkspaceFile(request) {
     );
   const bytes = await readFile(node.path),
     after = await stat(node.path);
+  await checkScopeAliases(node);
   if (
     before.size !== after.size ||
     before.mtimeMs !== after.mtimeMs ||

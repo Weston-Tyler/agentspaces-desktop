@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, mkdirSync, symlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, mkdirSync, symlinkSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -10,7 +10,7 @@ import { Store } from "../app/store.mjs";
 
 const thread = "00000000-0000-4000-8000-000000000001", nativeSessionId = "00000000-0000-4000-8000-000000000002";
 function fixture(t, { known = true, resolveMetadata = async () => null } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "agentspaces-bindings-")); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const root = mkdtempSync(join(realpathSync(tmpdir()), "agentspaces-bindings-")); t.after(() => rmSync(root, { recursive: true, force: true }));
   const engine = new Engine(new Store(root), { diagnostics: () => ({ status: "disconnected" }) }, { nativeFactory: () => { throw new Error("No native/model call allowed"); } });
   engine.workspace.index = { schema: 1, fixture: false, profile: { id: "owned-scope", active: true, account: "owner-boundary", hosts: ["local", "remote"], providers: ["codex", "claude"], policy: "local-retrieval", indexFiles: true, roots: {}, exclusions: {} }, nodes: [{ id: "host:remote", kind: "host", host: "remote" }], edges: [], sessions: [] };
   const source = { id: "claude@remote:" + thread, nativeThreadId: thread, host: "remote", provider: "claude", cwd: "/home/owner/work", account: "owner-boundary", scopeId: "owned-scope", fixture: false, status: "current", title: "Native metadata", sourceVersion: "1" };

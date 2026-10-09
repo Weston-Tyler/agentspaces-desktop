@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
+  realpathSync,
   mkdirSync,
   readFileSync,
   writeFileSync,
@@ -18,7 +19,7 @@ import {
   installHostRouter,
 } from "../app/router-install.mjs";
 function setup() {
-  const home = mkdtempSync(join(tmpdir(), "as-router-")),
+  const home = mkdtempSync(join(realpathSync(tmpdir()), "as-router-")),
     codexHome = join(home, ".codex"),
     claudeHome = join(home, ".claude");
   mkdirSync(codexHome);

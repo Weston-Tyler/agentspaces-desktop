@@ -1,4 +1,5 @@
 import test from "node:test";
+import { realpathSync } from "node:fs";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -12,7 +13,7 @@ const UUID = "00000000-0000-4000-8000-000000000001", OTHER = "00000000-0000-4000
 const deviceToken = "a".repeat(64), scopedToken = "b".repeat(64);
 const processRecord = { pid: 4242, parentPid: 1, exe: "/native/claude", startedAt: "fixture-start-1" };
 async function setup(provider = "claude") {
-  const root = await mkdtemp(join(tmpdir(), "as-bootstrap-")), configPath = join(root, "device.json");
+  const root = await mkdtemp(join(realpathSync(tmpdir()), "as-bootstrap-")), configPath = join(root, "device.json");
   const device = { schemaVersion: 1, address: "http://127.0.0.1:45111", authority: "127.0.0.1:43127", token: deviceToken, host: "remote", provider };
   await writeFile(configPath, JSON.stringify(device), { mode: 0o600 });
   const participantConfig = { schema: 1, address: "http://127.0.0.1:43127", authority: "127.0.0.1:43127", token: scopedToken, nativeThreadId: UUID, sessionId: provider + "@remote:" + UUID, provider, host: "remote" };

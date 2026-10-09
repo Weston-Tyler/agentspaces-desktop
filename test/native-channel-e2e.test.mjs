@@ -72,6 +72,9 @@ for (const aliasProxy of [false, true]) test("Native channel stdio actor roundtr
   assert.deepEqual(await call("native/channel/status", { sessionId: claudeId }), { connected: true, nativeIdentityVerified: false, mode: "native-interactive-channel" });
   const tools = await client.listTools();
   assert(tools.tools.some((tool) => tool.name === "reply"));
+  const contextTool = tools.tools.find(tool => tool.name === "read_group_discussion");
+  assert.equal(contextTool.annotations.readOnlyHint, false, "First context access can admit an eligible participant, so it is not a read-only operation");
+  assert.match(contextTool.description, /join open rooms on first access/);
   const discovered = await client.callTool({ name: "discover_group_discussions", arguments: { query: "Synthetic channel" } });
   assert.equal(JSON.parse(discovered.content[0].text)[0].id, group.id);
   const message = { id: group.id, text: "Synthetic request: what retry decision should this group preserve?", targets: [claudeId], deliveryId: "fixture-channel-post-0001" };

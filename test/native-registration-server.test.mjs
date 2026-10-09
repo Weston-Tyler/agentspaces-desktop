@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -10,7 +10,7 @@ import { startServer } from "../app/server.mjs";
 import { createNativeBootstrap } from "../app/native-bootstrap-mcp.mjs";
 const THREAD = "00000000-0000-4000-8000-000000000001", UNKNOWN = "00000000-0000-4000-8000-000000000002";
 async function fixture(t, sourceMetadataResolver = async () => null, nativeThreadAdapterFactory) {
-  const root = mkdtempSync(join(tmpdir(), "as-registration-http-"));
+  const root = mkdtempSync(join(realpathSync(tmpdir()), "as-registration-http-"));
   const engine = new Engine(new Store(root), { diagnostics: () => ({ status: "synthetic-disconnected" }), close() {} }, { nativeFactory: () => { throw new Error("No native or model call permitted by registration fixture"); } });
   engine.workspace.index = { schema: 1, fixture: false, profile: { id: "synthetic-owned-scope", active: true, account: "synthetic-owner", hosts: ["local"], providers: ["claude", "codex"], policy: "local-retrieval", indexFiles: true, roots: {}, exclusions: {} }, nodes: [{ id: "host:local", kind: "host", host: "local" }], edges: [], sessions: [], coverage: [], errors: [] };
   const source = { id: "claude@local:" + THREAD, nativeThreadId: THREAD, host: "local", provider: "claude", cwd: join(root, "fictional-work"), account: "synthetic-owner", scopeId: "synthetic-owned-scope", fixture: false, status: "unknown", title: "Synthetic native source metadata", sourceVersion: "synthetic-v1", topics: ["synthetic"] };

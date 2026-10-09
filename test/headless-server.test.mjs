@@ -148,3 +148,22 @@ test("native policy refusal stays visible in the HTTP group without a manufactur
   assert.equal(counts.bind, 1); assert.equal(counts.answer, 0);
   assert.equal(engine.store.data.codexDiscussionDeliveries[id].retryAllowed, false);
 });
+
+test('HTTP recent history preserves uncertain native receipts when errors omit an outcome flag', async t => {
+  const { engine, post } = await setup(t);
+  const deliveryId = 'http-uncertain-history-0001';
+  engine.ask.answer = async () => {
+    engine.store.data.askReceipts ??= {};
+    engine.store.data.askReceipts[deliveryId] = { state: 'uncertain', dispatchCounted: true };
+    engine.store.save();
+    throw new Error('Synthetic invalid bounded answer response');
+  };
+  const failed = await post('/api/ask/answer', { deliveryId, question: 'Synthetic question' });
+  assert.equal(failed.status, 400);
+  const history = await (await post('/api/ask/history', {})).json();
+  assert.equal(history.entries[0].status, 'uncertain');
+  const attempt = await post('/api/ask/history', { record: { deliveryId, question: 'Synthetic question', status: 'failed' } });
+  assert.equal(attempt.status, 200);
+  assert.equal((await attempt.json()).entries[0].status, 'uncertain');
+  assert.equal(engine.store.data.askReceipts[deliveryId].state, 'uncertain');
+});

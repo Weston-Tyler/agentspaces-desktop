@@ -369,7 +369,9 @@ export async function startServer({
           if (data.clear === true) result = recentHistory.clear();
           else if (data.record) {
             if (Object.keys(data.record).some(k => !['deliveryId','question','status'].includes(k)) || data.record.status !== 'failed') throw new Error('Bounded pre-dispatch history record required');
-            recentHistory.record(data.record); result = recentHistory.list();
+            const receipt = store.data.askReceipts?.[data.record.deliveryId];
+            if (receipt?.state === 'completed') throw new Error('Completed native answer already has its history record');
+            recentHistory.record({ ...data.record, status: receipt?.state === 'uncertain' ? 'uncertain' : 'failed' }); result = recentHistory.list();
           } else result = recentHistory.list();
           break;
         case "/api/ask/answer": {
@@ -397,7 +399,8 @@ export async function startServer({
             catch { result.historyWarning = 'Recent history could not be saved; this answer completed.'; }
           } catch (error) {
             if (typeof data.deliveryId === 'string' && typeof data.question === 'string') {
-              try { recentHistory.record({ deliveryId: data.deliveryId, question: data.question, status: error.uncertainOutcome ? 'uncertain' : 'failed' }); } catch {}
+              const receipt = store.data.askReceipts?.[data.deliveryId];
+              try { recentHistory.record({ deliveryId: data.deliveryId, question: data.question, status: receipt?.state === 'uncertain' || error.uncertainOutcome === true ? 'uncertain' : 'failed' }); } catch {}
             }
             throw error;
           } finally {

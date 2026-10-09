@@ -1,4 +1,5 @@
 import test from "node:test";
+import { realpathSync } from "node:fs";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { mkdtemp, writeFile, chmod, symlink, copyFile } from "node:fs/promises";
@@ -18,7 +19,7 @@ async function setup(t, handler) {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const root = await mkdtemp(join(tmpdir(), "as-participant-cli-")), path = join(root, "participant.json"), address = "http://127.0.0.1:" + server.address().port;
+  const root = await mkdtemp(join(realpathSync(tmpdir()), "as-participant-cli-")), path = join(root, "participant.json"), address = "http://127.0.0.1:" + server.address().port;
   const config = { schema: 1, address, authority: "127.0.0.1:43127", token: TOKEN, sessionId: "claude@remote:" + SOURCE, nativeThreadId: SOURCE, host: "remote", provider: "claude" };
   await writeFile(path, JSON.stringify(config), { mode: 0o600 });
   return { requests, path, root, config, args: (...args) => ["--config", path, "--source", SOURCE, ...args] };

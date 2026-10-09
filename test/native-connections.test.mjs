@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { NativeConnections, installChannelAssets } from "../app/native-connections.mjs";
 
 function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), "agentspaces-native-")); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const root = mkdtempSync(join(realpathSync(tmpdir()), "agentspaces-native-")); t.after(() => rmSync(root, { recursive: true, force: true }));
   const source = { id: "native-reference", nativeThreadId: "00000000-0000-4000-8000-000000000001", provider: "claude", host: "local", cwd: root, status: "dormant", fixture: false, account: "own-account", project: "own-project" };
   const grant = { enrolled: true, content: true, share: true, retrieve: true }, store = { data: { connectors: {} }, save() {} };
   let issued = 0;

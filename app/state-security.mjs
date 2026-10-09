@@ -15,21 +15,28 @@ export function protectStateDirectory(directory) {
       "State directory contains unrelated files; choose an application-owned directory",
     );
   if (process.platform === "win32") {
-    const sid = execFileSync(
+    // Replace the DACL atomically: removing inheritance alone retains explicit
+    // grants to unrelated accounts. Canonical privileged OS identities remain;
+    // localized group names never determine who may read application state.
+    const script = [
+      "$ErrorActionPreference='Stop'",
+      "$root='" + root.replaceAll("'", "''") + "'",
+      "$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+      "if($sid -notmatch '^S-\\d+(?:-\\d+)+$'){throw 'Cannot resolve state owner'}",
+      "$acl=New-Object System.Security.AccessControl.DirectorySecurity",
+      "$acl.SetAccessRuleProtection($true,$false)",
+      "$acl.SetOwner([System.Security.Principal.SecurityIdentifier]::new($sid))",
+      "foreach($value in @($sid,'S-1-5-18','S-1-5-32-544')){$principal=[System.Security.Principal.SecurityIdentifier]::new($value);$rule=[System.Security.AccessControl.FileSystemAccessRule]::new($principal,'FullControl','ContainerInherit,ObjectInherit','None','Allow');$acl.AddAccessRule($rule)}",
+      "[System.IO.Directory]::SetAccessControl($root,$acl)",
+    ].join(";");
+    execFileSync(
       "powershell.exe",
       [
         "-NoProfile",
-        "-Command",
-        "[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
       ],
-      { encoding: "utf8", windowsHide: true },
-    ).trim();
-    if (!/^S-\d+(?:-\d+)+$/.test(sid))
-      throw new Error("Cannot resolve state owner");
-    execFileSync(
-      "icacls.exe",
-      [root, "/inheritance:r", "/grant:r", "*" + sid + ":(OI)(CI)F"],
-      { windowsHide: true, stdio: "pipe" },
+      { windowsHide: true, stdio: "pipe", timeout: 15000 },
     );
   } else chmodSync(root, 0o700);
   protectedRoots.add(root);

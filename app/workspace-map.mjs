@@ -29,6 +29,18 @@ export function scopePathExcluded(path, host, exclusions = []) {
     (p) => actual === norm(p) || actual.startsWith(norm(p) + sep),
   );
 }
+function nodeExclusions(node, exclusions = []) {
+  const paths = hostPaths(node.host), result = [...exclusions];
+  const inside = (path, root) => {
+    const actual = normalizeHostPath(path, node.host), base = normalizeHostPath(root, node.host);
+    return actual === base || actual.startsWith(base + paths.sep);
+  };
+  for (const exclusion of exclusions) for (const alias of node.scopeAliases ?? []) {
+    if (inside(exclusion, alias.requestedPath)) result.push(paths.join(alias.canonicalPath, paths.relative(alias.requestedPath, exclusion)));
+    else if (inside(alias.requestedPath, exclusion)) result.push(alias.canonicalPath);
+  }
+  return result;
+}
 export function mapSessions(graph, sessions) {
   const nodes = [...graph.nodes],
     edges = [...graph.edges],
@@ -86,10 +98,7 @@ export function mapSessions(graph, sessions) {
       ? trees.find(
           (w) =>
             w.host === s.host &&
-            (path === norm(w.path) ||
-              path.startsWith(
-                norm(w.path) + hostPaths(s.host).sep,
-              )),
+            [w.path, ...(w.pathAliases ?? [])].some(candidate => path === norm(candidate) || path.startsWith(norm(candidate) + hostPaths(s.host).sep)),
         )
       : null;
     edges.push({
@@ -631,6 +640,10 @@ export class WorkspaceMap {
         (n) => n.id === rightId && n.kind === "worktree",
       );
     if (!left || !right) throw new Error("Select two indexed worktrees");
+    for (const node of [left, right]) {
+      const exclusions = nodeExclusions(node, this.index.profile.exclusions[node.host] ?? []), paths = hostPaths(node.host);
+      if (scopePathExcluded(node.path, node.host, exclusions) || exclusions.some(exclusion => normalizeHostPath(exclusion, node.host).startsWith(normalizeHostPath(node.path, node.host) + paths.sep))) throw new Error("Comparison cannot honor excluded worktree paths");
+    }
     if (left.host !== right.host)
       throw new Error(
         "Cross-host ancestry is not qualified; use file-hash relationships",
@@ -651,7 +664,7 @@ export class WorkspaceMap {
     );
     if (
       !node ||
-      scopePathExcluded(node.path, node.host, p.exclusions[node.host] ?? [])
+      scopePathExcluded(node.path, node.host, nodeExclusions(node, p.exclusions[node.host] ?? []))
     )
       throw new Error("File outside workspace scope");
     const adapter = this.adapterFactory(node.host);

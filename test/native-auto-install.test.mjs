@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { installOnCurrentHost } from "../app/native-auto-install.mjs";
 import { dependencyVersions } from "../app/dependency-versions.mjs";
 const TOKEN = "a".repeat(64);
 function fixture(provider = "claude") {
-  const home = mkdtempSync(join(tmpdir(), "as-auto-install-")), nativePath = join(home, provider === "claude" ? ".claude.json" : ".codex/config.toml"), calls = [];
+  const home = mkdtempSync(join(realpathSync(tmpdir()), "as-auto-install-")), nativePath = join(home, provider === "claude" ? ".claude.json" : ".codex/config.toml"), calls = [];
   const binary = join(home, "native", provider === "claude" ? "versions/2.1.283" : "codex.exe");
   mkdirSync(join(home, ".claude"), { recursive: true }); mkdirSync(join(home, ".codex"), { recursive: true });
   writeFileSync(nativePath, provider === "claude" ? JSON.stringify({ theme: "dark", mcpServers: { another: { command: "other-native-tool" } } }) : "model = \"fixture-model\"\n");
