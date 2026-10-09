@@ -83,3 +83,16 @@ These defaults ship in the installed router so a new supported native setup can 
 - **Keep provenance and setup status explicit.** Retain source/host/version/hash and unknown coverage. Run registration/discovery/join/read/capability checks without inference on new setups, and report source denial, native tool reload and missing inbound transport separately.
 
 Shared work-board views, a fair cross-machine resource broker, a phone decision inbox, full cloud reach and complete interrupted-lane recovery remain outstanding. Local Ask history retains up to 100 entries for 30 days; discussions and delivery receipts persist separately. See [installation](installer.md) and [retained state](headless.md#retained-state-and-owner-access) for reopening and retention behavior.
+
+
+### Room storage and exchange limits
+
+Rooms retain up to 10,000 messages in this alpha; existing history is preserved.
+The former 100-message storage cap blocked long-running coordination rooms. The
+storage capacity is separate from the 32-target allocation budget for one agent-
+initiated exchange (16 for legacy human-root rooms). Exhausting a wake budget
+pauses forwarding, not posting; a new opening message with no `replyTo` starts a
+new exchange. Do not reset old delivery receipts or automatically replay messages.
+The API reports `storage.messageCount` and `storage.messageLimit`. At the storage
+limit, preserve/export the record and explicitly start a continuation room.
+Automatic archival and paginated conversation storage remain future work.

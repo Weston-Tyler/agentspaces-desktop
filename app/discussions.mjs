@@ -7,6 +7,8 @@ import { parseAgentSelectors } from "./agent-selection.mjs";
 export const SNAPSHOT_TYPE =
   "ai.badmonkey.agentspaces.springai.model.wire.ConversationSnapshot";
 export const MAX_DISCUSSION_MEMBERS = 200;
+// Storage capacity is independent of the per-exchange wake budget.
+export const MAX_DISCUSSION_MESSAGES = 10000;
 const fingerprint = (value) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export class Discussions {
@@ -100,6 +102,7 @@ export class Discussions {
       messages: available ? g.messages : [],
       available,
       fixture: members.every((m) => m.fixture),
+      storage: { messageCount: g.messages.length, messageLimit: MAX_DISCUSSION_MESSAGES },
       policy: this.policy(g),
       agentInitiation: this.policy(g).agentInitiation,
       automaticNativeWake: {
@@ -297,6 +300,7 @@ export class Discussions {
       synthetic = false,
     },
   ) {
+    if (g.messages.length >= MAX_DISCUSSION_MESSAGES) throw new Error("Discussion storage capacity reached (10000 messages); history retained. This is not the per-exchange wake limit.");
     const m = {
       id: randomUUID(),
       at: new Date(this.engine.clock()).toISOString(),
@@ -400,8 +404,8 @@ export class Discussions {
         throw new Error("Delivery identifier reused for different content");
       return this.view(g);
     }
-    if (g.messages.length + 1 + selected.filter(member => member.fixture).length + fixtureDialogueTurns > 100)
-      throw new Error("Discussion limit reached; start another discussion");
+    if (g.messages.length + 1 + selected.filter(member => member.fixture).length + fixtureDialogueTurns > MAX_DISCUSSION_MESSAGES)
+      throw new Error("Discussion storage capacity reached (10000 messages); preserve/export history before starting a continuation room. This is not the per-exchange wake limit.");
     const targetStates = selected.map((m) => ({
       sessionId: m.sessionId,
       alias: m.alias,
@@ -483,7 +487,7 @@ export class Discussions {
         );
       return this.view(g);
     }
-    if (g.messages.length >= 100) throw new Error("Discussion limit reached");
+    if (g.messages.length >= MAX_DISCUSSION_MESSAGES) throw new Error("Discussion storage capacity reached (10000 messages); preserve/export history before starting a continuation room. This is not the per-exchange wake limit.");
     const m = this.append(g, {
       text,
       member,

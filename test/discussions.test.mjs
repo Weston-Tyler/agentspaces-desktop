@@ -227,3 +227,28 @@ test("owner room policy is explicit, bounded, persisted and cannot be changed by
   const created = engine.discussions.create({ title: "Explicit shared room", sessionIds: ["sample-codex-old"], agentInitiation: true });
   assert.equal(created.policy.maxForwardHops, 8); assert.equal(created.policy.maxDeliveries, 32);
 });
+
+
+test("long-running rooms preserve history and accept both owner and participant posts after 100 messages", () => {
+  const { engine, id, ids } = setup();
+  for (const source of ids) engine.grant(source, { enrolled: true, content: true, share: true, retrieve: true });
+  const group = engine.discussions.group(id);
+  for (let i = 0; i < 100; i++) engine.discussions.append(group, { text: "Synthetic historical message " + i, deliveryId: "historical-" + i });
+  const first = group.messages[0].id;
+  engine.discussions.contribute({ id, text: "Coordinator update", nativeTurnId: "fixture-turn", deliveryId: "after-one-hundred-0001" }, { sessionId: ids[0] });
+  engine.discussions.post({ id, text: "Owner update", targets: [], deliveryId: "owner-after-hundred-0001" });
+  assert.equal(group.messages[0].id, first);
+  assert.equal(group.messages.length, 102);
+  const restored = new Engine(new Store(engine.store.root), engine.fabric); restored.loadSample();
+  assert.equal(restored.discussions.group(id).messages.length, 102);
+  assert.equal(engine.discussions.view(group).storage.messageLimit, 10000);
+  assert.equal(engine.discussions.policy(group).maxDeliveries, 16);
+});
+
+
+test("storage capacity also bounds native append and reports the distinct storage cause", () => {
+  const { engine, id } = setup(), group = engine.discussions.group(id);
+  group.messages = Array(10000).fill({ text: "Synthetic capacity placeholder" });
+  assert.throws(() => engine.discussions.append(group, { text: "one more", deliveryId: "full-room-message" }), /storage capacity.*not the per-exchange wake limit/);
+  assert.equal(group.messages.length, 10000);
+});
