@@ -4,8 +4,15 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 10
+      day: monday
+      time: "09:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 4
+    # Group routine updates; major upgrades remain separate for review.
     groups:
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
       provider-sdks:
         patterns:
           - "@anthropic-ai/claude-agent-sdk"
@@ -23,8 +30,21 @@ updates:
           - "@types/*"
           - typescript
         update-types: [minor, patch]
+      other-npm-updates:
+        patterns: ["*"]
+        update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+      day: monday
+      time: "09:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    groups:
+      actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
+      actions-routine:
+        patterns: ["*"]
+        update-types: [minor, patch]
