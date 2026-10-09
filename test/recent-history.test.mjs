@@ -169,3 +169,16 @@ test("late history hydration preserves a new submission, its answer and a later 
   assert.match(d.allText(), /What did we decide/); assert(!d.allText().includes("Uncertain ·"));
   assert.equal(calls.filter(call => call.path === "ask/answer").length, 1);
 });
+
+test("first-run local connection preserves the draft and grants no native execution policy", async t => {
+  const d = dom(t), calls = [];
+  const dispose = mountHomeChat(d.root, { notice() {}, api: async (path, body) => {
+    calls.push({ path, body }); return path === "ask/history" ? { entries: [] } : { status: "connecting" };
+  } });
+  t.after(dispose); await flush();
+  d.find("textarea").value = "Keep this draft";
+  await d.find("button").onclick();
+  assert.deepEqual(calls.find(call => call.path === "desktop/connect-all").body, { hosts: ["local"] });
+  assert.equal(d.find("textarea").value, "Keep this draft");
+  assert.equal(calls.filter(call => call.path.startsWith("ask/") && call.path !== "ask/history").length, 0);
+});

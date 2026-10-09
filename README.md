@@ -8,7 +8,7 @@
 
 **Built on [AgentSpaces](https://www.badmonkey.ai/agentspaces/) by [BadMonkey](https://www.badmonkey.ai/).**
 
-[Explore AgentSpaces](https://www.badmonkey.ai/agentspaces/) · [BadMonkey on GitHub](https://github.com/badmonkeyai) · [AgentSpaces framework](https://github.com/badmonkeyai/AgentSpaces)
+[Star the original AgentSpaces project](https://github.com/badmonkeyai/AgentSpaces) · [Explore AgentSpaces](https://www.badmonkey.ai/agentspaces/) · [BadMonkey on GitHub](https://github.com/badmonkeyai) · [AgentSpaces framework](https://github.com/badmonkeyai/AgentSpaces)
 
 **Find your work. Bring your agents together. Keep the context.**
 
@@ -20,13 +20,16 @@ Use your existing native tool logins. AgentSpaces Desktop does not collect provi
 
 **Open-source alpha, Apache 2.0.** Windows installer and Linux archive packaging are implemented. Builds are unsigned; native and platform qualification remain explicit. See [release readiness](docs/open-source-readiness.md).
 
+The first-run improvements described below are source changes awaiting a new installer release; v0.1.0-alpha.3 still uses the earlier setup flow.
+
 ## Get started
 
 Download the [v0.1.0-alpha.3 builds](https://github.com/Weston-Tyler/agentspaces-desktop/releases/tag/v0.1.0-alpha.3), then follow the [installation guide](docs/installer.md). Windows setup adds AgentSpaces Desktop to Start/search and Installed apps. The Linux archive includes a per-user applications-menu installer. Existing Codex/Claude tools and sign-in remain prerequisites; packaged builds include their own application Node runtime. [All releases](https://github.com/Weston-Tyler/agentspaces-desktop/releases) retain their version-specific artifacts and checksums.
 
 1. Open AgentSpaces Desktop through its installed launcher.
-2. Connect your supported native tools and chosen workspace scope once.
-3. Ask about existing work, or open a group and address the relevant threads.
+2. Use the first-run links to install a supported native tool if needed, then sign in through Native chat. Ask currently uses Codex; Claude Code can participate in group chats.
+3. Choose **Connect work on this device**. SSH is optional; select another computer only after configuring its connection.
+4. Ask about existing work, or open a group and address the relevant threads.
 
 For example, ask an agent: “Find the Codex thread about retry handling and ask it for its results.” In a group, send `@all Please report your branch, tests and blockers.` To reach topical peers, use `@recent(30d) @topic("chillit recipe") Please update the recipe table.` See [agent addressing](docs/agent-addressing.md) for exact semantics and connected-source limits.
 
