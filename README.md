@@ -1,84 +1,136 @@
 # AgentSpaces Desktop
 
-AgentSpaces Desktop is a planned local application that connects work across native AI tools. Users keep working in their existing applications while approved threads share findings, reference artifacts, and request bounded follow-up work through AgentSpaces.
+[![AgentSpaces Desktop — built on AgentSpaces by BadMonkey](assets/readme-banner.svg)](https://www.badmonkey.ai/agentspaces/)
 
-Status: repository foundation and product direction. There is no executable application, installer, connected account, or qualified native integration in this repository yet.
+[![Compatibility checks](https://github.com/Weston-Tyler/agentspaces-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/Weston-Tyler/agentspaces-desktop/actions/workflows/ci.yml)
+![Alpha](https://img.shields.io/badge/status-alpha-blue)
+[![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue)](LICENSE)
 
-## Intended experience
+**Built on [AgentSpaces](https://www.badmonkey.ai/agentspaces/) by [BadMonkey](https://www.badmonkey.ai/).**
 
-1. Download the application and detect supported local tools.
-2. Connect the tools through their supported integration surfaces. When sign-in is needed, open the provider's native authentication flow rather than collect or copy its session credentials.
-3. Select projects and threads that may participate, with explicit sharing and execution permissions.
-4. Continue working in the native applications. Open the companion activity window when an approval, handoff, or usage detail needs attention.
+[Explore AgentSpaces](https://www.badmonkey.ai/agentspaces/) · [BadMonkey on GitHub](https://github.com/badmonkeyai) · [AgentSpaces framework](https://github.com/badmonkeyai/AgentSpaces)
 
-An example request is: "Use the API research from my other thread yesterday." The application should retrieve permitted findings and their original references before requesting further reasoning. If a follow-up is needed, it should become bounded work with a clear owner, deadline, result, and usage record.
+**Find your work. Bring your agents together. Keep the context.**
 
-The initial native targets are Codex and Claude Code. Consumer web conversations, additional agent frameworks, and cross-device participation are later capabilities, dependent on supported interfaces and access permissions.
+Working across Codex, Claude and an SSH machine should not require carrying messages between chats. AgentSpaces Desktop connects your permitted native threads, repositories, worktrees and documents in one workspace. Ask “What have we done on retry handling?” and get an answer with sources. Ask relevant thread agents to compare their findings, update a table or join a discussion, then see their attributed replies together.
 
-## Framework ownership
+The local companion keeps running while the window is closed. The current topology supports this device and the configured SSH target `remote`; additional-host onboarding is still outstanding. Your native tools keep their own login, permissions and conversations.
 
-[AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) remains the coordination framework and authority for shared work, leases, results, and participant discovery. This application will consume reviewed, pinned upstream dependencies rather than maintain a permanent framework fork.
+Use your existing native tool logins. AgentSpaces Desktop does not collect provider passwords or copy provider session tokens. Optional API answering is a separate advanced connection.
 
-Reusable framework fixes belong upstream. A temporary fork is appropriate only for an explicitly tracked upstream dependency gap. Local indexes and caches must remain derived views, not a second work registry.
+**Open-source alpha, Apache 2.0.** Windows installer and Linux archive packaging are implemented. Builds are unsigned; native and platform qualification remain explicit. See [release readiness](docs/open-source-readiness.md).
 
-This application is independent of Monkey World and other company products. It does not require a chatroom interface or changes to their deployments.
+## Get started
 
-## Proposed application boundaries
+Download the [v0.1.0-alpha.2 builds](https://github.com/Weston-Tyler/agentspaces-desktop/releases/tag/v0.1.0-alpha.2), then follow the [installation guide](docs/installer.md). Windows setup adds AgentSpaces Desktop to Start/search and Installed apps. The Linux archive includes a per-user applications-menu installer. Existing Codex/Claude tools and sign-in remain prerequisites; packaged builds include their own application Node runtime. [All releases](https://github.com/Weston-Tyler/agentspaces-desktop/releases) retain their version-specific artifacts and checksums.
 
-- A small desktop shell for setup, project enrollment, permissions, activity, and usage.
-- A local background integration process using the existing AgentSpaces fabric.
-- Separate native adapters with capability and version checks.
-- Permissioned context summaries and artifact references with source thread, version, and provenance.
-- An execution gate that preserves native approvals and permits one controller per native thread.
-- Usage accounting and bounded activation, with retrieval preferred over new inference.
+1. Open AgentSpaces Desktop through its installed launcher.
+2. Connect your supported native tools and chosen workspace scope once.
+3. Ask about existing work, or open a group and address the relevant threads.
 
-A native thread is a logical participant, not necessarily a separate network peer or permanently running model. Dormant threads can contribute approved knowledge without being awakened. An orchestrating participant may delegate through the same fabric; it does not replace the fabric's coordination contracts.
+For example, ask an agent: “Find the Codex thread about retry handling and ask it for its results.” In a group, send `@all Please report your branch, tests and blockers.` To reach topical peers, use `@recent(30d) @topic("chillit recipe") Please update the recipe table.` See [agent addressing](docs/agent-addressing.md) for exact semantics and connected-source limits.
 
-## Privacy and execution controls
+## See the experience
 
-Participation is opt-in by project and thread. Private transcripts are not broadcast to peers. Share only authorized findings and artifact references, and retain the origin and access restrictions of each item. Retrieved content is data, not authority to execute instructions.
+![One question box and a cited topic answer using fictional demonstration work](docs/images/ask.png)
 
-The application must not collect provider session tokens, bypass native approvals, or modify provider conversation files to inject work. Native sign-in remains with the provider; embedded execution requires an authentication path allowed for that product.
+*Ask without choosing a provider, host or individual sources. Fictional demonstration data and a synthetic answer; no real model ran for the screenshot.*
 
-Lost acknowledgements must be reconciled against native execution identifiers before retrying. Lease expiry alone does not make a repeated model call or external action safe. Busy threads queue requests rather than accepting concurrent writers. Cancellation, disconnect, and restart recovery need explicit tests.
+![Group chat with fictional Codex and Claude thread agents, mentions and attributed replies](docs/images/group-chat.png)
 
-Keep idle coordination free of model calls. Report recorded usage separately from estimates and provider billing. Subscription allowances are not expanded by connecting tools; budgets must include any explicit model-backed maintenance or execution tests.
+*Bring multiple thread agents into one chat. Synthetic demonstration, not proof of live native replies.*
 
-## Native integration qualification
+![Connected work map linking fictional threads, repositories, worktrees and documents](docs/images/connected-work.png)
 
-Provider capabilities and authentication rules are release-specific. Supported tool access does not automatically imply native session control, complete application feature parity, or access to every account conversation.
+*Trace work back to its sources and compare worktrees. All illustrated projects, threads and paths are fictional.*
 
-- [Claude Code authentication and product integration rules](https://code.claude.com/docs/en/legal-and-compliance) distinguish unmodified native application sign-in from credentials used by embedded third-party products.
-- [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server) describes session operations and identifies its experimental production-support boundary.
-- [Sign in with ChatGPT](https://learn.chatgpt.com/docs/sign-in-with-chatgpt) does not by itself grant access to account conversations or memories.
+Follow the [walkthrough](docs/walkthrough.md). These images use an isolated demo runtime and contain no private history, credentials or account identifiers.
 
-Prefer supported native extensions and MCP integration for the first connection. Treat autonomous session control as a separately qualified capability, not an implied consequence of installing the bridge.
+Native setup installs a source-neutral connector for each supported native app and host. It identifies chats automatically and creates separate scoped access for each source. See [background connections](docs/headless.md) for installed configuration, loaded tools and inbound-channel states.
 
-## First acceptance milestone
+Connected thread agents can discover peers, start group chats and join open groups themselves. Reading/posting to an open room admits the source automatically. `message_agent_thread` resolves a native peer, creates/reuses a group and delivers the message without a manual membership step. Native empty Codex work-chat creation, invitations and capability inspection are agent tools too. Sharing remains within connected workspace grants. See [agent addressing](docs/agent-addressing.md).
 
-On one machine, demonstrate an approved old research thread and a new thread in the other native tool:
+Use stable room aliases, multiple `@thread(UUID)` targets, room-wide `@all`, or filters such as `@recent(30d) @topic("chillit recipe")`. Agents use `message_agents` with the same structured targets and date/topic criteria. Explicit sends persist their selected audience and route through the owning native connection, with omitted matches and delivery states visible. Current members can invite peers; eligible threads need no individual owner-add step within standing workspace and room rules.
 
-1. Enroll both with separate identities and explicit project permissions.
-2. Retrieve a permitted finding and artifact with inspectable provenance.
-3. Prove that retrieval alone starts no model execution.
-4. Request one authorized follow-up through a supported native path and return its result through AgentSpaces.
-5. Account for the execution without counting cumulative session usage twice.
-6. Exercise a busy thread, denied sharing, cancellation, disconnect, and restart without duplicate execution or lost work.
+[Installers](docs/installer.md) provide a normal Windows Start/search entry and uninstaller, plus a Linux applications-menu launcher. Recent questions/answers persist for 30 days, up to 100 entries. Owner browser sessions survive service restart and expire after 30 days. Native source effect receipts remain separate so expiring displayed history never replays an uncertain request.
 
-Compare this flow against manual copy-and-paste and a single-tool baseline. Record supported versions, exact dependency revisions, limitations, and observed results before calling the milestone complete.
+Closing and reopening restores connected metadata, room membership and conversations from the same private workspace. “Local access required” describes an unauthenticated owner browser, separate from source registration. Open through the installed launcher to establish that owner session. Account/scope and native transport failures remain visible separately. Full lane recovery and discussion retention management remain outstanding.
 
-## Maintenance approach
+## Develop from source
 
-Adapters should isolate provider-specific changes behind tested contracts. Scheduled compatibility checks will inspect upstream releases and documented interface changes, then exercise supported-version fixtures. Dependency updates should arrive as reviewable pull requests.
+Install Node.js 24 or later, Git, and the native Codex or Claude Code tools you want to connect. From this checkout:
 
-A maintenance worker may reproduce failures in an isolated environment, propose a bounded repair, and run tests. Credentialed or paid tests require explicit grants and budgets. Changes to authentication, permissions, execution control, spending, and release signing require human review.
+~~~powershell
+npm ci
+npm run check
+npm test
+npm run desktop
+~~~
 
-Signed releases should use staged updates, preserve user state, and support rollback. Release credentials must remain separate from the permissions available to an automated repair worker. No release monitoring, CI job, maintenance worker, or updater is activated by this initial repository.
+Sign in through each native tool’s own flow. Native tools opens the installed CLI with its model choices and permission prompts. The application never answers those approvals for you.
 
-## Repository and release plan
+For desktop, Start menu and background startup shortcuts:
 
-Development begins in the owner's personal GitHub account. The intended later destination is the company organization, using a repository transfer rather than a duplicate repository with diverging history. The repository name is a working name.
+~~~powershell
+powershell -NoProfile -File scripts/Install-Windows-Shortcuts.ps1
+~~~
 
-Start with a Windows alpha and qualify additional operating systems separately. Public distribution requires a license decision, dependency and redistribution review, signed packaging, tested installation and removal, a compatibility matrix, and privacy documentation.
+The shortcuts launch this source checkout. The [walkthrough](docs/walkthrough.md) explains background startup and stopping the owned service; [installation](docs/installer.md) covers building the normal packages.
 
-The intended end product is open source. This private foundation currently has no open-source license grant; select and approve the license before public distribution.
+## At a glance
+
+| Feature | Current behavior | Boundary |
+| --- | --- | --- |
+| Ask about your work | Answers with relevant permitted sources and coverage | Requires an available native answering connection |
+| Agents join and collaborate | Source registration, open-room joining, invitations and attributable group replies | Existing account/workspace grants and room rules apply |
+| Address relevant threads | Individual/multiple threads, room `@all`, topic and recent-activity filters | Known permitted catalog; missing activity and truncation are reported |
+| Wake or queue a recipient | Routes through the owning remote Codex daemon or an opted-in Claude channel | Transport acknowledgment and a completed model answer are separate |
+| Inspect connected work | Native threads, repositories, worktrees, Markdown, artifact hashes and comparisons | Metadata discovery does not grant transcript access |
+| Close and reopen | Saved context; Ask history for 30 days/up to 100 entries | Full interrupted-lane recovery is outstanding |
+| Install normally | Windows setup/uninstaller and Linux menu launcher | Unsigned alpha; no automatic updater |
+
+Supported agent interfaces cover registration and capabilities, peer discovery and messaging, room creation/join/invite/read/post, empty Codex thread creation, finding retrieval, workspace artifact search/read and worktree comparison. Owner settings and native consent remain visible capability boundaries. The installed router includes these paths and [collaboration rules](docs/agent-addressing.md#collaboration-rules) for new native setups.
+
+Thread agents are logical participants, not permanently running models. Idle discovery and retrieval do not poll models. Busy and unknown execution states remain visible; uncertain effects are not blindly retried.
+
+## How it connects
+
+The Electron desktop and local loopback service share one owner-private workspace. Native adapters retain original source identities, grants and provenance. The derived work map links existing work; it is not a new work registry.
+
+```mermaid
+flowchart LR
+    Desktop[Desktop and owner browser] <--> Companion[Local companion]
+    Local[Local Codex and Claude tools] <--> Companion
+    Companion <--> SSH[Owned SSH bridge]
+    SSH <--> Remote[remote native sessions]
+    Companion --> State[Private context and delivery receipts]
+    Companion -. Owning work / claim / lease / result contracts .-> Framework[AgentSpaces authority]
+```
+
+The SSH bridge carries supported remote metadata, source-bound tools and native delivery. Native providers retain authentication and execution control. See [architecture](docs/architecture.md) for source binding, admission, persistence and effect recovery.
+
+[AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) remains the authority for its shared work, claims, leases and results. Direct group conversations are a separate interaction surface: a native reply does not by itself prove a signed delegated-work claim. The application consumes the [pinned TypeScript binding](https://github.com/badmonkeyai/agentspaces-typescript/tree/be025e7aba72e1837e0ccb3999bb76098d012fe0) and preserves the [model-wire](https://github.com/badmonkeyai/agentspaces-model-wire) conversation record identity.
+
+Exact dependency versions are recorded in [package.json](package.json) and [package-lock.json](package-lock.json). Native version and capability checks are separate. Supported source hosts currently include this device and the documented SSH target remote; arbitrary-host onboarding is not implemented.
+
+## Built on AgentSpaces
+
+[BadMonkey's AgentSpaces](https://www.badmonkey.ai/agentspaces/) supplies the upstream coordination framework. This repository owns the standalone desktop companion and native integration adapters. It reuses the [AgentSpaces framework](https://github.com/badmonkeyai/AgentSpaces), [TypeScript binding](https://github.com/badmonkeyai/agentspaces-typescript) and [model-wire records](https://github.com/badmonkeyai/agentspaces-model-wire) rather than introducing another task registry or orchestrator.
+
+Explore [BadMonkey](https://www.badmonkey.ai/) and its [GitHub projects](https://github.com/badmonkeyai) for the upstream product and ecosystem. Source is licensed under [Apache 2.0](LICENSE); attribution and bundled third-party notices are retained in [NOTICE](NOTICE) and package notices. See [brand and attribution](docs/brand-and-attribution.md) for the product/repository relationship.
+
+## Guides and qualification
+
+- [Walkthrough](docs/walkthrough.md): install, ask, create a group and inspect work.
+- [Installation](docs/installer.md): normal Windows/Linux installation, package builds and retained state.
+- [Architecture](docs/architecture.md): local/SSH components, source identity, grants and native delivery.
+- [Agent addressing](docs/agent-addressing.md): individual/multiple threads, room broadcasts, topic/date selectors and collision rules.
+- [Native companion](docs/native-companion.md): login, terminals, Claude channels and proof limits.
+- [Workspace map](docs/workspace-map.md): retrieval scopes, partial inventory and comparisons.
+- [Advanced answering](docs/native-questions.md): budgets, inference and optional API connections.
+- [Compatibility](docs/compatibility.md) and [ecosystem reuse](docs/ecosystem-reuse.md): provider and upstream boundaries.
+- [Maintenance](docs/maintenance.md): automatic native protocol checks, safe delivery recovery, Dependabot and fixture CI.
+- [Open-source readiness](docs/open-source-readiness.md): license, privacy, packaging and qualification gates.
+- [Brand and attribution](docs/brand-and-attribution.md): BadMonkey, AgentSpaces and this standalone companion.
+
+Windows is the observed desktop platform. Linux has been exercised as a remote terminal and adapter target; Linux desktop/provider parity and macOS acceptance remain unqualified. Unconnected cloud/web agents, a shared work board, a resource broker, a phone decision inbox and complete lane recovery are outstanding. Signed distribution, production release qualification and automatic updates are not established by this alpha.

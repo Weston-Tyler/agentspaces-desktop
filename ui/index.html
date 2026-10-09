@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AgentSpaces Desktop</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/vendor/xterm.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="/"
+        ><span class="mark"><i></i><i></i><i></i></span
+        ><span>AgentSpaces<small>DESKTOP</small></span></a
+      >
+      <div class="workspace-label">YOUR WORKSPACE</div>
+      <nav aria-label="Primary">
+  <button data-page="home"><span class="navicon">?</span>Ask</button>
+  <button data-page="discussions"><span class="navicon">#</span>Group chats</button>
+  <button data-page="discover"><span class="navicon">⌕</span>Your threads</button>
+  <button data-page="workspace"><span class="navicon">↔</span>Connected work</button>
+  <details class="nav-more"><summary>More</summary>
+    <button data-page="native">Native tools</button>
+    <button data-page="advanced">Advanced answering</button>
+    <button data-page="activity">Activity</button>
+    <button data-page="permissions">Permissions</button>
+    <button data-page="usage">Usage</button>
+    <button data-page="settings">Settings</button>
+  </details>
+  <button data-page="help"><span class="navicon">ⓘ</span>How to use</button>
+</nav>
+      <div class="sidebar-foot">
+        <span class="status-dot"></span
+        ><span
+          >Local companion<small id="sidebar-mode">Windows alpha</small></span
+        ><span class="alpha">ALPHA</span>
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div class="crumb">
+          Workspace <span>/</span> <b id="crumb">Discover work</b>
+        </div>
+        <div class="header-right">
+          <span id="mode-pill" class="pill">Empty workspace</span
+          ><span class="local-label">On this device</span>
+        </div>
+      </header>
+      <section class="page-heading">
+        <div>
+          <div class="eyebrow">NATIVE TOOLS. SHARED CONTEXT.</div>
+          <h1 id="page-title">Find the work you already did.</h1>
+          <p id="page-description">
+            Rediscover useful research and artifacts across your permitted
+            sessions.
+          </p>
+        </div>
+        <button id="sample" class="secondary" hidden>Open sample workspace</button>
+      </section>
+      <div id="notice" role="status" hidden></div>
+      <div id="view"></div>
+      <footer>
+        <span>Built on <a href="https://www.badmonkey.ai/agentspaces/" target="_blank" rel="noopener noreferrer">AgentSpaces by Bad Monkey</a></span
+        ><span id="footer-fabric">Background service</span>
+      </footer>
+    </main>
+    <dialog id="detail">
+      <div class="dialog-head">
+        <span class="eyebrow">SESSION & PROVENANCE</span
+        ><button
+          id="close-detail"
+          aria-label="Close details"
+          class="icon-button"
+        >
+          ×
+        </button>
+      </div>
+      <div id="detail-content"></div>
+    </dialog>
+    <script src="/vendor/xterm.js"></script>
+    <script src="/vendor/fit.js"></script>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

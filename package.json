@@ -1,0 +1,87 @@
+{
+  "name": "agentspaces-desktop",
+  "version": "0.1.0-alpha.2",
+  "private": true,
+  "description": "Desktop coordination for Codex and Claude, built on AgentSpaces by Bad Monkey",
+  "author": "AgentSpaces Desktop contributors",
+  "homepage": "https://www.badmonkey.ai/agentspaces/",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "app/desktop.mjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "postinstall": "node scripts/build-fabric.mjs",
+    "start": "node app/cli.mjs serve",
+    "desktop": "electron .",
+    "setup": "node scripts/install-router.mjs local install",
+    "test": "node --test test/*.test.mjs",
+    "check": "node scripts/check.mjs",
+    "mcp": "node app/mcp.mjs",
+    "diagnostics": "node app/cli.mjs diagnostics",
+    "package:prepare": "node scripts/prepare-package.mjs",
+    "package:dir": "node scripts/build-package.mjs dir",
+    "package:win": "node scripts/build-package.mjs win",
+    "package:linux": "node scripts/build-package.mjs linux"
+  },
+  "dependencies": {
+    "@agentspaces/client": "git+https://github.com/badmonkeyai/agentspaces-typescript.git#be025e7aba72e1837e0ccb3999bb76098d012fe0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.293",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "node-pty": "1.1.0",
+    "ws": "8.22.0",
+    "zod": "4.6.5"
+  },
+  "desktopName": "com.agentspaces.desktop.desktop",
+  "build": {
+    "appId": "com.agentspaces.desktop",
+    "productName": "AgentSpaces Desktop",
+    "directories": { "output": "dist", "buildResources": "assets" },
+    "asar": false,
+    "npmRebuild": false,
+    "allowMissingDependencies": false,
+    "disableDefaultIgnoredFiles": true,
+    "files": ["app/**", "ui/**", "assets/**", "package.json", "README.md", "LICENSE", "NOTICE", "docs/installer.md", "scripts/install-linux.mjs", "!node_modules/@anthropic-ai/claude-agent-sdk-*/**"],
+    "extraResources": [
+      { "from": "build/runtime", "to": "runtime", "filter": ["**/*"] },
+      { "from": "node_modules/@anthropic-ai/claude-agent-sdk/README.md", "to": "notices/CLAUDE-AGENT-SDK-README.md" },
+      { "from": "node_modules/@anthropic-ai/claude-agent-sdk/LICENSE.md", "to": "notices/CLAUDE-AGENT-SDK-LICENSE.md" }
+    ],
+    "afterPack": "scripts/verify-package.cjs",
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "assets/agentspaces.ico",
+      "artifactName": "AgentSpaces-Desktop-Setup-${version}-${arch}.${ext}",
+      "signAndEditExecutable": true
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createStartMenuShortcut": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "AgentSpaces Desktop",
+      "uninstallDisplayName": "AgentSpaces Desktop",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    },
+    "linux": {
+      "target": [{ "target": "tar.gz", "arch": ["x64"] }],
+      "icon": "assets/agentspaces.png",
+      "category": "Development",
+      "executableName": "agentspaces-desktop",
+      "syncDesktopName": true,
+      "artifactName": "AgentSpaces-Desktop-${version}-linux-${arch}.${ext}",
+      "desktop": { "entry": { "Name": "AgentSpaces Desktop", "Comment": "Connected Codex and Claude work", "Keywords": "agents;Codex;Claude;AgentSpaces;" } }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "electron": "44.7.0",
+    "electron-builder": "26.17.0",
+    "typescript": "5.9.3"
+  }
+}

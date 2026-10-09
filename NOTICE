@@ -1,0 +1,12 @@
+AgentSpaces Desktop
+Copyright 2026 AgentSpaces Desktop contributors
+
+Built on AgentSpaces by Bad Monkey.
+https://www.badmonkey.ai/agentspaces/
+https://github.com/badmonkeyai/AgentSpaces
+
+This application uses the AgentSpaces TypeScript binding and model-wire
+conversation contracts. Upstream software retains its own copyright,
+license and NOTICE files. Required dependency notices accompany the
+installed application. This project's Apache 2.0 license does not replace
+third-party licenses or grant trademark rights.

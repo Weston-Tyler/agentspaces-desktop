@@ -1,0 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
+const runtimePath = process.env.AGENTSPACES_STATE ? join(resolve(process.env.AGENTSPACES_STATE), 'runtime.json') : fileURLToPath(new URL('../.local/runtime.json', import.meta.url));
+const runtime = JSON.parse(readFileSync(runtimePath, 'utf8'));
+if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(runtime.address)) throw new Error('Owned companion address required');
+const headers = { Authorization: 'Bearer ' + runtime.admin, 'Content-Type': 'application/json' };
+const health = await fetch(runtime.address + '/api/health', { headers }).then(response => response.json());
+if (health.pid !== runtime.pid || health.instance !== runtime.instance) throw new Error('Owned runtime identity changed');
+const response = await fetch(runtime.address + '/api/native/automatic/setup', { method: 'POST', headers, body: '{}', signal: AbortSignal.timeout(240000) });
+const result = await response.json(); if (!response.ok) throw new Error('Native setup unavailable; existing sessions preserved');
+console.log(JSON.stringify(result, null, 2));

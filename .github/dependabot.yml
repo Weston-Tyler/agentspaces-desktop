@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      provider-sdks:
+        patterns:
+          - "@anthropic-ai/claude-agent-sdk"
+          - "@modelcontextprotocol/sdk"
+          - zod
+        update-types: [minor, patch]
+      terminal-runtime:
+        patterns:
+          - "@xterm/*"
+          - node-pty
+          - ws
+        update-types: [minor, patch]
+      development-tools:
+        patterns:
+          - "@types/*"
+          - typescript
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
