@@ -1,6 +1,6 @@
 import { Identity, Peer, cbor, spaceIdLocal } from '@agentspaces/client';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, openSync, closeSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { TYPES } from './fabric.mjs';
 import { projectWorkBoard } from './work-board.mjs';
@@ -29,7 +29,7 @@ export class WorkBoard {
   }
   open() {
     if (this.peer) return;
-    protectStateDirectory(this.root);
+    protectStateDirectory(this.root, ['identity','agents','replica.cbor','replica.cbor.tmp','writer.lock']);
     this.identity = Identity.loadOrCreate(join(this.root, 'identity'));
     this.group = spaceIdLocal(`desktop-work-board/${this.identity.peerId}`);
     this.peer = new Peer(this.identity, this.group, this.engine.clock);
@@ -68,7 +68,9 @@ export class WorkBoard {
     if (Object.keys(options).some(k => k !== 'limit')) throw new Error('Unknown work-board list field');
     const { limit = 100 } = options;
     // Check grants before opening a private replica.
-    this.access(binding); this.open(); this.access(binding);
+    this.access(binding);
+    if (this.writing) throw new Error('Work board is saving; refresh shortly');
+    this.peer = null; this.open(); this.access(binding);
     const result = projectWorkBoard({ groupId: this.group, space: SPACE,
       states: this.peer.states, claims: this.peer.claims, now: this.engine.clock(), limit });
     const labels = new Map(Object.values(this.receipts).filter(r => r.result.holder && r.result.holderSource).map(r => [r.result.holder, r.result.holderSource]));
@@ -81,7 +83,20 @@ export class WorkBoard {
       capabilities: { create: true, claim: true, update: true, complete: true, modelExecution: false } };
   }
   mutate(input, binding) {
-    const operation = this.tail.then(() => this.apply(input, binding));
+    const operation = this.tail.then(async () => {
+      this.access(binding);
+      protectStateDirectory(this.root, ['identity','agents','replica.cbor','replica.cbor.tmp','writer.lock']);
+      const lock = join(this.root, 'writer.lock'); let fd;
+      try { fd = openSync(lock, 'wx', 0o600); } catch (error) {
+        if (error.code === 'EEXIST') throw new Error('Work-board writer busy or interrupted; preserve the lock until its owner is confirmed stopped');
+        throw error;
+      }
+      try {
+        writeFileSync(fd, JSON.stringify({ pid: process.pid }));
+        this.writing = true; this.peer = null;
+        return await this.apply(input, binding);
+      } finally { this.writing = false; closeSync(fd); unlinkSync(lock); }
+    });
     this.tail = operation.catch(() => {}); return operation;
   }
   async apply(input, binding) {

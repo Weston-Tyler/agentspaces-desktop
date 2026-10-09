@@ -51,7 +51,7 @@ hosts access that replica using existing scoped HTTP/MCP/SSH transport. The boar
 does not join the optional fixture seed, publish private briefs into an external
 fabric group, or claim multi-companion consensus. Starting a second independent
 companion creates a separate board. Do not point independent services at the same
-state directory; the companion's existing single-service startup control applies.
+state directory. A file guard excludes simultaneous board writers; every mutation reloads the signed replica under that guard. After an interrupted write leaves a guard file, preserve it until the owner process is confirmed stopped; automatic stale-lock reclamation is not implemented.
 
 Signed public state, claims, scope and duplicate-operation receipts are saved
 atomically in the owner-private `work-board/replica.cbor`. Keys stay in the private

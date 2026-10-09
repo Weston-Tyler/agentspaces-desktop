@@ -66,3 +66,15 @@ test('overlapping live repository paths block another lane while disjoint paths 
  f.advance(5000);
  await f.board.mutate({action:'renew',entryId:first.entryId,deliveryId:'renew-right-0001'},a);
 });
+
+test('a fresh process can restore the board and a concurrent writer cannot overwrite it',async t=>{
+ const f=fixture(t);await f.board.mutate(create,null);
+ const {execFileSync}=await import('node:child_process');
+ const script=`import {WorkBoard} from ${JSON.stringify(new URL('../app/work-board-service.mjs',import.meta.url).href)};
+ const engine={store:{root:process.argv[1]},clock:Date.now,catalog:[],workspace:{index:{profile:{id:'scope',account:'synthetic-account',active:true,policy:'local-retrieval'}}}};
+ console.log(new WorkBoard(engine).view(null).items.length);`;
+ assert.equal(execFileSync(process.execPath,['--input-type=module','-e',script,f.root],{encoding:'utf8'}).trim(),'1');
+ const lock=join(f.root,'work-board','writer.lock');writeFileSync(lock,'synthetic interrupted writer');
+ await assert.rejects(f.board.mutate({...create,deliveryId:'locked-create-0001'},null),/writer busy or interrupted/);
+ assert.equal(f.board.view(null).items.length,1);
+});
