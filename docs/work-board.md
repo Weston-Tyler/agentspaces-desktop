@@ -68,6 +68,7 @@ old uncompleted briefs require a later maintenance feature. The view returns up
 to 200 work items and the latest 20 results per item, with truncation indicators.
 The UI currently displays the first bounded page; filtering/pagination is pending.
 
-The upstream exact-selection/snapshot extension is a pinned **unmerged review
-dependency**, not a claim that it has shipped on upstream main. See the PR's exact
-revision and qualification evidence before integration or release.
+The upstream exact-selection/snapshot extension is merged in
+[AgentSpaces TypeScript PR #2](https://github.com/badmonkeyai/agentspaces-typescript/pull/2).
+Desktop pins its merge revision `ab091a4fd9b325679ceca9dfa3d3042ff572696b`.
+This source integration does not imply an installed or released Desktop build.
