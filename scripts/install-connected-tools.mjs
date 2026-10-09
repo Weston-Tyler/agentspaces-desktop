@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-const runtime = JSON.parse(readFileSync(fileURLToPath(new URL('../.local/runtime.json', import.meta.url)), 'utf8'));
+import { join, resolve } from 'node:path';
+const runtimePath = process.env.AGENTSPACES_STATE ? join(resolve(process.env.AGENTSPACES_STATE), 'runtime.json') : fileURLToPath(new URL('../.local/runtime.json', import.meta.url));
+const runtime = JSON.parse(readFileSync(runtimePath, 'utf8'));
 if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(runtime.address)) throw new Error('Owned companion address required');
 const headers = { Authorization: 'Bearer ' + runtime.admin, 'Content-Type': 'application/json' };
 const health = await fetch(runtime.address + '/api/health', { headers }).then(response => response.json());
