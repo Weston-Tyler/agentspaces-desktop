@@ -440,7 +440,7 @@ export async function startServer({
           break;
         case "/api/desktop/connect-all":
           if (data.nativePolicyGranted === true) { store.data.desktopPreferences ??= {}; store.data.desktopPreferences.allowNativeFullAccess = true; store.save(); }
-          connectedWork = connectAllOwnedWork(engine, { hosts: data.hosts ?? ["local", "remote"] });
+          connectedWork = connectAllOwnedWork(engine, { hosts: data.hosts });
           result = { status: connectedWork.status, stage: connectedWork.stage, partial: connectedWork.partial };
           break;
         case "/api/discussions/post": {

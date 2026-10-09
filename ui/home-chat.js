@@ -1,10 +1,11 @@
+import { findNativeAnswerService } from "./answer-connection.js";
 const el = (tag, text, cls) => {
   const element = document.createElement(tag);
   if (text !== undefined && text !== null) element.textContent = text;
   if (cls) element.className = cls;
   return element;
 };
-export function mountHomeChat(root, { api, notice, preferredHost } = {}) {
+export function mountHomeChat(root, { api, notice, preferredHost, state = {} } = {}) {
   const mountId = crypto.randomUUID();
   root.dataset.homeChatMount = mountId;
   const welcome = el("section", null, "home-chat-welcome"),
@@ -30,6 +31,26 @@ export function mountHomeChat(root, { api, notice, preferredHost } = {}) {
   let running = false, disposed = false, deliveryId = null, dispatched = false,
     cancelled = false;
   const uncertainQuestions = new Set(), submittedIds = new Set();
+  if (!state.desktopPreferences?.connectAll) {
+    const firstRun = el("section", null, "card"), connect = el("button", "Connect work on this device", "primary"), native = el("button", "Open native sign-in", "secondary"), help = el("p", "Use your own Codex or Claude Code installation and account. SSH is optional and is only used after you select another computer.", "fineprint");
+    firstRun.append(el("h2", "Get started on this device"), help);
+    const links = el("p");
+    for (const [title, url] of [["Install Codex", "https://developers.openai.com/codex/cli/"], ["Install Claude Code", "https://code.claude.com/docs/en/setup"]]) {
+      const link = el("a", title); link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer"; links.append(link, document.createTextNode("  "));
+    }
+    firstRun.append(links, el("p", "Connect lets this companion retrieve permitted local work and index files. Existing exclusions and denied sources stay excluded. Ask currently needs Codex; Claude Code can join group chats.", "fineprint"));
+    connect.type = "button"; native.type = "button"; native.dataset.page = "native";
+    connect.onclick = async () => {
+      connect.disabled = true;
+      try {
+        const result = await api("desktop/connect-all", { hosts: ["local"] });
+        help.textContent = result.status === "connecting" ? "Local discovery started. You can ask questions while it runs; see Connected work for progress. Other computers can be added there later." : "Connection status: " + result.status + ". See Connected work for details.";
+      } catch (error) { notice(error.message, true); }
+      finally { connect.disabled = false; }
+    };
+    const buttons = el("div", null, "actions"); buttons.append(connect, native); firstRun.append(buttons); root.replaceChildren(firstRun, history, messages, form);
+  }
+
   const current = () => !disposed && root.isConnected && root.dataset.homeChatMount === mountId && form.isConnected;
   const showStatus = (text) => { if (current()) status.textContent = text; };
   async function cancelCurrent() {
@@ -47,18 +68,7 @@ export function mountHomeChat(root, { api, notice, preferredHost } = {}) {
   const ensureActive = () => {
     if (cancelled || !current()) throw new Error("Question cancelled before inference");
   };
-  async function findService() {
-    const hosts = preferredHost && ["remote", "local"].includes(preferredHost)
-      ? [preferredHost, ...["remote", "local"].filter((host) => host !== preferredHost)]
-      : ["remote", "local"];
-    for (const host of hosts) {
-      ensureActive();
-      let providers; try { providers = await api("ask/providers", { host }); } catch { continue; }
-      ensureActive();
-      if (providers.some((p) => p.provider === "codex" && p.available === true)) return { provider: "codex", host };
-    }
-    throw new Error("Sign in to native Codex in Settings to answer questions. No API key is required.");
-  }
+  const findService = () => findNativeAnswerService({ api, hosts: state.workspace?.profile?.hosts ?? ["local"], preferredHost, ensureActive });
   function renderAnswer(answer, search, selected, destination = messages, restored = false) {
     const card = el("article", null, "card home-chat-answer"),
       synthetic = answer.fixture || /fixture|synthetic/i.test(answer.executionKind ?? "");

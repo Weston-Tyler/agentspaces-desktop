@@ -18,7 +18,7 @@ function fixture({ index = null, more = [false], handler } = {}) {
 }
 test("explicit connect all upgrades cached scope while preserving account, paths and per-session revocations", async () => {
   const roots = { local: ["C:/owned-work"] }, exclusions = { remote: ["/home/owner/private"] };
-  const f = fixture({ index: { profile: { id: "cached", active: true, account: "existing-boundary", hosts: ["local"], providers: ["codex"], policy: "metadata", indexFiles: false, roots, exclusions }, nodes: [{ id: "visible-cache" }] } });
+  const f = fixture({ index: { profile: { id: "cached", active: true, account: "existing-boundary", hosts: ["local", "remote"], providers: ["codex"], policy: "metadata", indexFiles: false, roots, exclusions }, nodes: [{ id: "visible-cache" }] } });
   const scope = f.engine.workspace.index, revocations = structuredClone(f.grants);
   const state = connectAllOwnedWork(f.engine);
   assert.equal(scope.profile.policy, "local-retrieval"); assert.equal(scope.profile.indexFiles, true);
@@ -38,7 +38,7 @@ test("metadata comes first, full owning inventory follows and continuation stops
   assert.equal(f.calls.length, 3); assert.deepEqual(f.calls[0].options, { catalogOnly: true });
   assert.equal(f.calls[1].options, undefined); assert.deepEqual(f.calls[2].options, { continuePages: true });
   for (const call of f.calls) {
-    assert.deepEqual(call.profile.hosts, ["local", "remote"]); assert.deepEqual(call.profile.providers, ["codex", "claude"]);
+    assert.deepEqual(call.profile.hosts, ["local"]); assert.deepEqual(call.profile.providers, ["codex", "claude"]);
     assert.equal(call.profile.policy, "local-retrieval"); assert.equal(call.profile.indexFiles, true);
   }
   assert.equal(state.status, "partial"); assert.equal(state.hasMore, true); assert.equal(f.engine.modelCalls, 0);
@@ -81,4 +81,10 @@ test("external cancellation between batches stops further owning scans", async (
   const f = fixture({ handler: async (engine, batch) => { if (batch === 1) engine.workspace.cancelled = true; } });
   const state = connectAllOwnedWork(f.engine); await state.promise;
   assert.equal(state.status, "cancelled"); assert.equal(f.calls.length, 1);
+});
+
+test("fresh connect all does not enroll or scan an unconfigured remote host", async () => {
+  const f = fixture(); const state = connectAllOwnedWork(f.engine); await state.promise;
+  assert.deepEqual(f.engine.store.data.desktopPreferences.hosts, ["local"]);
+  assert.ok(f.calls.every(call => call.profile.hosts.length === 1 && call.profile.hosts[0] === "local"));
 });

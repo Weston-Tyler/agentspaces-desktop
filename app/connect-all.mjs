@@ -3,7 +3,9 @@
 const operations = new WeakMap();
 const safeState = status => ({ status, stage: status, batchesCompleted: 0, partial: false, hasMore: false, promise: Promise.resolve(null) });
 
-export function connectAllOwnedWork(engine, { hosts = ["local", "remote"], maxBatches = 32 } = {}) {
+export function connectAllOwnedWork(engine, { hosts, maxBatches = 32 } = {}) {
+  hosts ??= engine.workspace.index?.profile?.active === true && !engine.workspace.index.fixture
+    ? engine.workspace.index.profile.hosts ?? ["local"] : ["local"];
   if (!Array.isArray(hosts) || !hosts.length || hosts.some(host => !["local", "remote"].includes(host))) throw new Error("Choose supported native hosts");
   hosts = [...new Set(hosts)];
   if (!Number.isInteger(maxBatches) || maxBatches < 2 || maxBatches > 32) throw new Error("Invalid inventory batch bound");
