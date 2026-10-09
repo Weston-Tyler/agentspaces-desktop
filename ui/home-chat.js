@@ -8,6 +8,7 @@ export function mountHomeChat(root, { api, notice, preferredHost } = {}) {
   const mountId = crypto.randomUUID();
   root.dataset.homeChatMount = mountId;
   const welcome = el("section", null, "home-chat-welcome"),
+    history = el("section", null, "home-chat-history"),
     messages = el("section", null, "home-chat-messages"),
     form = el("form", null, "card home-chat-compose"),
     question = el("textarea"),
@@ -25,9 +26,10 @@ export function mountHomeChat(root, { api, notice, preferredHost } = {}) {
   submit.type = "submit"; cancel.type = "button"; cancel.hidden = true;
   setup.type = "button"; setup.dataset.page = "settings";
   const actions = el("div", null, "actions"); actions.append(submit, cancel, setup);
-  form.append(label, actions, status); root.replaceChildren(messages, form);
+  form.append(label, actions, status); root.replaceChildren(history, messages, form);
   let running = false, disposed = false, deliveryId = null, dispatched = false,
-    cancelled = false, uncertainQuestion = null;
+    cancelled = false;
+  const uncertainQuestions = new Set(), submittedIds = new Set();
   const current = () => !disposed && root.isConnected && root.dataset.homeChatMount === mountId && form.isConnected;
   const showStatus = (text) => { if (current()) status.textContent = text; };
   async function cancelCurrent() {
@@ -57,7 +59,7 @@ export function mountHomeChat(root, { api, notice, preferredHost } = {}) {
     }
     throw new Error("Sign in to native Codex in Settings to answer questions. No API key is required.");
   }
-  function renderAnswer(answer, search, selected) {
+  function renderAnswer(answer, search, selected, destination = messages, restored = false) {
     const card = el("article", null, "card home-chat-answer"),
       synthetic = answer.fixture || /fixture|synthetic/i.test(answer.executionKind ?? "");
     card.append(el("h3", synthetic ? "Example answer" : "Answer"));
@@ -68,7 +70,7 @@ export function mountHomeChat(root, { api, notice, preferredHost } = {}) {
       sources = el("details"),
       total = search.totalMatches ?? (search.sessions ?? search.sessionMatches ?? []).length + (search.work ?? search.workMatches ?? []).length;
     sources.append(el("summary", "Sources · " + citations.length + " included"));
-    sources.append(el("p", selected + " selected from " + total + " matching records. " + (coverage.truncated?.length ?? 0) + " excerpts truncated; " + (coverage.omitted?.length ?? 0) + " selected sources omitted by limits.", "fineprint"));
+    sources.append(el("p", (restored ? "Saved source references and coverage. " : selected + " selected from " + total + " matching records. ") + (coverage.truncated?.length ?? 0) + " excerpts truncated; " + (coverage.omitted?.length ?? 0) + " selected sources omitted by limits.", "fineprint"));
     if (coverage.partial || coverage.stale || coverage.hasMore)
       sources.append(el("p", "Coverage is partial or stale. More work may exist outside the captured permitted sources.", "fineprint"));
     if (!selected) sources.append(el("p", "No eligible connected context was found. This answer used the general question route.", "fineprint"));
@@ -79,19 +81,55 @@ export function mountHomeChat(root, { api, notice, preferredHost } = {}) {
     }
     sources.append(el("p", [answer.provider, answer.host, answer.nativeThreadId ? "Native thread " + answer.nativeThreadId : "", answer.nativeTurnId ? "Turn " + answer.nativeTurnId : ""].filter(Boolean).join(" · "), "fineprint"));
     for (const limitation of answer.limitations ?? []) sources.append(el("p", limitation, "fineprint"));
-    card.append(sources); messages.append(card);
+    card.append(sources); destination.append(card);
   }
+  function renderHistory(value) {
+    history.replaceChildren();
+    const entries = Array.isArray(value?.entries) ? value.entries.filter(entry => !submittedIds.has(entry.deliveryId)) : [];
+    const header = el("div", null, "actions"), clear = el("button", "Clear recent history", "subtle");
+    clear.type = "button"; clear.disabled = running || !entries.length;
+    header.append(el("h3", "Recent questions"), clear); history.append(header);
+    const days = Math.round((value?.retention?.maxAgeMs ?? 30 * 24 * 60 * 60 * 1000) / (24 * 60 * 60 * 1000));
+    const maximum = value?.retention?.maxEntries ?? 100;
+    history.append(el("p", "Saved on this device for " + days + " days, up to " + maximum + " questions. Clearing this view keeps delivery records that prevent duplicate requests.", "fineprint"));
+    if (!entries.length) history.append(el("p", "No saved questions yet.", "fineprint"));
+    for (const entry of entries) {
+      if (entry.status === "uncertain") uncertainQuestions.add(String(entry.question ?? "").trim());
+      const saved = el("details", null, "card"), summary = el("summary");
+      const at = new Date(entry.createdAt), date = Number.isFinite(at.getTime()) ? at.toLocaleString() : "";
+      summary.append(el("strong", entry.question), el("small", [entry.status === "complete" ? "Answered" : entry.status === "uncertain" ? "Uncertain" : "Failed", date].filter(Boolean).join(" · ")));
+      saved.append(summary);
+      if (entry.status === "complete" && entry.result) renderAnswer(entry.result, {}, entry.result.sourceCoverage?.selected ?? entry.result.citations?.length ?? 0, saved, true);
+      else saved.append(el("p", entry.error ?? (entry.status === "uncertain" ? "Native acceptance is uncertain. This question will not be retried automatically." : "The question did not complete."), "fineprint"));
+      history.append(saved);
+    }
+    clear.onclick = async () => {
+      if (running || !current()) return;
+      clear.disabled = true;
+      try {
+        const result = await api("ask/history", { clear: true });
+        if (current()) renderHistory(result);
+      } catch (error) { if (current()) { clear.disabled = false; notice(error.message, true); } }
+    };
+  }
+  history.append(el("p", "Loading recent questions…", "fineprint"));
+  // Keep restored history separate from the current exchange. A slow read must
+  // never reset a draft or replace a question submitted after mounting.
+  api("ask/history", {}).then(value => { if (current()) renderHistory(value); }).catch(() => {
+    if (current()) history.replaceChildren(el("p", "Recent questions are unavailable. New questions can still be sent.", "fineprint"));
+  });
   form.onsubmit = async (event) => {
     event.preventDefault();
     if (running || !current()) return;
     const input = question.value.trim();
     if (!input) return;
-    if (input === uncertainQuestion) {
+    if (uncertainQuestions.has(input)) {
       notice("That question has an uncertain native outcome. It will not be automatically retried; inspect it in Settings before another submission.", true);
       return;
     }
     running = true; cancelled = false; dispatched = false;
     deliveryId = crypto.randomUUID();
+    submittedIds.add(deliveryId);
     submit.disabled = true; question.disabled = true; cancel.hidden = false;
     const owner = el("article", null, "card home-chat-question"); owner.append(el("h3", "You"), el("p", input)); messages.append(owner);
     try {
@@ -121,7 +159,8 @@ export function mountHomeChat(root, { api, notice, preferredHost } = {}) {
       renderAnswer(answer, search, selected); question.value = "";
       showStatus("Answered. Sources and coverage are available below the response.");
     } catch (error) {
-      if (dispatched) uncertainQuestion = input;
+      if (dispatched) uncertainQuestions.add(input);
+      else api("ask/history", { record: { deliveryId, question: input, status: "failed" } }).catch(() => {});
       if (current()) {
         const failure = el("article", null, "card home-chat-error");
         failure.append(el("p", error.message), el("p", dispatched ? "The question was not retried. Native acceptance may be uncertain." : "No answering request was sent.", "fineprint"));

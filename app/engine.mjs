@@ -149,7 +149,7 @@ export class Engine {
           (status === "all" || s.status === status),
       )
       .map((s) => {
-        const text = [s.title, ...s.topics].join(" ").toLowerCase();
+        const text = [s.title, s.id, s.nativeThreadId, s.cwd, ...(s.topics ?? [])].filter(Boolean).join(" ").toLowerCase();
         return {
           ...s,
           score: words.reduce((n, w) => n + (text.includes(w) ? 1 : 0), 0),
@@ -158,7 +158,7 @@ export class Engine {
       })
       .filter((s) => !words.length || s.score > 0)
       .sort(
-        (a, b) => b.score - a.score || b.updatedAt.localeCompare(a.updatedAt),
+          (a, b) => b.score - a.score || String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')) || a.id.localeCompare(b.id),
       )
       .slice(0, Math.max(1, Math.min(Number(limit) || 100, 200)));
   }

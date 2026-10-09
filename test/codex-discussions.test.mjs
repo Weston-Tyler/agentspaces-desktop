@@ -203,13 +203,77 @@ test("native identity mismatch, uncertain outcome and approval attention never p
   }
 });
 
-test("closing the hub aborts active native work and closes its adapter", async () => {
+test("explicit cancellation on hub close aborts active native work and closes its adapter", async () => {
   let observedAbort = false;
   const { engine, hub, args, counters } = setup({ controls: { answer: input => new Promise((_yes, no) => {
     input.signal.addEventListener("abort", () => { observedAbort = true; no(fail("cancelled", true)); }, { once: true });
   }) } });
-  hub.dispatch(args); await until(() => counters.answer === 1); hub.close(); await settle(hub, args.requestId);
+  hub.dispatch(args); await until(() => counters.answer === 1); await hub.close({ cancelNative: true }); await settle(hub, args.requestId);
   assert(observedAbort); assert(counters.close > 0); assert.equal(engine.discussions.group(args.discussionId).messages.length, 1);
+});
+
+test("ordinary shutdown detaches without aborting native input and preserves acknowledged queue identity", async () => {
+  let observedAbort = false, rejectAnswer;
+  const f = setup({ controls: { answer: async (input, options, adapter) => {
+    await options.persistReceipt({ clientId: input.clientId, nativeThreadId: input.threadId,
+      queuedSubmissionId: "durable-detached-queue-id", status: "queued", retryAllowed: false });
+    adapter.events.emit("queued", { clientId: input.clientId, threadId: input.threadId });
+    input.signal.addEventListener("abort", () => { observedAbort = true; }, { once: true });
+    return new Promise((_yes, no) => { rejectAnswer = no; });
+  } } });
+  const factory = f.hub.adapterFactory;
+  f.hub.adapterFactory = options => {
+    const adapter = factory(options), close = adapter.close;
+    adapter.close = () => { close(); adapter.events.emit("disconnect"); rejectAnswer?.(fail("native_proxy_disconnected", true)); };
+    return adapter;
+  };
+  f.hub.dispatch(f.args); await until(() => f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].status === "queued");
+  const signal = f.adapters[0].answerArgs.signal, closed = await f.hub.close();
+  assert.equal(closed.nativeCancellationRequested, false); assert.equal(observedAbort, false); assert.equal(signal.aborted, false);
+  assert(f.counters.close > 0); assert.equal(f.engine.discussions.group(f.args.discussionId).messages.length, 1);
+  const persisted = new Store(f.root).data;
+  assert.equal(persisted.codexDiscussionNativeReceipts[f.args.requestId].queuedSubmissionId, "durable-detached-queue-id");
+  assert.equal(persisted.codexDiscussionNativeReceipts[f.args.requestId].clientId, f.args.requestId);
+  assert.equal(persisted.codexDiscussionDeliveries[f.args.requestId].uncertainOutcome, true);
+});
+
+test("a detached queued receipt is reconciled after restart without submitting or cancelling native input", async () => {
+  let rejectAnswer;
+  const f = setup({ controls: { answer: async (input, options, adapter) => {
+    await options.persistReceipt({ clientId: input.clientId, nativeThreadId: input.threadId,
+      queuedSubmissionId: "restart-owned-queue-id", status: "queued", retryAllowed: false });
+    adapter.events.emit("queued", { clientId: input.clientId, threadId: input.threadId });
+    return new Promise((_yes, no) => { rejectAnswer = no; });
+  } } });
+  const factory = f.hub.adapterFactory;
+  f.hub.adapterFactory = options => {
+    const adapter = factory(options);
+    adapter.close = () => { adapter.events.emit("disconnect"); rejectAnswer?.(fail("native_proxy_disconnected", true)); };
+    return adapter;
+  };
+  f.hub.dispatch(f.args); await until(() => f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].status === "queued");
+  await f.hub.close();
+  f.engine.store = new Store(f.root); f.engine.discussions.store = f.engine.store;
+  f.engine.store.data.desktopPreferences = { allowNativeFullAccess: true };
+  const calls = [];
+  const restarted = new CodexDiscussionHub(f.engine, { adapterFactory: () => ({
+    open: async () => {}, close() {},
+    bindReadTarget: async input => { calls.push({ method: "metadata-bind", ...input }); },
+    reconcileAnswer: async input => { calls.push({ method: "read-owned-completion", ...input }); return {
+      status: "completed", clientId: input.clientId, nativeThreadId: input.threadId,
+      nativeTurnId: TURN, text: "Completed after companion restart", usage: { known: false },
+    }; },
+    answer() { throw new Error("Restart reconciliation must not enqueue or cancel a turn"); },
+  }) });
+  const result = await restarted.reconcileSubmitted();
+  assert.deepEqual(result.reconciled, [f.args.requestId]); assert.equal(result.nativeInputRetried, false);
+  assert.deepEqual(calls.map(call => call.method), ["metadata-bind", "read-owned-completion"]);
+  const group = f.engine.discussions.group(f.args.discussionId);
+  assert.equal(group.messages.length, 2); assert.equal(group.messages.at(-1).replyTo, f.args.messageId);
+  assert.equal(group.messages.at(-1).source.nativeThreadId, THREAD);
+  assert.equal(f.engine.store.data.codexDiscussionNativeReceipts[f.args.requestId].queuedSubmissionId, "restart-owned-queue-id");
+  await restarted.reconcileSubmitted(); assert.equal(group.messages.length, 2); assert.equal(calls.length, 2);
+  await restarted.close();
 });
 
 test("native validation uses the addressed message epoch while retaining historical-root grant checks", async t => {

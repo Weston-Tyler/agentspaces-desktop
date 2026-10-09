@@ -1,9 +1,12 @@
 import { randomUUID, createHash } from "node:crypto";
+import { AgentBroadcast } from "./agent-broadcast.mjs";
+import { parseAgentSelectors } from "./agent-selection.mjs";
 
 // Owning portable model-wire record identity is preserved. This is conversation
 // content, never a task registry, queue, lease implementation or native history.
 export const SNAPSHOT_TYPE =
   "ai.badmonkey.agentspaces.springai.model.wire.ConversationSnapshot";
+export const MAX_DISCUSSION_MEMBERS = 200;
 const fingerprint = (value) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export class Discussions {
@@ -147,7 +150,7 @@ export class Discussions {
     }
   }
   joinEligible(g, caller) {
-    if (!this.policy(g).selfRegistration || g.members.length >= 12 || !g.members.every(m => this.allowed(m)) || !this.view(g).available) throw new Error("Discussion self-registration unavailable");
+    if (!this.policy(g).selfRegistration || g.members.length >= MAX_DISCUSSION_MEMBERS || !g.members.every(m => this.allowed(m)) || !this.view(g).available) throw new Error("Discussion self-registration unavailable");
     this.sharingBoundary(caller, g.members.map(m => m.sessionId));
   }
   discoverJoinable({ query = "" } = {}, binding) {
@@ -161,16 +164,43 @@ export class Discussions {
     const caller = this.participant(binding), g = this.group(id), existing = g.members.find(m => m.sessionId === caller.id);
     if (existing) {
       this.context(id, binding);
-      return { id, title: g.title, version: g.version, participantAlias: existing.alias, alreadyMember: true };
+      return { id, title: g.title, version: g.version, participantAlias: existing.alias, sessionId: caller.id, alreadyMember: true };
     }
     this.joinEligible(g, caller);
-    const member = this.member(caller.id);
+    return this.admit(g, caller);
+  }
+  contextOrJoin(id, binding) {
+    const g = this.group(id);
+    if (binding && !g.members.some(member => member.sessionId === binding.sessionId) && this.policy(g).selfRegistration) this.join({ id }, binding);
+    return this.context(id, binding);
+  }
+  invite({ id, sessionId }, binding) {
+    const caller = this.participant(binding), g = this.group(id);
+    this.context(id, binding);
+    if (!this.policy(g).selfRegistration) throw new Error("Discussion self-registration unavailable");
+    if (typeof sessionId !== "string" || !sessionId || sessionId.length > 300) throw new Error("Known native source identity required");
+    const target = this.engine.session(sessionId);
+    if (target.fixture || !["codex", "claude"].includes(target.provider) || target.id !== target.provider + "@" + target.host + ":" + target.nativeThreadId || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(target.nativeThreadId ?? "")) throw new Error("Known native source identity required");
+    this.sharingBoundary(caller, [target.id]);
+    const existing = g.members.find(m => m.sessionId === target.id);
+    if (existing) return { id, title: g.title, version: g.version, participantAlias: existing.alias, sessionId: target.id, alreadyMember: true, invitedBy: caller.id };
+    this.joinEligible(g, target);
+    return this.admit(g, target, caller.id);
+  }
+  inviteOwner({ id, sessionId }) {
+    const group = this.group(id), target = this.engine.session(sessionId), grant = this.engine.permissions(target);
+    if (target.fixture || !["codex", "claude"].includes(target.provider) || target.id !== target.provider + "@" + target.host + ":" + target.nativeThreadId || !grant.enrolled || !grant.share || !grant.retrieve) throw new Error("Known enrolled native source required");
+    if (group.members.some(member => member.sessionId === sessionId)) return;
+    this.joinEligible(group, target); return this.admit(group, target, "owner");
+  }
+  admit(g, source, invitedBy = null) {
+    const member = this.member(source.id);
     let number = 1;
     while (g.members.some(m => m.alias === member.provider + number)) number++;
     member.alias = member.provider + number;
     g.members.push(member); g.version++;
-    this.store.audit("Participant joined discussion", { discussionId: id, sessionId: caller.id });
-    return { id, title: g.title, version: g.version, participantAlias: member.alias, alreadyMember: false };
+    this.store.audit(invitedBy ? "Participant invited to discussion" : "Participant joined discussion", { discussionId: g.id, sessionId: source.id, ...(invitedBy ? { invitedBy } : {}) });
+    return { id: g.id, title: g.title, version: g.version, participantAlias: member.alias, sessionId: source.id, alreadyMember: false, ...(invitedBy ? { invitedBy } : {}) };
   }
   createFor({ title, sessionIds, deliveryId }, binding) {
     const caller = this.participant(binding);
@@ -192,12 +222,12 @@ export class Discussions {
     if (
       !Array.isArray(sessionIds) ||
       !sessionIds.length ||
-      sessionIds.length > 12 ||
+      sessionIds.length > MAX_DISCUSSION_MEMBERS ||
       new Set(sessionIds).size !== sessionIds.length
     )
-      throw new Error("Choose 1–12 distinct source threads");
-    if (this.store.data.discussions.length >= 20)
-      throw new Error("This alpha supports 20 discussions per profile");
+      throw new Error("Choose 1–" + MAX_DISCUSSION_MEMBERS + " distinct source threads");
+    if (this.store.data.discussions.length >= 1000)
+      throw new Error("This profile supports 1000 discussions; archive completed groups before creating more");
     const counts = {};
     const members = sessionIds.map((id) => {
       const m = this.member(id);
@@ -308,7 +338,20 @@ export class Discussions {
     this.store.save();
     return m;
   }
-  post({ id, text, targets = [], deliveryId, fixtureDialogueTurns = 0 }) {
+  async postAddressed({ id, text, targets = [], deliveryId, fixtureDialogueTurns = 0 }) {
+    const parsed = parseAgentSelectors(text);
+    if (parsed.directives.length) {
+      if (fixtureDialogueTurns) throw new Error("Synthetic dialogue cannot use catalog selectors");
+      const group = this.group(id);
+      if (!Array.isArray(targets) || targets.some(target => !group.members.some(member => member.sessionId === target))) throw new Error("Reply target is not a discussion participant");
+      const broadcast = await new AgentBroadcast(this.engine).sendOwner({ discussionId: id, text, deliveryId, ...(targets.length ? { sessionIds: targets } : {}) });
+      return { view: this.view(group), broadcast, batches: broadcast.batches };
+    }
+    const view = this.post({ id, text, targets, deliveryId, fixtureDialogueTurns }), group = this.group(id);
+    const message = group.messages.find(item => item.deliveryId === deliveryId);
+    return { view, broadcast: null, batches: [{ discussionId: id, messageId: message.id, targetSessionIds: message.targets.map(target => target.sessionId), createdGroup: false }] };
+  }
+  post({ id, text, targets = [], deliveryId, fixtureDialogueTurns = 0 }, { exactTargets = false } = {}) {
     const g = this.group(id);
     if (!g.members.every((m) => this.allowed(m)))
       throw new Error("Discussion source scope revoked or stale");
@@ -333,11 +376,11 @@ export class Discussions {
     const aliases = [
       ...text.matchAll(/(?:^|\s)@([a-zA-Z][a-zA-Z0-9_-]*)\b/g),
     ].map((m) => m[1]);
-    for (const alias of aliases)
+    for (const alias of exactTargets ? [] : aliases)
       if (!g.members.some((m) => m.alias === alias))
         throw new Error("Unknown mention @" + alias);
     const selected = g.members.filter(
-      (m) => targets.includes(m.sessionId) || aliases.includes(m.alias) || (this.policy(g).agentInitiation && !targets.length && !aliases.length),
+      (m) => targets.includes(m.sessionId) || !exactTargets && (aliases.includes(m.alias) || (this.policy(g).agentInitiation && !targets.length && !aliases.length)),
     );
     if (
       fixtureDialogueTurns &&
@@ -357,7 +400,7 @@ export class Discussions {
         throw new Error("Delivery identifier reused for different content");
       return this.view(g);
     }
-    if (g.messages.length + 1 + selected.length + fixtureDialogueTurns > 100)
+    if (g.messages.length + 1 + selected.filter(member => member.fixture).length + fixtureDialogueTurns > 100)
       throw new Error("Discussion limit reached; start another discussion");
     const targetStates = selected.map((m) => ({
       sessionId: m.sessionId,

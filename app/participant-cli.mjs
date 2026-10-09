@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = (code) => Object.assign(new Error(code), { code });
 function argumentsOf(args) {
-  const options = {}, commands = ["info", "discover", "joinable", "join", "create", "read", "work", "finding", "contribute"];
+  const options = {}, commands = ["info", "capabilities", "discover", "joinable", "join", "invite", "create", "new-thread", "message", "broadcast", "read", "work", "finding", "contribute"];
   let command = null;
   for (let i = 0; i < args.length; i++) {
     const value = args[i];
@@ -17,7 +17,7 @@ function argumentsOf(args) {
     options[key] = args[++i];
   }
   if (!command || !options.config || !UUID.test(options.source ?? "")) throw fail("config_and_exact_source_required");
-  const allowed = { info: [], discover: ["query"], joinable: ["query"], join: ["discussion"], create: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
+  const allowed = { info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], 'new-thread': [], message: [], broadcast: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
   if (Object.keys(options).some((key) => !["config", "source", ...allowed[command]].includes(key))) throw fail("invalid_command_argument");
   return { command, options };
 }
@@ -72,9 +72,33 @@ function request({ address, authority, token, path, body }) {
 export async function runParticipantCli(args, { input, requestImpl = request } = {}) {
   const { command, options } = argumentsOf(args), config = await configuration(options.config, options.source);
   const attribution = "locally connector-bound; native caller not verified";
-  if (command === "info") return { nativeThreadId: config.nativeThreadId, sessionId: config.sessionId, provider: config.provider, host: config.host, attribution, commands: ["discover", "joinable", "join", "create", "read", "work", "finding", "contribute"] };
+  if (command === "info") return { nativeThreadId: config.nativeThreadId, sessionId: config.sessionId, provider: config.provider, host: config.host, attribution, commands: ["capabilities", "discover", "joinable", "join", "invite", "create", "new-thread", "message", "broadcast", "read", "work", "finding", "contribute"] };
   let path, body;
-  if (["discover", "joinable", "work"].includes(command)) {
+  if (command === 'capabilities') { path = '/api/agent/capabilities'; body = {}; }
+  else if (command === 'message' || command === 'broadcast') {
+    const data = await inputJson(input), keys = ['text','nativeTurnId','deliveryId', ...(command === 'message' ? ['sessionId','nativeThreadId','host','provider','title'] : ['query','activeWithinDays','sessionIds','nativeThreadIds','discussionId'])];
+    if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !keys.includes(key))
+      || typeof data.text !== 'string' || !data.text.trim() || data.text.length > 8000
+      || typeof data.nativeTurnId !== 'string' || !data.nativeTurnId || data.nativeTurnId.length > 200
+      || !/^[a-zA-Z0-9-]{8,100}$/.test(data.deliveryId ?? '')) throw fail('bounded_agent_message_required');
+    if (command === 'message') {
+      if (!!data.sessionId === !!data.nativeThreadId || data.sessionId !== undefined && (typeof data.sessionId !== 'string' || !data.sessionId || data.sessionId.length > 300)
+        || data.nativeThreadId !== undefined && !UUID.test(data.nativeThreadId)
+        || data.host !== undefined && !['local','remote'].includes(data.host) || data.provider !== undefined && !['codex','claude'].includes(data.provider)
+        || data.title !== undefined && (typeof data.title !== 'string' || !data.title.trim() || data.title.length > 80)) throw fail('bounded_agent_message_required');
+    } else if (data.query !== undefined && (typeof data.query !== 'string' || data.query.length > 500)
+      || data.activeWithinDays !== undefined && (!Number.isInteger(data.activeWithinDays) || data.activeWithinDays < 1 || data.activeWithinDays > 3650)
+      || data.sessionIds !== undefined && (!Array.isArray(data.sessionIds) || !data.sessionIds.length || data.sessionIds.length > 200 || data.sessionIds.some(id => typeof id !== 'string' || !id || id.length > 300))
+      || data.nativeThreadIds !== undefined && (!Array.isArray(data.nativeThreadIds) || !data.nativeThreadIds.length || data.nativeThreadIds.length > 200 || data.nativeThreadIds.some(id => !UUID.test(id ?? '')))
+      || data.discussionId !== undefined && !UUID.test(data.discussionId ?? '')) throw fail('bounded_agent_message_required');
+    body = data;
+    path = command === 'message' ? '/api/agent/message' : '/api/agent/broadcast';
+  }
+  else if (command === 'new-thread') {
+    const data = await inputJson(input);
+    if (!data || typeof data.title !== 'string' || !data.title.trim() || data.title.length > 200 || !/^[a-zA-Z0-9-]{8,100}$/.test(data.deliveryId ?? '') || data.host !== undefined && !['local','remote'].includes(data.host) || data.cwd !== undefined && (typeof data.cwd !== 'string' || !data.cwd || data.cwd.length > 4096) || Object.keys(data).some(key => !['title','deliveryId','host','cwd'].includes(key))) throw fail('bounded_native_thread_creation_required');
+    path = '/api/native/thread/create'; body = data;
+  } else if (["discover", "joinable", "work"].includes(command)) {
     const query = options.query ?? ""; if (query.length > 200) throw fail("query_limit_exceeded");
     path = command === "work" ? "/api/discover" : command === "joinable" ? "/api/discussions/joinable" : "/api/discussions/discover"; body = { query };
   } else if (command === "create") {
@@ -86,7 +110,11 @@ export async function runParticipantCli(args, { input, requestImpl = request } =
     path = "/api/retrieve"; body = { sourceId: options["source-id"] };
   } else {
     if (!UUID.test(options.discussion ?? "")) throw fail("discussion_uuid_required");
-    path = command === "read" ? "/api/discussions/context" : command === "join" ? "/api/discussions/join" : "/api/discussions/contribute"; body = { id: options.discussion };
+    path = command === "read" ? "/api/discussions/context" : command === "join" ? "/api/discussions/join" : command === 'invite' ? '/api/discussions/invite' : "/api/discussions/contribute"; body = { id: options.discussion };
+    if (command === 'invite') {
+      if (!options['source-id'] || options['source-id'].length > 300) throw fail('source_actor_id_required');
+      body.sessionId = options['source-id'];
+    }
     if (command === "contribute") {
       if (!options.turn || options.turn.length > 200 || !/^[a-zA-Z0-9-]{8,100}$/.test(options.delivery ?? "") || (options["reply-to"] && !UUID.test(options["reply-to"]))) throw fail("stable_contribution_identifiers_required");
       body = { ...body, text: await inputText(input), nativeTurnId: options.turn, deliveryId: options.delivery, ...(options["reply-to"] ? { replyTo: options["reply-to"] } : {}) };

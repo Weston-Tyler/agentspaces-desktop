@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $desktopProductRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$desktopRuntimePath = Join-Path $desktopProductRoot '.local/runtime.json'
+$desktopStateRoot=if($env:AGENTSPACES_STATE){[IO.Path]::GetFullPath($env:AGENTSPACES_STATE)}else{Join-Path $desktopProductRoot '.local'}
+$desktopRuntimePath = Join-Path $desktopStateRoot 'runtime.json'
 if (-not (Test-Path -LiteralPath $desktopRuntimePath)) {
     & (Join-Path $PSScriptRoot 'Start-Background.ps1') | Out-Null
     for ($desktopWait = 0; $desktopWait -lt 30 -and -not (Test-Path -LiteralPath $desktopRuntimePath); $desktopWait++) {

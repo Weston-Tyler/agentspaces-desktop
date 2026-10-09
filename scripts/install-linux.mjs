@@ -1,0 +1,21 @@
+import { cpSync, existsSync, mkdirSync, writeFileSync, chmodSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+if (process.platform !== "linux") throw new Error("This per-user installer requires Linux.");
+if (process.argv.slice(2).length) throw new Error("Run this installer without arguments from the extracted Linux package.");
+const root = fileURLToPath(new URL("../../../", import.meta.url));
+const manifest = JSON.parse(readFileSync(join(root, "resources", "runtime", "build-manifest.json"), "utf8"));
+if (manifest.platform !== "linux" || manifest.architecture !== process.arch || !existsSync(join(root, "agentspaces-desktop"))) throw new Error("Run the installer inside the matching extracted AgentSpaces Desktop Linux package.");
+const destination = join(homedir(), ".local", "opt", "agentspaces-desktop", manifest.version);
+if (existsSync(destination)) throw new Error("This version is already installed. The existing installation has been preserved.");
+mkdirSync(dirname(destination), { recursive: true });
+cpSync(root, destination, { recursive: true, errorOnExist: true, force: false, dereference: true });
+const applications = join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "applications");
+mkdirSync(applications, { recursive: true });
+const escape = value => value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("`", "\\`").replaceAll("$", "\\$").replaceAll("%", "%%");
+const desktop = join(applications, "com.agentspaces.desktop.desktop");
+writeFileSync(desktop, "[Desktop Entry]\nType=Application\nName=AgentSpaces Desktop\nComment=Connected Codex and Claude work\nExec=\"" + escape(join(destination, "agentspaces-desktop")) + "\"\nIcon=" + join(destination, "resources", "app", "assets", "agentspaces.png") + "\nTerminal=false\nCategories=Development;\nKeywords=agents;Codex;Claude;AgentSpaces;\nStartupWMClass=com.agentspaces.desktop\n");
+chmodSync(desktop, 0o644);
+console.log("Installed AgentSpaces Desktop " + manifest.version + " for this user. Open it from the applications menu. Workspace state remains outside the installation directory.");

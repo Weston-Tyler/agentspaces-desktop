@@ -253,6 +253,18 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
         if (m.replyTo) provenance.append(el("small", "Reply to message " + m.replyTo));
         content.append(provenance);
       }
+      if (m.wire?.metadata?.originalSelectorText) {
+        const selection = el('details');
+        selection.append(el('summary', 'Addressed agents'), el('p', m.wire.metadata.originalSelectorText));
+        try {
+          const report = JSON.parse(m.wire.metadata.agentSelectionCoverage ?? '{}');
+          const coverage = report.coverage ?? {};
+          selection.append(el('p', `${report.selectedCount ?? m.targets?.length ?? 0} selected across ${report.batchCount ?? 1} group(s). Catalog coverage: ${coverage.catalogCompleteness ?? 'not-established'}.`));
+          const omitted = Object.entries(report.omitted ?? {}).filter(([, count]) => count > 0).map(([kind,count]) => `${kind}: ${count}`).join(' · ');
+          if (omitted) selection.append(el('small', omitted));
+        } catch {}
+        content.append(selection);
+      }
       for (const t of m.targets ?? [])
         content.append(
           el("div", "@" + t.alias + " · " + replyLabel(t.status), "reply-status"),
@@ -270,7 +282,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
     textarea.required = true;
     textarea.maxLength = 8000;
     textarea.rows = 3;
-    textarea.placeholder = "Message the group…";
+    textarea.placeholder = '@all Share your results, or @recent(30d) @topic("chillit recipe")…';
     textarea.disabled = !g.available;
     label.htmlFor = textarea.id;
     textarea.oninput = () => {
@@ -338,6 +350,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
     submit.disabled = !g.available;
     controls.append(submit);
     form.append(
+      el("p", 'Use @aliases, @all, @thread(UUID), @recent(30d), or @topic("keywords"). Topic and date filters select connected peers beyond this room.', "fineprint"),
       label,
       textarea,
       suggestions,

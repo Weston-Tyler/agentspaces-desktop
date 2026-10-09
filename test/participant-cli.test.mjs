@@ -65,6 +65,30 @@ test("Participant CLI discovers joinable rooms, joins itself and creates groups 
   await assert.rejects(runParticipantCli(args("create"), { input: JSON.stringify({ ...body, selfRegistration: true }) }), /bounded_group_creation_required/);
   assert.equal(requests.length, 3);
 });
+test('Participant CLI exposes capabilities, source-bound invitations and empty native thread creation', async t => {
+  const { args, requests } = await setup(t);
+  await runParticipantCli(args('capabilities'));
+  await runParticipantCli(args('invite', '--discussion', GROUP, '--source-id', 'codex@local:' + GROUP));
+  const body = { title: 'New native work chat', deliveryId: 'cli-native-create-0001', host: 'remote', cwd: '/fictional/work' };
+  await runParticipantCli(args('new-thread'), { input: JSON.stringify(body) });
+  assert.deepEqual(requests.map(r => r.path), ['/api/agent/capabilities','/api/discussions/invite','/api/native/thread/create']);
+  assert.deepEqual(requests[1].body, { id: GROUP, sessionId: 'codex@local:' + GROUP });
+  assert.deepEqual(requests[2].body, body);
+  await assert.rejects(runParticipantCli(args('new-thread'), { input: JSON.stringify({ ...body, approvalPolicy: 'never' }) }), /bounded_native_thread_creation_required/);
+  assert.equal(requests.length, 3);
+});
+test('Participant CLI sends exact peer messages and bounded topic/date broadcasts', async t => {
+  const { args, requests } = await setup(t);
+  const common = { text: 'Please share your findings.', nativeTurnId: 'synthetic-turn', deliveryId: 'cli-message-0001' };
+  await runParticipantCli(args('message'), { input: JSON.stringify({ ...common, nativeThreadId: GROUP }) });
+  await runParticipantCli(args('broadcast'), { input: JSON.stringify({ ...common, deliveryId: 'cli-broadcast-0001', query: 'chillit recipe', activeWithinDays: 30 }) });
+  assert.deepEqual(requests.map(r => r.path), ['/api/agent/message', '/api/agent/broadcast']);
+  assert.equal(requests[1].body.activeWithinDays, 30);
+  await assert.rejects(runParticipantCli(args('message'), { input: JSON.stringify({ ...common, nativeThreadId: GROUP, sessionId: 'other' }) }), /bounded_agent_message_required/);
+  await assert.rejects(runParticipantCli(args('broadcast'), { input: JSON.stringify({ ...common, activeWithinDays: 0 }) }), /bounded_agent_message_required/);
+  await assert.rejects(runParticipantCli(args('broadcast'), { input: JSON.stringify({ ...common, model: 'override' }) }), /bounded_agent_message_required/);
+  assert.equal(requests.length, 2);
+});
 test("Revocation and server diagnostics never expose credentials; successful echo redacts capability", async (t) => {
   let status = 401;
   const { args } = await setup(t, () => ({ status, body: { secret: TOKEN, privateDiagnostic: "Should never appear in CLI error" } }));

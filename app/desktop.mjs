@@ -1,9 +1,15 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, session } from "electron";
+import { app, BrowserWindow, Tray, Menu, nativeImage, session, shell } from "electron";
 import { startServer } from "./server.mjs";
-import { join } from "node:path";
+import { join, isAbsolute } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { addNativeToolPaths } from './native-tool-path.mjs';
 app.setName("AgentSpaces Desktop");
+if (app.isPackaged) {
+  process.env.AGENTSPACES_NODE_BINARY = join(process.resourcesPath,'runtime',process.platform==='win32'?'node.exe':'node');
+  process.env.PATH = join(process.resourcesPath,'runtime') + (process.platform==='win32'?';':':') + (process.env.PATH ?? '');
+}
+addNativeToolPaths();
 if (process.platform === "win32") app.setAppUserModelId("com.agentspaces.desktop");
 const desktopIcon = fileURLToPath(new URL("../assets/agentspaces.png", import.meta.url));
 if (process.env.AGENTSPACES_DESKTOP_STATE) {
@@ -23,18 +29,35 @@ else {
   app
     .whenReady()
     .then(async () => {
-      const sourceRuntime = process.env.AGENTSPACES_STATE ? join(process.env.AGENTSPACES_STATE, "runtime.json") : fileURLToPath(new URL("../.local/runtime.json", import.meta.url));
+      const locationPath = join(app.getPath('userData'),'workspace-location.json');
+      let savedRoot = null;
+      if (existsSync(locationPath)) {
+        try { const saved = JSON.parse(readFileSync(locationPath,'utf8')); if(saved.schema===1 && typeof saved.root==='string' && saved.root.length<4096 && isAbsolute(saved.root)) savedRoot=saved.root; } catch {}
+      }
+      const ownedRoot = process.env.AGENTSPACES_STATE ?? savedRoot ?? join(app.getPath('userData'),'workspace');
+      const sourceRuntime = process.env.AGENTSPACES_STATE || savedRoot || app.isPackaged ? join(ownedRoot, "runtime.json") : fileURLToPath(new URL("../.local/runtime.json", import.meta.url));
       const sharedRuntime = process.env.AGENTSPACES_DESKTOP_RUNTIME ?? (!process.env.AGENTSPACES_DESKTOP_STATE && existsSync(sourceRuntime) ? sourceRuntime : null);
       if (sharedRuntime) {
-        const runtime = JSON.parse(readFileSync(sharedRuntime, "utf8"));
-        if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(runtime.address)) throw new Error("Invalid companion address");
-        const health = await fetch(runtime.address + "/api/health", { headers: { Authorization: "Bearer " + runtime.admin }, signal: AbortSignal.timeout(3000) }).then(r => r.json());
-        if (health.instance !== runtime.instance || health.pid !== runtime.pid) throw new Error("Companion runtime identity mismatch");
-        // An attached desktop window does not own the background process.
-        companion = { address: runtime.address, close: async () => {} };
-      } else companion = await startServer({
-        root: join(app.getPath("userData"), "alpha-state"),
-        port: 0,
+        let runtime;
+        try {
+          runtime = JSON.parse(readFileSync(sharedRuntime, "utf8"));
+          if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(runtime.address)) throw new Error("Invalid companion address");
+          const response = await fetch(runtime.address + "/api/health", { headers: { Authorization: "Bearer " + runtime.admin }, signal: AbortSignal.timeout(3000) });
+          const health = await response.json();
+          if (!response.ok || health.instance !== runtime.instance || health.pid !== runtime.pid) throw new Error("Companion runtime identity mismatch");
+          // An attached desktop window does not own the background process.
+          companion = { address: runtime.address, close: async () => {} };
+        } catch (error) {
+          // A saved runtime can outlive its service after a computer restart.
+          // Do not replace a live process or an explicitly selected runtime.
+          let live = false;
+          if (Number.isInteger(runtime?.pid) && runtime.pid > 0) try { process.kill(runtime.pid, 0); live = true; } catch {}
+          if (live || process.env.AGENTSPACES_DESKTOP_RUNTIME) throw error;
+        }
+      }
+      if (!companion) companion = await startServer({
+        root: ownedRoot,
+        port: 43127,
       });
       session.defaultSession.setPermissionRequestHandler((_w, _p, callback) =>
         callback(false),
@@ -57,7 +80,15 @@ else {
           });
           window.setMenuBarVisibility(false);
           window.loadURL(companion.address);
-          window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+          window.webContents.setWindowOpenHandler(({ url }) => {
+            try {
+              const target = new URL(url);
+              const company = target.protocol === 'https:' && ['badmonkey.ai','www.badmonkey.ai'].includes(target.hostname);
+              const project = target.protocol === 'https:' && target.hostname === 'github.com' && /^\/(?:badmonkeyai(?:\/|$)|Weston-Tyler\/agentspaces-desktop(?:\/|$))/.test(target.pathname);
+              if ((company || project) && !target.username && !target.password) void shell.openExternal(target.href);
+            } catch {}
+            return { action: 'deny' };
+          });
           window.webContents.on("will-navigate", (event, url) => {
             if (new URL(url).origin !== companion.address)
               event.preventDefault();

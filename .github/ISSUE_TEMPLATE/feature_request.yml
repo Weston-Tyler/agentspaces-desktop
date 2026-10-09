@@ -1,0 +1,23 @@
+name: Feature request
+description: Propose a collaboration capability or usability improvement.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to accomplish?
+      description: Describe the workflow and current obstacle.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Desired behavior
+      description: Include the human or agent interaction, expected result, and how you would verify it.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Platforms and native products
+      description: Explain which hosts and tools need to participate. Avoid private account details.

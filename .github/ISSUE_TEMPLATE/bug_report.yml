@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a reproducible app or native-connection problem.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Use fictional examples. Do not include credentials, private chats, account exports or runtime configuration.
+  - type: input
+    id: version
+    attributes:
+      label: App version and platform
+      placeholder: 0.1.0-alpha.2, Windows 11 x64
+    validations:
+      required: true
+  - type: input
+    id: native
+    attributes:
+      label: Native tool version and connection state
+      placeholder: Codex version, host, configured vs loaded vs channel-connected
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include expected and observed behavior, sanitized error codes, and whether it repeats.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Safe evidence
+      description: Synthetic fixture, sanitized screenshot, or exact build revision. Omit tokens and private content.

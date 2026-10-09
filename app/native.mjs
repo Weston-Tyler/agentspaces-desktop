@@ -89,15 +89,18 @@ export async function detectTools(host = "local") {
   );
 }
 export class CodexReadAdapter {
+  #threadCreationEnabled;
   constructor({
     spawnProcess = spawn,
     host = "local",
     onDiagnostic = () => {},
+    enableThreadCreation = false,
   } = {}) {
     if (!["local", "remote"].includes(host))
       throw new Error("Unsupported host");
     this.host = host;
     this.onDiagnostic = onDiagnostic;
+    this.#threadCreationEnabled = enableThreadCreation === true;
     this.normalize =
       host === "remote"
         ? (value) => posix.normalize(value).replace(/\/$/, "")
@@ -159,6 +162,19 @@ export class CodexReadAdapter {
   rpc(method, params) {
     if (!["initialize", "thread/list", "thread/read"].includes(method))
       throw new Error("Read-only adapter refuses this method");
+    return this.#request(method, params);
+  }
+  createEmptyThread(cwd) {
+    if (!this.#threadCreationEnabled)
+      throw new Error("Thread creation is not enabled on this adapter");
+    return this.#request("thread/start", { cwd, ephemeral: false });
+  }
+  setThreadName(threadId, name) {
+    if (!this.#threadCreationEnabled)
+      throw new Error("Thread creation is not enabled on this adapter");
+    return this.#request("thread/name/set", { threadId, name });
+  }
+  #request(method, params) {
     return new Promise((res, rej) => {
       this.onDiagnostic({ event: "request", method });
       const id = ++this.id;

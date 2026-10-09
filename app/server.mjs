@@ -7,6 +7,16 @@ import { Store } from "./store.mjs";
 import { Engine } from "./engine.mjs";
 import { FabricAdapter } from "./fabric.mjs";
 import { openNativeSignIn } from "./native.mjs";
+import { NativeThreadCreation } from './native-thread-creation.mjs';
+import { scopePathExcluded } from './workspace-map.mjs';
+import { nativeAdapterCompatible } from './native-versions.mjs';
+import { hostPaths, normalizeHostPath } from './platform.mjs';
+import { OwnerBrowserSession } from './owner-browser-session.mjs';
+import { RecentHistory } from './recent-history.mjs';
+import { addNativeToolPaths } from './native-tool-path.mjs';
+import { PeerMessaging } from './peer-messaging.mjs';
+import { AgentBroadcast } from './agent-broadcast.mjs';
+import { parseAgentSelectors } from './agent-selection.mjs';
 import { protectStateDirectory } from "./state-security.mjs";
 import { loadWorkspaceFixture } from "./workspace-fixture.mjs";
 import { installHostRouter } from "./router-install.mjs";
@@ -54,11 +64,13 @@ export async function startServer({
   sourceMetadataResolver = resolveNativeSourceMetadata,
   automaticInstallLocal,
   automaticInstallRemote,
+  nativeThreadAdapterFactory,
 } = {}) {
   const store = provided?.store ?? new Store(root),
     fabric = provided?.fabric ?? new FabricAdapter({ stateRoot: root }),
     engine = provided ?? new Engine(store, fabric);
   protectStateDirectory(root);
+  if (!provided) addNativeToolPaths();
   if (!provided) await engine.initialize();
   const desktopStartup = desktopDiscovery ? ensureDesktopDiscovery(engine) : null;
   let connectedWork = null;
@@ -66,14 +78,37 @@ export async function startServer({
     if (engine.workspace.running) desktopStartup.promise.then(() => { connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts }); });
     else connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts });
   }
-  const session = randomBytes(32).toString("hex"),
-    admin = randomBytes(32).toString("hex"),
+  const ownerBrowser = new OwnerBrowserSession(store), recentHistory = new RecentHistory(store);
+  const admin = randomBytes(32).toString("hex"),
     instance = randomBytes(16).toString("hex");
-  const cookies = new Set([session]);
   let closing = false;
   const activeAnswers = new Map();
   const channels = new ChannelHub(engine);
   const codexAgents = new CodexDiscussionHub(engine, { adapterFactory: codexAdapterFactory, onContribution: (group, message) => routeConversation(engine, { codexAgents, channels }, group, message) });
+  const nativeThreads = new NativeThreadCreation(engine, { adapterFactory: nativeThreadAdapterFactory, registerSource: async input => {
+    const saved = store.data.nativeAutomaticInstallations?.[input.host + ':codex']?.device;
+    let device;
+    if (saved) { sourceBindings.device(saved.token); device = saved; }
+    else device = sourceBindings.issueDevice({ host: input.host, provider: 'codex' });
+    const registered = await sourceBindings.register(device.token, { nativeThreadId: input.nativeThreadId, cwd: input.cwd });
+    return { sessionId: registered.sessionId };
+  } });
+  const peerMessages = new PeerMessaging(engine, { resolveTarget: async input => {
+    const saved = store.data.nativeAutomaticInstallations?.[input.host + ':' + input.provider]?.device;
+    let device;
+    if (saved) { sourceBindings.device(saved.token); device = saved; }
+    else device = sourceBindings.issueDevice({ host: input.host, provider: input.provider });
+    const registered = await sourceBindings.register(device.token, { nativeThreadId: input.nativeThreadId });
+    return { sessionId: registered.sessionId };
+  } });
+  const broadcasts = new AgentBroadcast(engine);
+  const routeBatches = async result => {
+    for (const batch of result.batches) {
+      const group = engine.discussions.group(batch.discussionId);
+      await routeConversation(engine, { codexAgents, channels }, group, group.messages.find(m => m.id === batch.messageId));
+    }
+    return result;
+  };
   let connections, participantConnections, sourceBindings, automaticConnections;
   const terminals = providedTerminals ?? new NativeTerminals({ resolveLaunch: options => connections.resolveLaunch(options) });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 65536, perMessageDeflate: false });
@@ -116,7 +151,7 @@ export async function startServer({
       if (url.pathname === "/")
         res.setHeader(
           "Set-Cookie",
-          `as_session=${session}; HttpOnly; SameSite=Strict; Path=/`,
+          ownerBrowser.cookie(),
         );
       const file = staticFiles[url.pathname] ?? vendorFiles[url.pathname];
       res.setHeader(
@@ -135,7 +170,7 @@ export async function startServer({
       req.headers.cookie ?? "",
     )?.[1];
     let connector = null, registrationDevice = null;
-    if (!isAdmin && !cookies.has(cookie)) {
+    if (!isAdmin && !ownerBrowser.valid(cookie)) {
       const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
       try {
         if (token) connector = engine.connector(token);
@@ -214,6 +249,12 @@ export async function startServer({
           "/api/discussions/joinable",
           "/api/discussions/join",
           "/api/discussions/create",
+          "/api/discussions/invite",
+          "/api/native/thread/create",
+          "/api/agent/capabilities",
+          "/api/agent/message",
+          "/api/agent/broadcast",
+          "/api/workspace/compare",
           "/api/discussions/contribute",
           "/api/native/channel/reply",
         ].includes(url.pathname)
@@ -256,6 +297,40 @@ export async function startServer({
         case '/api/discussions/join':
           result = engine.discussions.join(data, connector);
           break;
+        case '/api/discussions/invite':
+          result = engine.discussions.invite(data, connector);
+          break;
+        case '/api/native/thread/create': {
+          const caller = engine.discussions.participant(connector), host = data.host ?? caller.host;
+          if (!engine.workspace.index?.profile?.hosts.includes(host)) throw new Error('Native host outside connected scope');
+          if (!nativeThreadAdapterFactory) await engine.probe(host);
+          result = await nativeThreads.create(data, connector);
+          break;
+        }
+        case '/api/agent/capabilities': {
+          const caller = engine.discussions.participant(connector), profile = engine.workspace.index?.profile;
+          const workspaceGranted = !!profile?.active && connector.scopeId === profile.id;
+          const creationGranted = workspaceGranted && profile.policy === 'local-retrieval' && caller.account === profile.account && !!engine.permissions(caller).content && profile.providers.includes('codex');
+          result = { sourceId: caller.id, host: caller.host, provider: caller.provider,
+            groups: { discover: true, create: true, join: true, invite: true, read: true, contribute: true, firstAccessJoinsOpenRoom: true },
+            nativeThreads: { provider: 'codex', creationStartsTurn: false, hosts: (profile?.hosts ?? []).map(host => ({ host, available: creationGranted && engine.tools.some(t => t.host === host && t.provider === 'codex' && t.installed && nativeAdapterCompatible(t)), policy: 'inherit-native-configuration' })) },
+            workspace: { search: workspaceGranted, inspect: workspaceGranted && !!profile.indexFiles, compare: workspaceGranted && !!profile.indexFiles },
+            findings: { discover: true, retrieveShared: true },
+            ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
+            unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
+            availableTools: ['register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
+          break;
+        }
+        case '/api/agent/message': {
+          result = await peerMessages.send(data, connector);
+          const group = engine.discussions.group(result.discussionId), message = group.messages.find(m => m.id === result.messageId);
+          await routeConversation(engine, { codexAgents, channels }, group, message);
+          break;
+        }
+        case '/api/agent/broadcast':
+          result = await routeBatches(await broadcasts.send(data, connector));
+          break;
         case '/api/native/discussions/recover':
           result = data.reconcileOnly === true ? await codexAgents.reconcileSubmitted() : await codexAgents.recoverUndispatched({ includeLegacy: data.includeLegacy === true });
           break;
@@ -289,6 +364,14 @@ export async function startServer({
         case "/api/ask/search":
           result = engine.ask.search(data);
           break;
+        case '/api/ask/history':
+          if (connector || registrationDevice) throw new Error('Owner-private recent history');
+          if (data.clear === true) result = recentHistory.clear();
+          else if (data.record) {
+            if (Object.keys(data.record).some(k => !['deliveryId','question','status'].includes(k)) || data.record.status !== 'failed') throw new Error('Bounded pre-dispatch history record required');
+            recentHistory.record(data.record); result = recentHistory.list();
+          } else result = recentHistory.list();
+          break;
         case "/api/ask/answer": {
           if (activeAnswers.size >= 2)
             throw new Error(
@@ -310,6 +393,13 @@ export async function startServer({
           res.once("close", onClose);
           try {
             result = await engine.ask.answer(data, { signal: abort.signal });
+            try { recentHistory.record({ deliveryId: data.deliveryId, question: data.question, status: 'complete', result }); }
+            catch { result.historyWarning = 'Recent history could not be saved; this answer completed.'; }
+          } catch (error) {
+            if (typeof data.deliveryId === 'string' && typeof data.question === 'string') {
+              try { recentHistory.record({ deliveryId: data.deliveryId, question: data.question, status: error.uncertainOutcome ? 'uncertain' : 'failed' }); } catch {}
+            }
+            throw error;
           } finally {
             if (timeout) clearTimeout(timeout);
             activeAnswers.delete(data.deliveryId);
@@ -350,21 +440,26 @@ export async function startServer({
           connectedWork = connectAllOwnedWork(engine, { hosts: data.hosts ?? ["local", "remote"] });
           result = { status: connectedWork.status, stage: connectedWork.stage, partial: connectedWork.partial };
           break;
-        case "/api/discussions/post":
-          result = engine.discussions.post(data);
-          {
-            const group = engine.discussions.group(data.id), message = group.messages.find(item => item.deliveryId === data.deliveryId);
-            await routeConversation(engine, { codexAgents, channels }, group, message);
-            store.save(); result = engine.discussions.view(group);
-          }
+        case "/api/discussions/post": {
+          const posted = await engine.discussions.postAddressed(data);
+          await routeBatches(posted);
+          store.save(); result = engine.discussions.view(engine.discussions.group(data.id));
+          if (posted.broadcast) result.addressing = posted.broadcast;
           break;
+        }
         case "/api/discussions/context":
-          result = engine.discussions.context(data.id, connector);
+          result = engine.discussions.contextOrJoin(data.id, connector);
           break;
         case "/api/discussions/discover":
           result = engine.discussions.discover(data, connector);
           break;
         case "/api/discussions/contribute":
+          engine.discussions.contextOrJoin(data.id, connector);
+          if (parseAgentSelectors(data.text).directives.length) {
+            if (data.replyTo) throw new Error('Recipient selectors and replyTo must be sent separately');
+            result = await routeBatches(await broadcasts.send({ discussionId: data.id, text: data.text, nativeTurnId: data.nativeTurnId, deliveryId: data.deliveryId }, connector));
+            break;
+          }
           result = engine.discussions.contribute(data, connector);
           { const group = engine.discussions.group(data.id); await routeConversation(engine, { codexAgents, channels }, group, group.messages.find(message => message.deliveryId === data.deliveryId)); }
           break;
@@ -387,6 +482,17 @@ export async function startServer({
           });
           break;
         case "/api/workspace/compare":
+          if (connector) {
+            engine.discussions.participant(connector);
+            const p = engine.workspace.index?.profile;
+            if (!p?.active || !p.indexFiles || connector.scopeId !== p.id) throw new Error('Granted workspace content scope required');
+            for (const id of [data.leftId, data.rightId]) {
+              const node = engine.workspace.index.nodes.find(n => n.id === id && n.kind === 'worktree');
+              if (!node || !p.hosts.includes(node.host) || scopePathExcluded(node.path, node.host, p.exclusions[node.host] ?? [])) throw new Error('Worktree outside connected scope');
+              const rootPath = normalizeHostPath(node.path, node.host), separator = hostPaths(node.host).sep;
+              if ((p.exclusions[node.host] ?? []).some(exclusion => { const path = normalizeHostPath(exclusion, node.host); return path === rootPath || path.startsWith(rootPath + separator); })) throw new Error('Comparison cannot honor excluded descendants; inspect permitted indexed files instead');
+            }
+          }
           result = await engine.workspace.compare(data);
           break;
         case "/api/workspace/search":
@@ -493,7 +599,7 @@ export async function startServer({
     }
     const match = /^\/api\/native\/terminal\/([a-f0-9-]+)$/.exec(path);
     const cookie = /\bas_session=([a-f0-9]+)/.exec(req.headers.cookie ?? "")?.[1];
-    if (!match || req.headers.origin !== "http://" + expected || !cookies.has(cookie)) return deny();
+    if (!match || req.headers.origin !== "http://" + expected || !ownerBrowser.valid(cookie)) return deny();
     try {
       terminals.get(match[1]);
       sockets.handleUpgrade(req, socket, head, ws => {
@@ -523,7 +629,7 @@ export async function startServer({
   );
   async function close() {
     await participantConnections.close();
-    codexAgents.close();
+    await codexAgents.close();
     if (engine.workspace.running) engine.workspace.cancel();
     terminals.closeAll();
     for (const ws of sockets.clients) ws.terminate();

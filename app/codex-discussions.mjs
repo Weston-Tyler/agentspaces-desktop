@@ -230,5 +230,26 @@ export class CodexDiscussionHub {
     catch { return { status: 'native-refresh-unavailable' }; }
     finally { adapter.close(); }
   }
-  close() { this.closed = true; clearInterval(this.recoveryTimer); for (const abort of this.aborters.values()) abort.abort(); for (const adapter of this.adapters.values()) adapter.close(); }
+  close({ cancelNative = false } = {}) {
+    if (typeof cancelNative !== 'boolean') throw new Error('Native cancellation choice must be boolean');
+    if (this.closePromise) return this.closePromise;
+    this.closed = true; clearInterval(this.recoveryTimer);
+    this.closePromise = (async () => {
+      const pending = [...this.pending.values()], closures = [];
+      const detach = () => {
+        for (const adapter of [...this.adapters.values()]) {
+          try { closures.push(Promise.resolve(adapter.close()).catch(() => {})); } catch { /* Preserve durable receipts if a transport close fails. */ }
+        }
+      };
+      // Closing the companion is not permission to cancel input already owned
+      // by the native daemon. Disconnect persists uncertainty for later reads.
+      if (cancelNative) for (const abort of this.aborters.values()) abort.abort();
+      else detach();
+      let timer;
+      try { await Promise.race([Promise.allSettled([...pending, ...closures]), new Promise(resolve => { timer = setTimeout(resolve, 2000); })]); }
+      finally { clearTimeout(timer); if (cancelNative) detach(); }
+      return { status: 'closed', nativeCancellationRequested: cancelNative };
+    })();
+    return this.closePromise;
+  }
 }

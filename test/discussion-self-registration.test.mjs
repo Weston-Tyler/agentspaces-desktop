@@ -7,7 +7,7 @@ import { Engine } from "../app/engine.mjs";
 import { Store } from "../app/store.mjs";
 
 const fixtureBindings = new WeakMap();
-function fixture(t, count = 14) {
+function fixture(t, count = 202) {
   const root = mkdtempSync(join(tmpdir(), "as-self-registration-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const makeEngine = () => new Engine(new Store(root), {
@@ -125,14 +125,31 @@ test("foreign account/scope, excluded host/path and stale identities cannot self
   assert.equal(f.engine.discussions.group(room.id).members.length, 2);
 });
 
-test("admission stops at twelve members while repeated membership remains idempotent", t => {
-  const { engine, ids } = fixture(t), room = openRoom(engine, ids.slice(0, 12));
+test("admission stops at two hundred members while repeated membership remains idempotent", t => {
+  const { engine, ids } = fixture(t), room = openRoom(engine, ids.slice(0, 200));
   const original = engine.discussions.group(room.id).members.map(member => ({ sessionId: member.sessionId, alias: member.alias }));
-  assert.throws(() => engine.discussions.join({ id: room.id }, binding(engine, ids[12])));
-  assert.deepEqual(engine.discussions.discoverJoinable({}, binding(engine, ids[12])), []);
+  assert.throws(() => engine.discussions.join({ id: room.id }, binding(engine, ids[200])));
+  assert.deepEqual(engine.discussions.discoverJoinable({}, binding(engine, ids[200])), []);
   const repeat = engine.discussions.join({ id: room.id }, binding(engine, ids[0]));
   assert.equal(repeat.alreadyMember, true); assert.equal(repeat.version, room.version);
   assert.deepEqual(engine.discussions.group(room.id).members.map(member => ({ sessionId: member.sessionId, alias: member.alias })), original);
+});
+
+test("the thirteenth eligible native source joins an open room without manual membership changes", t => {
+  const { engine, ids } = fixture(t), room = openRoom(engine, ids.slice(0, 12));
+  const joined = engine.discussions.join({ id: room.id }, binding(engine, ids[12]));
+  assert.equal(joined.alreadyMember, false); assert.equal(joined.participantAlias, "codex7");
+  assert.equal(engine.discussions.group(room.id).members.length, 13);
+  assert.equal(engine.discussions.context(room.id, binding(engine, ids[12])).available, true);
+});
+
+test("a large native room can post its opening question without counting recipients as synthetic messages", t => {
+  const { engine, ids } = fixture(t), room = openRoom(engine, ids.slice(0, 200), { agentInitiation: true });
+  const posted = engine.discussions.post({ id: room.id, text: "Please share your current work.", deliveryId: "large-native-opening-0001" });
+  assert.equal(posted.messages.length, 1); assert.equal(posted.messages[0].source, null);
+  assert.equal(posted.messages[0].targets.length, 200);
+  assert.equal(posted.messages[0].text, "Please share your current work.");
+  assert.throws(() => engine.discussions.create({ title: "Too many native sources", sessionIds: ids.slice(0, 201) }), /distinct source threads/);
 });
 
 test("joining each provider preserves existing aliases and adds unique stable aliases", t => {
@@ -270,4 +287,150 @@ test("bound admission and creation require a source binding and bounded metadata
   assert.throws(() => engine.discussions.join({ id: "unknown-discussion" }, binding(engine, ids[1])));
   assert.throws(() => engine.discussions.createFor({ title: "Unbound creation", sessionIds: [ids[0]], deliveryId: "unbound-create-0001" }, null));
   assert.equal(engine.store.data.discussions.length, 1);
+});
+
+test("a room member invites a known peer without minting capabilities or replaying messages", t => {
+  const { engine, ids, makeEngine } = fixture(t), room = openRoom(engine, ids.slice(0, 2), { agentInitiation: true });
+  engine.discussions.post({ id: room.id, text: "PRIVATE-SYNTHETIC-PRE-INVITATION", deliveryId: "before-invitation-0001" });
+  const group = engine.discussions.group(room.id), caller = binding(engine, ids[0]);
+  const messages = structuredClone(group.messages), grants = structuredClone(engine.store.data.grants);
+  const connectors = structuredClone(engine.store.data.connectors), version = group.version;
+  const invited = engine.discussions.invite({ id: room.id, sessionId: ids[2], invitedBy: ids[3] }, caller);
+  assert.deepEqual(invited, {
+    id: room.id, title: room.title, version: version + 1, participantAlias: "codex2",
+    sessionId: ids[2], alreadyMember: false, invitedBy: caller.sessionId,
+  });
+  assert(!JSON.stringify(invited).includes("PRIVATE-SYNTHETIC"));
+  assert.equal(engine.discussions.context(room.id, binding(engine, ids[2])).available, true);
+  assert.deepEqual(group.members.slice(0, 2).map(member => member.alias), ["codex1", "claude1"]);
+  assert.deepEqual(group.messages, messages, "existing messages and delivery targets are untouched");
+  assert.deepEqual(engine.store.data.connectors, connectors, "an invitation mints no target connector");
+  assert.deepEqual(engine.store.data.grants, grants);
+  const repeat = engine.discussions.invite({ id: room.id, sessionId: ids[2] }, caller);
+  assert.equal(repeat.alreadyMember, true); assert.equal(repeat.version, invited.version);
+  assert.equal(repeat.participantAlias, invited.participantAlias); assert.equal(group.members.length, 3);
+  const restarted = makeEngine(), recovered = restarted.discussions.invite({ id: room.id, sessionId: ids[2] }, caller);
+  assert.equal(recovered.alreadyMember, true); assert.equal(recovered.version, invited.version);
+  assert.equal(recovered.participantAlias, invited.participantAlias);
+  assert.equal(restarted.discussions.group(room.id).members.length, 3);
+  assert.equal(restarted.modelCalls, 0); assert.equal(restarted.cache.size, 0);
+});
+
+test("invitations require a current room member and owner-enabled admission", t => {
+  const { engine, ids } = fixture(t), open = openRoom(engine, ids.slice(0, 2));
+  const closed = engine.discussions.create({ title: "Closed invitations", sessionIds: [ids[0]] });
+  const caller = binding(engine, ids[0]);
+  assert.throws(() => engine.discussions.invite({ id: open.id, sessionId: ids[2] }, binding(engine, ids[3])), /participant/);
+  assert.throws(() => engine.discussions.invite({ id: open.id, sessionId: ids[2] }, null));
+  assert.throws(() => engine.discussions.invite({ id: closed.id, sessionId: ids[2] }, caller), /self-registration/);
+  engine.discussions.setPolicy({ id: open.id, selfRegistration: false });
+  assert.throws(() => engine.discussions.invite({ id: open.id, sessionId: ids[2] }, caller), /self-registration/);
+  assert.equal(engine.discussions.group(open.id).members.length, 2);
+  assert.equal(engine.discussions.group(closed.id).members.length, 1);
+  engine.discussions.setPolicy({ id: open.id, selfRegistration: true });
+  engine.grant(ids[0], { share: false });
+  assert.throws(() => engine.discussions.invite({ id: open.id, sessionId: ids[2] }, caller));
+  assert.equal(engine.discussions.group(open.id).members.length, 2);
+});
+
+test("invitation preserves target refusals and rejects foreign or noncanonical native identities", t => {
+  const mutations = [
+    ({ engine, ids }) => engine.grant(ids[2], { enrolled: false }),
+    ({ engine, ids }) => engine.grant(ids[2], { retrieve: false }),
+    ({ engine, ids }) => engine.grant(ids[2], { share: false }),
+    ({ sources }) => { sources[2].account = "foreign-account"; },
+    ({ sources }) => { sources[2].scopeId = "foreign-scope"; },
+    ({ sources }) => { sources[2].host = "foreign-host"; },
+    ({ sources }) => { sources[2].provider = "foreign-provider"; },
+    ({ sources }) => { sources[2].fixture = true; },
+    ({ sources }) => { sources[2].nativeThreadId = "00000000-0000-4000-8000-000000000099"; },
+    ({ sources }) => { sources[2].cwd = null; },
+    ({ engine, sources }) => { engine.workspace.index.profile.exclusions.local = [sources[2].cwd]; },
+  ];
+  for (const mutate of mutations) {
+    const f = fixture(t), room = openRoom(f.engine, f.ids.slice(0, 2)), caller = binding(f.engine, f.ids[0]);
+    mutate(f);
+    const grants = structuredClone(f.engine.store.data.grants), connectors = structuredClone(f.engine.store.data.connectors);
+    assert.throws(() => f.engine.discussions.invite({ id: room.id, sessionId: f.ids[2] }, caller));
+    assert.equal(f.engine.discussions.group(room.id).members.length, 2);
+    assert.equal(f.engine.discussions.group(room.id).version, room.version);
+    assert.deepEqual(f.engine.store.data.grants, grants); assert.deepEqual(f.engine.store.data.connectors, connectors);
+  }
+  const { engine, ids, sources } = fixture(t), room = openRoom(engine, ids.slice(0, 2)), caller = binding(engine, ids[0]);
+  for (const sessionId of ["unknown-source", sources[2].nativeThreadId, "", "x".repeat(301)]) {
+    assert.throws(() => engine.discussions.invite({ id: room.id, sessionId }, caller));
+  }
+  assert.equal(engine.discussions.group(room.id).members.length, 2);
+});
+
+test("invitations refuse a two-hundred-and-first source but preserve repeat membership at capacity", t => {
+  const { engine, ids } = fixture(t), room = openRoom(engine, ids.slice(0, 200)), caller = binding(engine, ids[0]);
+  assert.throws(() => engine.discussions.invite({ id: room.id, sessionId: ids[200] }, caller));
+  const repeated = engine.discussions.invite({ id: room.id, sessionId: ids[1] }, caller);
+  assert.equal(repeated.alreadyMember, true); assert.equal(repeated.participantAlias, "claude1");
+  assert.equal(repeated.sessionId, ids[1]); assert.equal(repeated.version, room.version);
+  assert.equal(engine.discussions.group(room.id).members.length, 200);
+});
+
+test("invitations and self-joins allocate stable aliases through the same admission path", t => {
+  const { engine, ids } = fixture(t), room = openRoom(engine, ids.slice(0, 2)), caller = binding(engine, ids[0]);
+  const invitedCodex = engine.discussions.invite({ id: room.id, sessionId: ids[2] }, caller);
+  const invitedClaude = engine.discussions.invite({ id: room.id, sessionId: ids[3] }, caller);
+  const joinedCodex = engine.discussions.join({ id: room.id }, binding(engine, ids[4]));
+  assert.deepEqual([invitedCodex.participantAlias, invitedClaude.participantAlias, joinedCodex.participantAlias], ["codex2", "claude2", "codex3"]);
+  const group = engine.discussions.group(room.id);
+  assert.equal(new Set(group.members.map(member => member.alias)).size, group.members.length);
+  engine.grant(ids[2], { retrieve: false });
+  assert.throws(() => engine.discussions.invite({ id: room.id, sessionId: ids[2] }, caller));
+  assert.equal(group.members.length, 5); assert.equal(group.version, joinedCodex.version);
+});
+
+test("an eligible first context request joins its open room and repeated reads do not mutate it", t => {
+  const { engine, ids } = fixture(t), room = openRoom(engine, ids.slice(0, 2), { agentInitiation: true });
+  engine.discussions.post({ id: room.id, text: "PRIVATE-SYNTHETIC-CONTEXT-BEFORE-FIRST-READ", deliveryId: "before-first-read-0001" });
+  const group = engine.discussions.group(room.id), caller = binding(engine, ids[2]);
+  const messages = structuredClone(group.messages), grants = structuredClone(engine.store.data.grants);
+  const connectors = structuredClone(engine.store.data.connectors), version = group.version;
+  assert.throws(() => engine.discussions.context(room.id, caller), /participant/);
+  assert.deepEqual(engine.discussions.discover({}, caller), []);
+  assert.equal(engine.discussions.discoverJoinable({}, caller).length, 1);
+  assert.equal(group.members.length, 2, "discovery and ordinary context never silently join rooms");
+  const context = engine.discussions.contextOrJoin(room.id, caller);
+  assert.equal(context.available, true); assert.equal(context.version, version + 1);
+  assert.equal(context.messages[0].text, messages[0].text);
+  assert.equal(context.members.find(member => member.sessionId === ids[2]).alias, "codex2");
+  assert.equal(group.members.length, 3);
+  assert.deepEqual(group.messages, messages, "reading creates no new message or delivery allocation");
+  assert.deepEqual(engine.store.data.grants, grants); assert.deepEqual(engine.store.data.connectors, connectors);
+  const repeated = engine.discussions.contextOrJoin(room.id, caller);
+  assert.equal(repeated.version, context.version); assert.equal(group.members.length, 3);
+  assert.deepEqual(group.messages, messages);
+});
+
+test("first context requests leave closed, full and ineligible rooms unchanged", t => {
+  const { engine, ids } = fixture(t), caller = binding(engine, ids[2]);
+  const closed = engine.discussions.create({ title: "Closed first read", sessionIds: ids.slice(0, 2) });
+  assert.throws(() => engine.discussions.contextOrJoin(closed.id, caller), /participant/);
+  assert.equal(engine.discussions.group(closed.id).members.length, 2);
+  const full = openRoom(engine, ids.slice(0, 200));
+  assert.throws(() => engine.discussions.contextOrJoin(full.id, binding(engine, ids[200])));
+  assert.equal(engine.discussions.group(full.id).members.length, 200);
+  for (const mutate of [
+    ({ engine, ids }) => engine.grant(ids[2], { enrolled: false }),
+    ({ engine, ids }) => engine.grant(ids[2], { retrieve: false }),
+    ({ engine, ids }) => engine.grant(ids[2], { share: false }),
+    ({ engine, ids }) => engine.grant(ids[0], { share: false }),
+    ({ sources }) => { sources[2].account = "foreign-account"; },
+    ({ sources }) => { sources[2].scopeId = "foreign-scope"; },
+    ({ sources }) => { sources[0].nativeThreadId = "00000000-0000-4000-8000-000000000099"; },
+    ({ engine }) => { engine.workspace.index.profile.active = false; },
+  ]) {
+    const f = fixture(t), room = openRoom(f.engine, f.ids.slice(0, 2)), bound = binding(f.engine, f.ids[2]);
+    mutate(f);
+    const grants = structuredClone(f.engine.store.data.grants), connectors = structuredClone(f.engine.store.data.connectors);
+    assert.throws(() => f.engine.discussions.contextOrJoin(room.id, bound));
+    assert.equal(f.engine.discussions.group(room.id).members.length, 2);
+    assert.equal(f.engine.discussions.group(room.id).version, room.version);
+    assert.deepEqual(f.engine.store.data.grants, grants); assert.deepEqual(f.engine.store.data.connectors, connectors);
+  }
 });

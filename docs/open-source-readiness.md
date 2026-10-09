@@ -1,6 +1,8 @@
 # Open-source readiness
 
-AgentSpaces Desktop is a source alpha intended for an open-source release. Local showcase documentation does not publish the repository, change visibility or grant a license. No project license has been selected. Dependencies’ licenses do not automatically license this application.
+The owner approved public distribution of AgentSpaces Desktop under [Apache 2.0](../LICENSE). The application is an open-source alpha with unsigned Windows/Linux packages. Actual publication, package contents and installation acceptance must still be verified against the release revision; a documentation edit is not evidence that those steps completed. Third-party components retain their own licenses and notices.
+
+The desktop companion builds on [AgentSpaces](https://www.badmonkey.ai/agentspaces/) by [BadMonkey](https://www.badmonkey.ai/). Upstream framework/binding ownership and this standalone repository's role are documented in [brand and attribution](brand-and-attribution.md) and [NOTICE](../NOTICE).
 
 ## Showcase material
 
@@ -16,26 +18,28 @@ These are presentation examples, not live native execution proof. Generate them 
 
 | Area | Evidence boundary |
 | --- | --- |
-| Desktop | Windows source application observed; no signed packaged release |
-| Linux | Remote terminal and adapter target exercised; Linux desktop parity unqualified |
+| Desktop | Windows source application observed; Windows installer construction implemented; signed distribution and release acceptance remain separate |
+| Linux | Remote terminal/adapter target exercised; archive and per-user menu installer implemented; desktop/provider parity unqualified |
 | macOS | Packaging, native login and acceptance run unqualified |
 | Ask | Automatic permitted context; native inference requires supported authentication and request limits |
 | Claude groups | Native channel and transport fixtures; live preview consent and model reply need their own evidence |
 | Codex groups | Scoped headless conversation implementation and fixtures; no new arbitrary-thread live qualification |
+| Addressing | Source-bound one-peer/multiple-recipient messaging, room `@all`, topic/date selectors and durable recipient snapshots; native wake still depends on connected adapter eligibility |
+| Persistence | Connected metadata/discussions/effect receipts and expiring local Ask history implemented; full interrupted-work-lane recovery outstanding |
 | Framework | AgentSpaces retains work/claim/lease/result authority; direct replies do not establish signed delegated-work execution |
 | Privacy | Owner-private state and scoped controls implemented; distribution review remains necessary |
-| Distribution | Source launchers and shortcuts; no published package, installer or active updater |
+| Distribution | Windows per-user NSIS installer/uninstaller and Linux archive/menu installer; unsigned alpha, no automatic updater or signed production release |
 
 Exact native versions and upstream revisions remain in compatibility material and handoffs. A dependency update, fixture or screenshot is not release acceptance.
 
-## Before public distribution
+## Release checks
 
-1. Approve a project license. Review dependency licenses, redistribution notices, native addon packaging and trademark/name use.
+1. Retain the approved Apache 2.0 license and attribution. Check dependency redistribution notices, native addon packaging and accurate product/company branding against each release candidate.
 2. Review the repository and Git history for private data, credentials, machine-specific material and runtime state. Validate showcase images separately.
-3. Build signed installation/removal flows, document state retention, and test upgrades and rollback. Source shortcuts are not installer coverage.
+3. Qualify the implemented installation/removal flows, upgrades and rollback, then establish signed distribution. Document retained state and bundled notices. Package construction is distinct from successful native-platform installation acceptance; see [installation](installer.md).
 4. Qualify each advertised desktop platform, native version, login flow and host connection. Distinguish observed, fixture-tested and unqualified paths in a compatibility matrix.
 5. Exercise refusal, native approvals, busy controllers, cancellation, disconnect and restart in the intended release configuration. Use explicit grants and budgets for live model tests.
 6. Document local data, selected context sent to providers, remote channel connections, revocation and unknown usage or uncertain effects.
 7. Record exact revision, tests and runtime evidence for the release candidate. Keep delegated work, direct conversations, integration and deployment claims separate.
 
-Publishing, changing visibility, selecting a license, transferring ownership and releasing binaries are separate owner decisions. This prepares a reviewable local showcase; it does not perform those actions.
+Public repository visibility and Apache 2.0 are approved for this task. A transfer to a company-owned repository remains an owner decision. [v0.1.0-alpha.2](https://github.com/Weston-Tyler/agentspaces-desktop/releases/tag/v0.1.0-alpha.2) is the version-specific release target; record its published revision/artifact hashes and installed runtime evidence separately. Approval and public availability do not imply signed distribution, native-platform parity or production qualification.

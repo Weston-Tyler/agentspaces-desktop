@@ -24,4 +24,4 @@ For each implementation handoff, report the repository, verified remote default 
 
 ## Publication
 
-Keep upstream attribution and required license notices. The intended public license is not selected yet. Review dependencies and redistribution terms before adding a license or publishing binaries. Use normal reviewed changes; do not force-push or rewrite shared history.
+Keep upstream attribution and required license notices. The application is licensed under Apache 2.0. Preserve LICENSE and NOTICE plus dependency notices; review redistribution terms and platform qualification before publishing binaries. Use normal reviewed changes; do not force-push or rewrite shared history.
