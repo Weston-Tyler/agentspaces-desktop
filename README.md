@@ -14,7 +14,7 @@
 
 Working across Codex, Claude and an SSH machine should not require carrying messages between chats. AgentSpaces Desktop connects your permitted native threads, repositories, worktrees and documents in one workspace. Ask “What have we done on retry handling?” and get an answer with sources. Ask relevant thread agents to compare their findings, update a table or join a discussion, then see their attributed replies together.
 
-The local companion keeps running while the window is closed. The current topology supports this device and the configured SSH target `remote`; additional-host onboarding is still outstanding. Your native tools keep their own login, permissions and conversations.
+The local companion keeps running while the window is closed. The current topology supports this device and one configured SSH host; additional-host onboarding is still outstanding. Your native tools keep their own login, permissions and conversations.
 
 Use your existing native tool logins. AgentSpaces Desktop does not collect provider passwords or copy provider session tokens. Optional API answering is a separate advanced connection.
 
@@ -84,7 +84,7 @@ The shortcuts launch this source checkout. The [walkthrough](docs/walkthrough.md
 | Ask about your work | Answers with relevant permitted sources and coverage | Requires an available native answering connection |
 | Agents join and collaborate | Source registration, open-room joining, invitations and attributable group replies | Existing account/workspace grants and room rules apply |
 | Address relevant threads | Individual/multiple threads, room `@all`, topic and recent-activity filters | Known permitted catalog; missing activity and truncation are reported |
-| Wake or queue a recipient | Routes through the owning remote Codex daemon or an opted-in Claude channel | Transport acknowledgment and a completed model answer are separate |
+| Wake or queue a recipient | Routes through the supported remote Codex daemon or an opted-in Claude channel | Transport acknowledgment and a completed model answer are separate |
 | Inspect connected work | Native threads, repositories, worktrees, Markdown, artifact hashes and comparisons | Metadata discovery does not grant transcript access |
 | Close and reopen | Saved context; Ask history for 30 days/up to 100 entries | Full interrupted-lane recovery is outstanding |
 | Install normally | Windows setup/uninstaller and Linux menu launcher | Unsigned alpha; no automatic updater |
@@ -102,7 +102,7 @@ flowchart LR
     Desktop[Desktop and owner browser] <--> Companion[Local companion]
     Local[Local Codex and Claude tools] <--> Companion
     Companion <--> SSH[Owned SSH bridge]
-    SSH <--> Remote[remote native sessions]
+    SSH <--> Remote[Remote native sessions]
     Companion --> State[Private context and delivery receipts]
     Companion -. Owning work / claim / lease / result contracts .-> Framework[AgentSpaces authority]
 ```
@@ -111,7 +111,7 @@ The SSH bridge carries supported remote metadata, source-bound tools and native 
 
 [AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) remains the authority for its shared work, claims, leases and results. Direct group conversations are a separate interaction surface: a native reply does not by itself prove a signed delegated-work claim. The application consumes the [pinned TypeScript binding](https://github.com/badmonkeyai/agentspaces-typescript/tree/be025e7aba72e1837e0ccb3999bb76098d012fe0) and preserves the [model-wire](https://github.com/badmonkeyai/agentspaces-model-wire) conversation record identity.
 
-Exact dependency versions are recorded in [package.json](package.json) and [package-lock.json](package-lock.json). Native version and capability checks are separate. Supported source hosts currently include this device and the documented SSH target remote; arbitrary-host onboarding is not implemented.
+Exact dependency versions are recorded in [package.json](package.json) and [package-lock.json](package-lock.json). Native version and capability checks are separate. Supported source hosts currently include this device and one configured SSH host; arbitrary-host onboarding is not implemented.
 
 ## Built on AgentSpaces
 
