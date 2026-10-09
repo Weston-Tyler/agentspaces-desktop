@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statS
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { installOnCurrentHost } from "../app/native-auto-install.mjs";
+import { dependencyVersions } from "../app/dependency-versions.mjs";
 const TOKEN = "a".repeat(64);
 function fixture(provider = "claude") {
   const home = mkdtempSync(join(tmpdir(), "as-auto-install-")), nativePath = join(home, provider === "claude" ? ".claude.json" : ".codex/config.toml"), calls = [];
@@ -23,7 +24,7 @@ function fixture(provider = "claude") {
     }
     return "";
   };
-  return { home, nativePath, calls, settings, options: { home, config: { schemaVersion: 1, provider, host: "local", token: TOKEN, address: "http://127.0.0.1:43127", authority: "127.0.0.1:43127" }, sources: { bootstrap: "// Synthetic bootstrap source", hook: "// Synthetic lifecycle source" }, resolveExecutable: () => binary, runCLI, installDependencies: false }, binary };
+  return { home, nativePath, calls, settings, options: { home, versions: dependencyVersions(), config: { schemaVersion: 1, provider, host: "local", token: TOKEN, address: "http://127.0.0.1:43127", authority: "127.0.0.1:43127" }, sources: { bootstrap: "// Synthetic bootstrap source", hook: "// Synthetic lifecycle source" }, resolveExecutable: () => binary, runCLI, installDependencies: false }, binary };
 }
 test("Automatic Claude setup preserves settings and other MCP names, backs up privately and is idempotent", async () => {
   const f = fixture(), first = await installOnCurrentHost(f.options), second = await installOnCurrentHost(f.options);
@@ -88,4 +89,14 @@ test("Failed managed native registration update restores existing global configu
   await assert.rejects(installOnCurrentHost({ ...f.options, runCLI: failingCLI, sources: { ...f.options.sources, bootstrap: "// Synthetic upgrade refused after native removal" } }), /Synthetic native add failure/);
   assert.equal(readFileSync(f.nativePath, "utf8"), original);
   assert.equal(readFileSync(join(f.home, ".claude/settings.json"), "utf8"), settingsBefore);
+});
+test("Root dependency payload determines all managed runtime versions and rejects ranges before native changes", async () => {
+  const f = fixture(), versions = { mcp: "1.33.0", zod: "4.6.6", claude: "0.4.0-beta.1" };
+  await installOnCurrentHost({ ...f.options, versions });
+  const manifest = JSON.parse(readFileSync(join(f.home, ".agentspaces-desktop-native/automatic/package.json"), "utf8"));
+  assert.deepEqual(manifest.dependencies, { "@modelcontextprotocol/sdk": versions.mcp, zod: versions.zod, "@anthropic-ai/claude-agent-sdk": versions.claude });
+  const original = readFileSync(f.nativePath, "utf8"), count = f.calls.length;
+  await assert.rejects(installOnCurrentHost({ ...f.options, versions: { ...versions, claude: "^0.4.0" } }), /Exact managed/);
+  await assert.rejects(installOnCurrentHost({ ...f.options, versions: undefined }), /Exact managed/);
+  assert.equal(f.calls.length, count); assert.equal(readFileSync(f.nativePath, "utf8"), original);
 });

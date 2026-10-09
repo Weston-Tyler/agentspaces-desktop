@@ -72,6 +72,7 @@ Exact dependency versions are recorded in [package.json](package.json) and [pack
 - [Workspace map](docs/workspace-map.md): retrieval scopes, partial inventory and comparisons.
 - [Advanced answering](docs/native-questions.md): budgets, inference and optional API connections.
 - [Compatibility](docs/compatibility.md) and [ecosystem reuse](docs/ecosystem-reuse.md): provider and upstream boundaries.
+- [Maintenance](docs/maintenance.md): automatic native protocol checks, safe delivery recovery, Dependabot and fixture CI.
 - [Open-source readiness](docs/open-source-readiness.md): license, privacy, packaging and qualification gates.
 
 Windows is the observed desktop platform. Linux has been exercised as a remote terminal and adapter target; Linux desktop parity and macOS desktop acceptance remain unqualified. Consumer ChatGPT/Claude web histories, arbitrary existing-thread broadcasts, signed distribution and automatic updates are not established by this alpha.

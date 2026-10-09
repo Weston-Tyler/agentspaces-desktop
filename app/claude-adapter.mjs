@@ -1,18 +1,22 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { readSdk } from "./claude-reader.mjs";
-export const CLAUDE_SDK_PIN = "0.3.293";
+import { dependencyVersions, exactDependencyVersion } from "./dependency-versions.mjs";
+export const CLAUDE_SDK_PIN = dependencyVersions().claude;
 export class ClaudeReadAdapter {
   constructor({
     host = "local",
     sdkLoader = () => import("@anthropic-ai/claude-agent-sdk"),
     spawnProcess = spawn,
+    sdkPin = CLAUDE_SDK_PIN,
   } = {}) {
     if (!["local", "remote"].includes(host))
       throw new Error("Unsupported host");
     this.host = host;
     this.sdkLoader = sdkLoader;
     this.spawnProcess = spawnProcess;
+    if (!exactDependencyVersion(sdkPin)) throw new Error("Exact read SDK version required");
+    this.sdkPin = sdkPin;
   }
   async open() {}
   async call(request) {
@@ -24,7 +28,7 @@ export class ClaudeReadAdapter {
     ).replace("export async function readSdk", "async function readSdk");
     const script =
       "import {homedir} from 'node:os';import {join} from 'node:path';import {readFileSync} from 'node:fs';\n" + helper +
-      "\nconst sdkRoot=join(homedir(),'.agentspaces-desktop-native','automatic','node_modules','@anthropic-ai','claude-agent-sdk');if(JSON.parse(readFileSync(join(sdkRoot,'package.json'),'utf8')).version!=='0.3.293')throw Error('Read SDK version mismatch');const sdk=await import(join(sdkRoot,'sdk.mjs'));\nconst request=" +
+      "\nconst sdkRoot=join(homedir(),'.agentspaces-desktop-native','automatic','node_modules','@anthropic-ai','claude-agent-sdk');if(JSON.parse(readFileSync(join(sdkRoot,'package.json'),'utf8')).version!==" + JSON.stringify(this.sdkPin) + ")throw Error('Read SDK version mismatch');const sdk=await import(join(sdkRoot,'sdk.mjs'));\nconst request=" +
       JSON.stringify(request) +
       ";\ntry{console.log(JSON.stringify(await readSdk(request,sdk)));}catch(e){console.log(JSON.stringify({error:e.message}));process.exitCode=1;}";
     return new Promise((yes, no) => {

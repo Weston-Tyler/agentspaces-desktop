@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { WorkspaceAdapter } from "./workspace-adapter.mjs";
 import { hostPaths, normalizeHostPath } from "./platform.mjs";
+import { nativeAdapterCompatible } from './native-versions.mjs';
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 function previousHostGraph(index, host) {
   const nodes = index.nodes.filter(
@@ -266,7 +267,7 @@ export class WorkspaceMap {
           const tool = e.tools.find(
             (t) => t.provider === provider && t.host === host,
           );
-          if (!tool?.versionMatches) {
+          if (!nativeAdapterCompatible(tool)) {
             errors.push({
               host,
               provider,

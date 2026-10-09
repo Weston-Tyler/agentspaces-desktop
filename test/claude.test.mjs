@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readSdk } from "../app/claude-reader.mjs";
-import { ClaudeReadAdapter } from "../app/claude-adapter.mjs";
+import { ClaudeReadAdapter, CLAUDE_SDK_PIN } from "../app/claude-adapter.mjs";
+import { dependencyVersions } from "../app/dependency-versions.mjs";
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 const p = {
@@ -23,7 +24,7 @@ test('remote Claude metadata uses the installed pinned read SDK and injected SSH
   } });
   const result = await adapter.discover({ ...p, host: 'remote', path: '/fictional/project' });
   assert.equal(launches, 1); assert.deepEqual(result.sessions, []);
-  assert.match(source, /homedir\(\)/); assert.match(source, /\.agentspaces-desktop-native/); assert.match(source, /0\.3\.293/);
+  assert.match(source, /homedir\(\)/); assert.match(source, /\.agentspaces-desktop-native/); assert.ok(source.includes(JSON.stringify(CLAUDE_SDK_PIN))); assert.equal(CLAUDE_SDK_PIN, dependencyVersions().claude);
   assert.doesNotMatch(source, /\/tmp\/agentspaces-desktop-sdk|sdk\.query\(/); adapter.close();
 });
 test("Claude metadata uses explicit directory, no worktree widening and no inference APIs", async () => {

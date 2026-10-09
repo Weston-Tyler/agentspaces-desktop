@@ -14,7 +14,7 @@ export async function routeConversation(engine, { codexAgents, channels }, group
       visited.add(current.id); current = group.messages.find(candidate => candidate.id === current.replyTo);
     }
     if (!current || current.synthetic) return null;
-    if (current.source && (!policy.agentInitiation || group.messages.indexOf(current) < (group.policy?.agentInitiationFromMessage ?? 0))) return null;
+    if (current.source && !policy.agentInitiation) return null;
     return { root: current, depth };
   };
   const blocked = status => {
@@ -28,6 +28,9 @@ export async function routeConversation(engine, { codexAgents, channels }, group
   };
   const chain = ancestry(message);
   if (!chain) { blocked(message.source && !message.replyTo ? "agent-initiation-disabled" : "invalid-or-unapproved-ancestry"); return; }
+  if (chain.root.source && group.messages.indexOf(message) < (group.policy?.agentInitiationFromMessage ?? 0)) {
+    blocked("message-predates-room-activation"); return;
+  }
   if (message.source && (!permitted(message.source.sessionId) || !permitted(chain.root.source?.sessionId ?? message.source.sessionId))) {
     blocked("participant-access-unavailable"); return;
   }
@@ -67,7 +70,7 @@ export async function routeConversation(engine, { codexAgents, channels }, group
     target.status = "dispatch-allocated"; engine.store.save();
     try {
       const currentPolicy = engine.discussions.policy(group);
-      if ((chain.root.source && !currentPolicy.agentInitiation) || chain.depth > currentPolicy.maxForwardHops) {
+      if ((chain.root.source && (!currentPolicy.agentInitiation || group.messages.indexOf(message) < (group.policy?.agentInitiationFromMessage ?? 0))) || chain.depth > currentPolicy.maxForwardHops) {
         target.status = "room-policy-changed; not dispatched"; engine.store.save(); continue;
       }
       if (!permitted(target.sessionId) || (message.source && !permitted(message.source.sessionId)))

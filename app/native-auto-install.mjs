@@ -48,8 +48,12 @@ export function mergeClaudeHooks(settings, command, { previousCommand } = {}) {
   }
   return result;
 }
-export async function installOnCurrentHost({ config, sources, home = homedir(), nodeBinary = process.env.AGENTSPACES_NODE_BINARY ?? (process.versions.electron ? executable('node') : process.execPath), runCLI = cli, resolveExecutable = executable, installDependencies = true } = {}) {
+export async function installOnCurrentHost({ config, sources, versions, home = homedir(), nodeBinary = process.env.AGENTSPACES_NODE_BINARY ?? (process.versions.electron ? executable('node') : process.execPath), runCLI = cli, resolveExecutable = executable, installDependencies = true } = {}) {
   if (config?.schemaVersion !== 1 || !['codex', 'claude'].includes(config.provider) || !/^[a-f0-9]{64}$/.test(config.token ?? '') || !sources?.bootstrap || !sources?.hook) throw new Error('Invalid automatic installation payload');
+  if (!versions || ['mcp', 'zod', 'claude'].some(key => {
+    const value = versions[key];
+    return typeof value !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(value) || value.includes('-') && value.slice(value.indexOf('-') + 1).split('.').some(part => /^\d+$/.test(part) && part.length > 1 && part.startsWith('0'));
+  })) throw new Error('Exact managed dependency versions payload required');
   const base = join(home, '.agentspaces-desktop-native', 'automatic'); noLinks(base);
   const settingsPath = join(home, '.claude', 'settings.json'); let settings = {};
   if (config.provider === 'claude') {
@@ -66,7 +70,7 @@ export async function installOnCurrentHost({ config, sources, home = homedir(), 
   } else chmodSync(base, 0o700);
   const runtime = join(base, 'runtime-' + digest(sources.bootstrap + sources.hook)); noLinks(runtime); mkdirSync(runtime, { recursive: true, mode: 0o700 });
   savePrivate(join(runtime, 'native-bootstrap-mcp.mjs'), sources.bootstrap); savePrivate(join(runtime, 'native-session-hook.mjs'), sources.hook);
-  const manifest = { private: true, type: 'module', dependencies: { '@modelcontextprotocol/sdk': '1.32.1', zod: '4.6.5', '@anthropic-ai/claude-agent-sdk': '0.3.293' } };
+  const manifest = { private: true, type: 'module', dependencies: { '@modelcontextprotocol/sdk': versions.mcp, zod: versions.zod, '@anthropic-ai/claude-agent-sdk': versions.claude } };
   savePrivate(join(base, 'package.json'), JSON.stringify(manifest));
   const dependenciesPresent = () => Object.entries(manifest.dependencies).every(([name, version]) => {
     const path = join(base, 'node_modules', name, 'package.json'); noLinks(path);
@@ -161,6 +165,8 @@ export class NativeAutoInstaller {
     return { results, modelCalls: 0 };
   }
   async run({ host, provider }) {
+    const { dependencyVersions } = await import('./dependency-versions.mjs');
+    const versions = dependencyVersions();
     const key = host + ':' + provider, records = this.engine.store.data.nativeAutomaticInstallations, old = records[key];
     let device;
     if (old?.device) { this.sourceBindings.device(old.device.token); device = old.device; }
@@ -169,7 +175,7 @@ export class NativeAutoInstaller {
     if (host === 'remote') { const tunnel = await this.participantConnections.tunnel(); device = { ...device, address: 'http://127.0.0.1:' + tunnel.remotePort }; }
     const sources = { bootstrap: readFileSync(new URL('./native-bootstrap-mcp.mjs', import.meta.url), 'utf8'), hook: readFileSync(new URL('./native-session-hook.mjs', import.meta.url), 'utf8') };
     try {
-      const result = await (host === 'remote' ? this.installRemote : this.installLocal)({ config: device, sources });
+      const result = await (host === 'remote' ? this.installRemote : this.installLocal)({ config: device, sources, versions });
       this.sourceBindings.device(device.token); // Recheck after installation; never undo a revocation.
       const refresh = provider === 'codex' ? await this.refreshNative(host) : { status: 'new-session-load-required' };
       result.nativeRefresh = refresh.status;

@@ -2,11 +2,9 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname, basename } from "node:path";
+import { NATIVE_VERSION_PINS, qualifiedNativeVersion } from './native-versions.mjs';
 
-export const ANSWER_VERSION_PINS = {
-  local: { codex: "0.162.0-alpha.2", claude: "2.1.113" },
-  remote: { codex: "0.161.0", claude: "2.1.283" },
-};
+export const ANSWER_VERSION_PINS = NATIVE_VERSION_PINS;
 const failure = (code, uncertainOutcome = false) =>
   Object.assign(new Error(code), { code, uncertainOutcome });
 async function cleanupScratch(scratch) {
@@ -154,7 +152,7 @@ export async function detectAnswerProviders({
     const pin = ANSWER_VERSION_PINS[host][provider];
     const version =
       typeof r.version === "string" ? r.version.slice(0, 128) : "";
-    const versionMatches = version.split(/\s+/).includes(pin);
+    const versionMatches = qualifiedNativeVersion(host, provider, version);
     return {
       provider,
       host,

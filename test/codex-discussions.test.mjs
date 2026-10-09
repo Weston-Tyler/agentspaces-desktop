@@ -211,3 +211,33 @@ test("closing the hub aborts active native work and closes its adapter", async (
   hub.dispatch(args); await until(() => counters.answer === 1); hub.close(); await settle(hub, args.requestId);
   assert(observedAbort); assert(counters.close > 0); assert.equal(engine.discussions.group(args.discussionId).messages.length, 1);
 });
+
+test("native validation uses the addressed message epoch while retaining historical-root grant checks", async t => {
+  const { engine, hub, args, counters } = setup(); t.after(() => hub.close());
+  const author = "sample-claude-new";
+  engine.discussions.contribute({ id: args.discussionId, text: "Historical participant root", nativeTurnId: "historical-turn",
+    deliveryId: "native-old-participant-root" }, { sessionId: author });
+  const group = engine.discussions.group(args.discussionId), root = group.messages.at(-1);
+  engine.discussions.setPolicy({ id: group.id, agentInitiation: true });
+  assert.throws(() => hub.dispatch({ ...args, messageId: root.id, requestId: "native-old-root-request" }), /policy/);
+  engine.discussions.contribute({ id: group.id, text: "@codex1 answer this new reply", nativeTurnId: "new-reply-turn",
+    replyTo: root.id, deliveryId: "native-new-participant-reply" }, { sessionId: author });
+  const reply = group.messages.at(-1), request = { ...args, messageId: reply.id, text: reply.text, requestId: "native-new-root-reply-request" };
+  hub.dispatch(request); await hub.wait(request.requestId); assert.equal(counters.answer, 1);
+  assert.equal(group.messages.at(-1).replyTo, reply.id);
+});
+
+test("a revoked historical root author blocks native dispatch before adapter creation", async t => {
+  const { engine, hub, args, counters } = setup(); t.after(() => hub.close());
+  engine.grant("sample-claude-old", { enrolled: true, content: true, share: true, retrieve: true });
+  const group = engine.discussions.group(args.discussionId);
+  group.members.push({ ...engine.discussions.member("sample-claude-old"), alias: "claude2" });
+  engine.discussions.contribute({ id: group.id, text: "Historical root", nativeTurnId: "old-root-turn",
+    deliveryId: "native-revoked-history-root" }, { sessionId: "sample-claude-new" });
+  const root = group.messages.at(-1); engine.discussions.setPolicy({ id: group.id, agentInitiation: true });
+  engine.discussions.contribute({ id: group.id, text: "@codex1 inspect this ancestry", nativeTurnId: "current-reply-turn",
+    replyTo: root.id, deliveryId: "native-current-history-reply" }, { sessionId: "sample-claude-old" });
+  const reply = group.messages.at(-1); engine.grant("sample-claude-new", { retrieve: false });
+  assert.throws(() => hub.dispatch({ ...args, messageId: reply.id, requestId: "native-revoked-ancestor-request" }), /retrieval|grant|revoked/);
+  assert.equal(counters.factory, 0); assert.equal(counters.answer, 0);
+});

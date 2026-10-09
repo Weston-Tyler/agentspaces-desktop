@@ -175,7 +175,7 @@ test("loaded request polls only after acknowledgement and returns exact-client r
   assert.equal(result.nativeTurnId, "own-polled-turn"); assert.equal(result.text, "Own polled reply"); assert.equal(result.usage.totalTokens, 6);
   assert.ok(!JSON.stringify([result, f.receipts]).includes("PRIVATE"));
   const calls = f.calls.map(call => call.method); assert.ok(calls.indexOf("thread/queue/add") < calls.indexOf("thread/turns/list"));
-  assert.deepEqual(f.calls.find(call => call.method === "thread/turns/list").params, { threadId, limit: 8, itemsView: "full" });
+  assert.deepEqual(f.calls.find(call => call.method === "thread/turns/list").params, { threadId, limit: 8, itemsView: "summary" });
   const count = f.calls.length; await new Promise(resolve => setTimeout(resolve, 35)); assert.equal(f.calls.length, count);
   assert.ok(!calls.includes("thread/resume") && !calls.includes("thread/start"));
 });
@@ -204,6 +204,68 @@ test("poll constructor bounds and queue wait ceiling are finite", async () => {
   assert.throws(() => new CodexQueueAdapter({ queueWaitTimeoutMs: 1800001 }), { code: "invalid_native_delivery_poll_bound" });
   const f = pollingFixture({ queueWaitTimeoutMs: 35 }); await f.bind();
   await assert.rejects(f.answer(), { code: "native_queue_timeout" });
+});
+test("large foreign full history is never fetched when reconciling an exact completed summary", async () => {
+  const f = pollingFixture({ data: [{ id: "foreign", status: "completed", items: [{ type: "userMessage", clientId: "foreign" }, { type: "agentMessage", text: "PRIVATE foreign summary" }] }, { id: "own-final", status: "completed", items: [{ type: "userMessage", clientId: "poll-client" }, { type: "agentMessage", phase: "commentary", text: "Own progress" }, { type: "agentMessage", phase: "final_answer", text: "Exact final result" }] }] });
+  await f.bind();
+  const request = f.adapter.request;
+  f.adapter.request = async (method, params) => { if (method === "thread/turns/list") assert.equal(params.itemsView, "summary", "a full read would exceed the observed native frame bound"); return request(method, params); };
+  const result = await f.adapter.reconcileAnswer({ threadId, clientId: "poll-client", grant: true });
+  assert.equal(result.status, "completed"); assert.equal(result.text, "Exact final result"); assert.equal(result.nativeTurnId, "own-final"); assert.equal(result.usage.known, false);
+  assert.ok(!JSON.stringify(result).includes("PRIVATE")); assert.ok(!f.calls.some(call => ["thread/queue/add", "thread/start", "thread/resume", "turn/interrupt"].includes(call.method)));
+});
+test("missing summary text reads bounded items from the own exact turn only", async () => {
+  const f = pollingFixture({ data: [{ id: "own-no-text", status: "completed", items: [{ type: "userMessage", clientId: "poll-client" }] }] }); await f.bind();
+  const request = f.adapter.request;
+  f.adapter.request = async (method, params) => {
+    if (method === "thread/items/list") {
+      f.calls.push({ method, params }); assert.equal(params.threadId, threadId); assert.equal(params.turnId, "own-no-text");
+      return { data: [{ turnId: "own-no-text", item: { type: "agentMessage", phase: "final_answer", text: "Own paged final" } }], nextCursor: null };
+    }
+    return request(method, params);
+  };
+  const result = await f.adapter.reconcileAnswer({ threadId, clientId: "poll-client", grant: true }); assert.equal(result.text, "Own paged final");
+  assert.equal(f.calls.filter(call => call.method === "thread/items/list").length, 1);
+});
+test("unknown or textless completed own turn never fabricates an answer or retries inference", async () => {
+  const f = pollingFixture({ data: [{ id: "foreign-only", status: "completed", items: [{ type: "userMessage", clientId: "foreign" }, { type: "agentMessage", text: "PRIVATE" }] }] }); await f.bind();
+  const unknown = await f.adapter.reconcileAnswer({ threadId, clientId: "not-present", grant: true }); assert.equal(unknown.status, "uncertain"); assert.equal(unknown.retryAllowed, false); assert.equal(unknown.text, undefined);
+  const g = pollingFixture({ data: [{ id: "own-empty", status: "completed", items: [{ type: "userMessage", clientId: "poll-client" }] }] }); await g.bind();
+  const request = g.adapter.request; g.adapter.request = async (method, params) => method === "thread/items/list" ? { data: [], nextCursor: null } : request(method, params);
+  const empty = await g.adapter.reconcileAnswer({ threadId, clientId: "poll-client", grant: true }); assert.equal(empty.status, "uncertain"); assert.equal(empty.text, undefined);
+  assert.ok(![...f.calls, ...g.calls].some(call => call.method === "thread/queue/add"));
+});
+test("foreign own-turn paging identity and missing reconciliation grants are refused", async () => {
+  const f = pollingFixture({ data: [{ id: "own-no-text", status: "completed", items: [{ type: "userMessage", clientId: "poll-client" }] }] }); await f.bind();
+  const request = f.adapter.request; f.adapter.request = async (method, params) => method === "thread/items/list" ? { data: [{ turnId: "other-turn", item: { type: "agentMessage", text: "PRIVATE" } }] } : request(method, params);
+  await assert.rejects(f.adapter.reconcileAnswer({ threadId, clientId: "poll-client", grant: true }), { code: "native_own_item_identity_mismatch" });
+  await assert.rejects(f.adapter.reconcileAnswer({ threadId, clientId: "poll-client", grant: false }), { code: "reconciliation_grant_required" });
+});
+test("reconciliation does not silently truncate a native result above discussion limit", async () => {
+  const f = pollingFixture({ data: [{ id: "own-long", status: "completed", items: [{ type: "userMessage", clientId: "poll-client" }, { type: "agentMessage", phase: "final_answer", text: "x".repeat(8001) }] }] }); await f.bind();
+  const result = await f.adapter.reconcileAnswer({ threadId, clientId: "poll-client", grant: true });
+  assert.equal(result.status, "uncertain"); assert.equal(result.reason, "output_limit"); assert.equal(result.clientId, "poll-client"); assert.equal(result.text, undefined); assert.equal(result.queuedSubmissionId, undefined);
+});
+test("cold completed history uses a separate read-only target without execution authority", async () => {
+  const adapter = new CodexQueueAdapter({ persistReceipt: async () => {} }), calls = [];
+  adapter.request = async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/read") return { thread: { id: threadId, cwd, status: { type: "notLoaded" }, canAcceptDirectInput: null } };
+    if (method === "thread/turns/list") return { data: [{ id: "cold-completed", status: "completed", items: [{ type: "userMessage", clientId: "cold-client" }, { type: "agentMessage", phase: "final_answer", text: "Already completed response" }] }] };
+    throw new Error("Read-only target cannot mutate native state");
+  };
+  const bound = await adapter.bindReadTarget({ threadId, cwd, grant: true }); assert.equal(bound.executionAuthorized, false); assert.equal(adapter.proofs.size, 0);
+  const answer = await adapter.reconcileAnswer({ threadId, clientId: "cold-client", grant: true }); assert.equal(answer.status, "completed"); assert.equal(answer.text, "Already completed response");
+  await assert.rejects(adapter.answer({ threadId, clientId: "not-authorized", question: "No new question", grant: true, budget: { timeoutMs: 1000, maxOutputTokens: 800 } }));
+  assert.ok(calls.every(call => ["thread/read", "thread/turns/list"].includes(call.method)));
+});
+test("historical read target rechecks exact identity and cwd and still requires caller grant", async () => {
+  const adapter = new CodexQueueAdapter(); let changed = false;
+  adapter.request = async () => ({ thread: { id: threadId, cwd: changed ? "/changed" : cwd, status: { type: "notLoaded" } } });
+  await adapter.bindReadTarget({ threadId, cwd, grant: true }); changed = true;
+  await assert.rejects(adapter.reconcileAnswer({ threadId, clientId: "read-client", grant: true }), { code: "native_read_target_identity_mismatch" });
+  await assert.rejects(adapter.reconcileAnswer({ threadId, clientId: "read-client", grant: false }), { code: "reconciliation_grant_required" });
+  await assert.rejects(adapter.bindReadTarget({ threadId, cwd, grant: false }), { code: "native_read_target_grant_required" });
 });
 test("only correlated owned-turn approvals are declined; foreign native requests are untouched", async t => {
   const server = createServer(), wss = new WebSocketServer({ server });

@@ -2,8 +2,9 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve, posix } from "node:path";
 import { hostOS } from "./platform.mjs";
+import { NATIVE_VERSION_PINS, nativeCompatibility } from './native-versions.mjs';
 const exec = promisify(execFile);
-export const compatibility = { codex: "0.162.0-alpha.2", claude: "2.1.113" };
+export const compatibility = NATIVE_VERSION_PINS.local;
 export function openNativeSignIn(provider, host = "local") {
   if (process.platform !== "win32")
     throw new Error(
@@ -51,12 +52,8 @@ export async function detectTools(host = "local") {
           { timeout: 5000, windowsHide: true },
         );
         const version = stdout.trim();
-        const pin =
-          host === "remote"
-            ? provider === "codex"
-              ? "0.161.0"
-              : "2.1.283"
-            : compatibility[provider];
+        const pin = NATIVE_VERSION_PINS[host][provider];
+        const compatible = await nativeCompatibility(host, provider, version);
         return {
           provider,
           host,
@@ -64,7 +61,7 @@ export async function detectTools(host = "local") {
           installed: true,
           version,
           qualifiedVersion: pin,
-          versionMatches: version.includes(pin),
+          ...compatible,
           authentication: "Not inspected",
           capabilities: {
             mcp: true,

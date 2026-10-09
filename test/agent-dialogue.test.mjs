@@ -224,3 +224,39 @@ test("cycles and room policy changes during delivery never dispatch remaining pa
   f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
   await routeConversation(f.engine, f.transports, f.group, root); assert.equal(f.deliveries.size, 1);
 });
+
+test("new mentioned replies to a pre-activation source root route while historical roots do not replay", async () => {
+  const f = routingFixture(), old = f.contribute(0, "Pre-activation topic", null, "pre-activation-root");
+  f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
+  const reply = f.contribute(1, "@claude3 review the earlier topic", old.id, "new-historical-reply");
+  await routeConversation(f.engine, f.transports, f.group, reply);
+  assert.equal(reply.routing.rootId, old.id); assert.equal(reply.routing.depth, 1);
+  assert.deepEqual(reply.targets.map(target => target.alias), ["claude3"]); assert.equal(f.deliveries.size, 1);
+  await routeConversation(f.engine, f.transports, f.group, old);
+  assert.equal(old.routing.status, "message-predates-room-activation"); assert.equal(f.deliveries.size, 1);
+  const plain = f.contribute(1, "Finished with that topic", old.id, "plain-historical-reply");
+  await routeConversation(f.engine, f.transports, f.group, plain);
+  assert.deepEqual(plain.targets, []); assert.equal(f.deliveries.size, 1);
+});
+
+test("current ancestor retrieval revocation fences a new reply to historical context", async () => {
+  const f = routingFixture(), old = f.contribute(0, "Historical ancestor", null, "revoked-ancestor-root");
+  f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
+  const reply = f.contribute(1, "@claude3 inspect this", old.id, "reply-before-ancestor-revoke");
+  f.engine.grant(f.engine.catalog[0].id, { retrieve: false });
+  await routeConversation(f.engine, f.transports, f.group, reply);
+  assert.equal(reply.routing.status, "participant-access-unavailable"); assert.equal(f.deliveries.size, 0);
+});
+
+test("reenabling room policy excludes prior epoch messages but permits newly addressed replies to their roots", async () => {
+  const f = routingFixture(); f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
+  const root = f.contribute(0, "An existing room topic", null, "epoch-root");
+  const prior = f.contribute(1, "@claude3 prior epoch", root.id, "prior-epoch-reply");
+  f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: false });
+  f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
+  await routeConversation(f.engine, f.transports, f.group, prior);
+  assert.equal(prior.routing.status, "message-predates-room-activation"); assert.equal(f.deliveries.size, 0);
+  const fresh = f.contribute(1, "@claude3 current epoch", root.id, "current-epoch-reply");
+  await routeConversation(f.engine, f.transports, f.group, fresh);
+  assert.equal(f.deliveries.size, 1); assert.deepEqual(fresh.targets.map(target => target.alias), ["claude3"]);
+});

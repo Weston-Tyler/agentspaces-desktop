@@ -247,6 +247,9 @@ export async function startServer({
         case '/api/discussions/policy':
           result = engine.discussions.setPolicy(data, connector);
           break;
+        case '/api/native/discussions/recover':
+          result = data.reconcileOnly === true ? await codexAgents.reconcileSubmitted() : await codexAgents.recoverUndispatched({ includeLegacy: data.includeLegacy === true });
+          break;
         case "/api/native/terminal/open":
           if (data.connectionId && data.ownerConfirmedAvailable !== true) throw new Error("Confirm that other native controllers are closed before resuming the selected thread");
           result = await terminals.create(data);

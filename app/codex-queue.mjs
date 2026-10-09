@@ -39,6 +39,7 @@ export class CodexQueueAdapter {
     this.inflight = new Set();
     this.bindingThreads = new Set();
     this.activeOwnedTurns = new Map();
+    this.readTargets = new Map();
     this.nextId = 1;
     this.pollIntervalMs = pollIntervalMs; this.queueWaitTimeoutMs = queueWaitTimeoutMs;
   }
@@ -93,7 +94,7 @@ export class CodexQueueAdapter {
           this.pending.delete(message.id);
           clearTimeout(request.timer);
           message.error
-            ? request.reject(fail("native_rpc_rejected", true))
+            ? request.reject(Object.assign(fail("native_rpc_rejected", true), { rpcMethod: request.method, nativeRpcCode: message.error.code }))
             : request.resolve(message.result);
         }
       } else if (message.method && message.id !== undefined) {
@@ -129,6 +130,7 @@ export class CodexQueueAdapter {
       },
       capabilities: { experimentalApi: true },
     });
+    this.serverInfo = { userAgent: typeof result?.userAgent === 'string' ? result.userAgent.slice(0, 200) : null };
     this.send({ method: "initialized", params: {} });
     return result;
   }
@@ -143,9 +145,9 @@ export class CodexQueueAdapter {
       const id = this.nextId++;
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(fail("native_rpc_timeout", true));
+        reject(Object.assign(fail("native_rpc_timeout", true), { rpcMethod: method }));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, method });
       try {
         this.send({ id, method, params });
       } catch {
@@ -240,7 +242,7 @@ export class CodexQueueAdapter {
       // activate unrelated messages before this exact targeted request exists.
       const queued = await this.request("thread/queue/list", { threadId, limit: 1 });
       if (!Array.isArray(queued.data) || queued.data.length || queued.nextCursor) throw fail("native_existing_thread_pending_queue");
-      const resumed = await this.request("thread/resume", { threadId });
+      const resumed = await this.request("thread/resume", { threadId }, 30000);
       const after = resumed.thread;
       if (!after || after.id !== threadId || after.cwd !== cwd || resumed.cwd !== cwd || after.status?.type !== "idle" || after.ephemeral || after.canAcceptDirectInput === false) throw fail("native_existing_thread_resume_not_eligible");
       if (!finiteNativePolicy(resumed.sandbox, resumed.approvalPolicy, resumed.approvalsReviewer, fullAccessGranted)) throw fail("native_existing_permission_policy_not_qualified");
@@ -259,6 +261,14 @@ export class CodexQueueAdapter {
     const proof = { nativeThreadId: threadId, host: this.host, cwd, source: "loaded-native-input-target", policyKnown: false, allowExistingNativePolicy: true, verifiedAt: new Date().toISOString() };
     this.proofs.set(threadId, proof);
     return { nativeThreadId: threadId, permissionProof: proof, limitations: ["Loaded native input target only; effective sandbox and approval policy are not asserted", "Explicit owner accepts existing native policy; no settings are overridden", "Only this adapter's correlated turns can receive automatic approval declines"] };
+  }
+  async bindReadTarget({ threadId, cwd, grant } = {}) {
+    if (grant !== true || !UUID.test(threadId ?? "") || typeof cwd !== "string" || !posix.isAbsolute(cwd) || cwd.includes("\0")) throw fail("native_read_target_grant_required");
+    const result = await this.request("thread/read", { threadId, includeTurns: false });
+    if (!result.thread || result.thread.id !== threadId || result.thread.cwd !== cwd) throw fail("native_read_target_identity_mismatch");
+    const target = { nativeThreadId: threadId, host: this.host, cwd, source: "native-readonly-metadata-target" };
+    this.readTargets.set(threadId, target);
+    return { nativeThreadId: threadId, readTarget: { ...target }, executionAuthorized: false };
   }
   async eligible(threadId) {
     const response = await this.request("thread/read", {
@@ -322,7 +332,7 @@ export class CodexQueueAdapter {
     const turns = await this.request("thread/turns/list", {
       threadId,
       limit: 100,
-      itemsView: "full",
+      itemsView: "summary",
     });
     const turn = (turns.data ?? turns.turns ?? []).find((t) =>
       t.items?.some(
@@ -353,6 +363,62 @@ export class CodexQueueAdapter {
     } finally {
       this.inflight.delete(args.clientId);
     }
+  }
+  async findOwnSummary(threadId, clientId, maxTurns = 100) {
+    let cursor = null, observed = 0; const visited = new Set();
+    while (observed < maxTurns) {
+      const result = await this.request("thread/turns/list", { threadId, limit: Math.min(8, maxTurns - observed), itemsView: "summary", ...(cursor ? { cursor } : {}) });
+      const turns = result.data ?? result.turns ?? []; observed += turns.length;
+      const matches = turns.filter(turn => turn.items?.some(item => item.type === "userMessage" && item.clientId === clientId));
+      if (matches.length === 1) return matches[0];
+      if (matches.length > 1) return null;
+      cursor = result.nextCursor;
+      if (!cursor || !turns.length || visited.has(cursor)) break; visited.add(cursor);
+    }
+    return null;
+  }
+  async ownFinalText(threadId, turn) {
+    const extract = items => {
+      const messages = items.filter(item => item.type === "agentMessage" && typeof item.text === "string" && item.phase !== "commentary");
+      const finals = messages.filter(item => item.phase === "final_answer");
+      return finals.length ? finals.map(item => item.text).join("\n") : messages.at(-1)?.text ?? "";
+    };
+    let text = extract(turn.items ?? []);
+    if (text) { if (text.length > 8000) throw fail("native_answer_output_limit", true); return text; }
+    // Read only the already-correlated own turn. Never hydrate unrelated turns.
+    const ownItems = []; let cursor = null; const visited = new Set();
+    for (let page = 0; page < 16; page++) {
+      const response = await this.request("thread/items/list", { threadId, turnId: turn.id, limit: 16, ...(cursor ? { cursor } : {}) });
+      for (const entry of response.data ?? []) {
+        if (entry.turnId !== turn.id) throw fail("native_own_item_identity_mismatch", true);
+        if (entry.item?.type === "agentMessage") ownItems.push(entry.item);
+      }
+      cursor = response.nextCursor;
+      if (!cursor) { text = extract(ownItems); if (text.length > 8000) throw fail("native_answer_output_limit", true); return text; }
+      if (visited.has(cursor)) break; visited.add(cursor);
+    }
+    throw fail("native_own_items_incomplete", true);
+  }
+  async reconcileAnswer({ threadId, clientId, grant } = {}) {
+    if (grant !== true || typeof clientId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(clientId)) throw fail("reconciliation_grant_required");
+    const target = this.readTargets.get(threadId);
+    if (target) {
+      const result = await this.request("thread/read", { threadId, includeTurns: false });
+      if (target.host !== this.host || !result.thread || result.thread.id !== target.nativeThreadId || result.thread.cwd !== target.cwd) throw fail("native_read_target_identity_mismatch");
+    } else { const eligible = await this.eligible(threadId); if (!eligible.eligible) throw fail(eligible.reason); }
+    const turn = await this.findOwnSummary(threadId, clientId);
+    if (turn) {
+      if (turn.status === "completed") {
+        let text;
+        try { text = await this.ownFinalText(threadId, turn); } catch (error) { if (error.code === "native_answer_output_limit") return { status: "uncertain", reason: "output_limit", nativeThreadId: threadId, nativeTurnId: turn.id, clientId, retryAllowed: false }; throw error; }
+        if (!text.trim()) return { status: "uncertain", nativeThreadId: threadId, nativeTurnId: turn.id, clientId, retryAllowed: false };
+        return { status: "completed", nativeThreadId: threadId, nativeTurnId: turn.id, clientId, text, usage: { inputTokens: null, outputTokens: null, totalTokens: null, known: false }, retryAllowed: false };
+      }
+      return { status: turn.status, nativeThreadId: threadId, nativeTurnId: turn.id, clientId, retryAllowed: false };
+    }
+    const queue = await this.request("thread/queue/list", { threadId, limit: 100 });
+    const pending = queue.data?.find(item => item.clientUserMessageId === clientId);
+    return pending ? { status: "queued", nativeThreadId: threadId, clientId, queuedSubmissionId: pending.id, retryAllowed: false } : { status: "uncertain", nativeThreadId: threadId, clientId, retryAllowed: false };
   }
   async executeAnswer({
     threadId,
@@ -505,7 +571,7 @@ export class CodexQueueAdapter {
               const history = await this.request("thread/turns/list", {
                 threadId,
                 limit: 100,
-                itemsView: "full",
+                itemsView: "summary",
               });
               const turn = (history.data ?? history.turns ?? []).find((t) =>
                 t.items?.some(
@@ -625,7 +691,7 @@ export class CodexQueueAdapter {
           if (!permitted) { await stop("native_delivery_grant_revoked", false); return; }
         }
         try {
-          const result = await this.request("thread/turns/list", { threadId, limit: 8, itemsView: "full" });
+          const result = await this.request("thread/turns/list", { threadId, limit: 8, itemsView: "summary" });
           if (settled || stopping) return;
           // Inspect only the stable client-ID discriminator. Never retain or
           // publish another native turn's messages or tool arguments.
@@ -635,13 +701,18 @@ export class CodexQueueAdapter {
             const reported = own.tokenUsage?.last ?? own.usage;
             if (reported) notification({ method: "thread/tokenUsage/updated", params: { threadId, turnId: own.id, tokenUsage: { last: reported } } });
             if (["completed", "failed", "interrupted"].includes(own.status)) {
-              text = own.items.filter(item => item.type === "agentMessage").map(item => item.text ?? "").join("\n");
+              text = own.status === "completed" ? await this.ownFinalText(threadId, own) : "";
               if (text.length > 16000) { await stop("native_answer_output_limit"); return; }
               notification({ method: "turn/completed", params: { threadId, turn: { id: own.id, status: own.status, items: [] } } });
             }
           }
           pollDelay = this.pollIntervalMs;
-        } catch { pollDelay = Math.min(pollDelay * 2, 5000); /* Read uncertainty never retries inference. */ }
+        } catch (error) {
+          if (["native_answer_output_limit", "native_own_item_identity_mismatch", "native_own_items_incomplete"].includes(error.code)) {
+            receipt.status = "uncertain"; await save().catch(() => {}); await finish(error); return;
+          }
+          pollDelay = Math.min(pollDelay * 2, 5000); /* Read uncertainty never retries inference. */
+        }
         if (!settled && !stopping) pollTimer = setTimeout(() => { void pollOwnDelivery(); }, pollDelay);
       };
       this.events.on("notification", notification);
