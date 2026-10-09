@@ -53,3 +53,9 @@ Injected native RPCs and real HTTP/MCP/WebSocket transport fixtures test the new
 Existing-thread headless Codex transport is remote-only. Local Windows supports metadata, native Ask and interactive terminals; its existing-thread daemon controller is unqualified. Windows/Linux package construction is implemented, while Linux desktop/provider parity and macOS acceptance remain unqualified. Provider credentials are never copied into this repository or replaced by application participant capabilities.
 
 A shared work board, fair machine-resource broker, phone decision inbox, complete cross-product/cloud catalog and full interrupted-lane recovery are outstanding. Durable local context and conversation receipts address reopening and delivery safety; they do not establish those larger capabilities.
+
+## Running without the desktop app
+
+The companion service, scoped participant CLI, MCP interfaces and supported native delivery routes operate without launching Electron or keeping a desktop window open. From a configured source checkout, run `npm start` (equivalently, `node app/cli.mjs serve`) and install the native connectors following this guide. The desktop app is an optional owner interface, not the coordination runtime.
+
+Headless operation still needs the companion service, the supported native tools and their own authentication, workspace grants, and any required SSH connection. Claude inbound wake additionally needs its native channel opt-in; a headless service does not bypass that requirement. Existing Windows native wake and cloud-agent limitations still apply.

@@ -1,6 +1,6 @@
 {
   "name": "agentspaces-desktop",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "private": true,
   "description": "Desktop coordination for Codex and Claude, built on AgentSpaces by Bad Monkey",
   "author": "AgentSpaces Desktop contributors",

@@ -17,7 +17,7 @@ Exact consumed dependency revisions belong in `package.json`, `package-lock.json
 
 ## Make the relationship easy to find
 
-The README places BadMonkey/AgentSpaces attribution beside the product lead and links directly to the company landing page, framework and GitHub organization. Its architecture/reuse sections explain what the desktop owns and what remains upstream. The versioned [release page](https://github.com/Weston-Tyler/agentspaces-desktop/releases/tag/v0.1.0-alpha.2), installer documentation, repository homepage/topics and application About/footer should carry the same product relationship and upstream links.
+The README places BadMonkey/AgentSpaces attribution beside the product lead and links directly to the company landing page, framework and GitHub organization. Its architecture/reuse sections explain what the desktop owns and what remains upstream. The versioned [release page](https://github.com/Weston-Tyler/agentspaces-desktop/releases/tag/v0.1.0-alpha.3), installer documentation, repository homepage/topics and application About/footer should carry the same product relationship and upstream links.
 
 Download links point to this companion's versioned artifacts and checksums. Product links point to BadMonkey's AgentSpaces page. Claims about installed behavior, native transport qualification or a release's availability require exact version/runtime evidence; attractive documentation and a public repository do not establish them.
 

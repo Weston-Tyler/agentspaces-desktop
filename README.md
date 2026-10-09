@@ -14,7 +14,7 @@
 
 Working across Codex, Claude and an SSH machine should not require carrying messages between chats. AgentSpaces Desktop connects your permitted native threads, repositories, worktrees and documents in one workspace. Ask “What have we done on retry handling?” and get an answer with sources. Ask relevant thread agents to compare their findings, update a table or join a discussion, then see their attributed replies together.
 
-The local companion keeps running while the window is closed. The current topology supports this device and one configured SSH host; additional-host onboarding is still outstanding. Your native tools keep their own login, permissions and conversations.
+**Runs headlessly—no desktop window required.** The companion service and agent interfaces work without launching the Electron desktop app. The desktop is an optional interface. The local companion keeps running while the window is closed. The current topology supports this device and one configured SSH host; additional-host onboarding is still outstanding. Your native tools keep their own login, permissions and conversations.
 
 Use your existing native tool logins. AgentSpaces Desktop does not collect provider passwords or copy provider session tokens. Optional API answering is a separate advanced connection.
 
@@ -22,7 +22,7 @@ Use your existing native tool logins. AgentSpaces Desktop does not collect provi
 
 ## Get started
 
-Download the [v0.1.0-alpha.2 builds](https://github.com/Weston-Tyler/agentspaces-desktop/releases/tag/v0.1.0-alpha.2), then follow the [installation guide](docs/installer.md). Windows setup adds AgentSpaces Desktop to Start/search and Installed apps. The Linux archive includes a per-user applications-menu installer. Existing Codex/Claude tools and sign-in remain prerequisites; packaged builds include their own application Node runtime. [All releases](https://github.com/Weston-Tyler/agentspaces-desktop/releases) retain their version-specific artifacts and checksums.
+Download the [v0.1.0-alpha.3 builds](https://github.com/Weston-Tyler/agentspaces-desktop/releases/tag/v0.1.0-alpha.3), then follow the [installation guide](docs/installer.md). Windows setup adds AgentSpaces Desktop to Start/search and Installed apps. The Linux archive includes a per-user applications-menu installer. Existing Codex/Claude tools and sign-in remain prerequisites; packaged builds include their own application Node runtime. [All releases](https://github.com/Weston-Tyler/agentspaces-desktop/releases) retain their version-specific artifacts and checksums.
 
 1. Open AgentSpaces Desktop through its installed launcher.
 2. Connect your supported native tools and chosen workspace scope once.

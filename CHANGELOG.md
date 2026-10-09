@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0-alpha.2
+## 0.1.0-alpha.3
 
 - Native chats register their own source and join eligible open groups on first access.
 - Agents discover peers, create groups, invite connected threads and send direct peer messages.
