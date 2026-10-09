@@ -4,6 +4,8 @@ The loopback service runs independently of the Electron window. It restores conn
 
 On Windows, install the locked dependencies with npm ci, then run scripts/Install-Windows-Shortcuts.ps1. Desktop and Start-menu shortcuts open the application. The Startup shortcut invokes scripts/Start-Background.ps1, which starts the source service in a hidden process and preserves an already-running owned runtime. Run node app/cli.mjs status to verify it; scripts/Stop-Background.ps1 stops the owned service. This is a source-script shortcut, not a signed installer or release. The current startup script is not Authenticode-signed.
 
+`AGENTSPACES_STATE` can retain the existing owner-private workspace when selecting a new source checkout. CLI, background startup and desktop attachment use the same runtime file; changing source code does not require copying credentials or creating another workspace.
+
 Connect all persists the selected hosts, local-retrieval policy and file indexing. The normal selection covers this device and remote. Existing account labels, roots, exclusions and per-thread refusals remain authoritative; revoked broad scopes are not silently reenabled. Native catalogs publish first, followed by the owning workspace inventory and continuation path. A run is bounded to 32 batches and stops on stalled progress. Partial coverage remains visible. There is no idle model polling, transcript broadcast or cleanup of source repositories/worktrees.
 
 ## Direct native Codex conversations

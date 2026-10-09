@@ -23,7 +23,7 @@ else {
   app
     .whenReady()
     .then(async () => {
-      const sourceRuntime = fileURLToPath(new URL("../.local/runtime.json", import.meta.url));
+      const sourceRuntime = process.env.AGENTSPACES_STATE ? join(process.env.AGENTSPACES_STATE, "runtime.json") : fileURLToPath(new URL("../.local/runtime.json", import.meta.url));
       const sharedRuntime = process.env.AGENTSPACES_DESKTOP_RUNTIME ?? (!process.env.AGENTSPACES_DESKTOP_STATE && existsSync(sourceRuntime) ? sourceRuntime : null);
       if (sharedRuntime) {
         const runtime = JSON.parse(readFileSync(sharedRuntime, "utf8"));
