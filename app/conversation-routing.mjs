@@ -45,7 +45,8 @@ export async function routeConversation(engine, { codexAgents, channels }, group
     let candidates = existing;
     if (message.source && !existing.length) {
       const aliases = [...message.text.matchAll(/(?:^|\s)@([a-zA-Z0-9_-]+)/g)].map(match => match[1]);
-      const broadcast = policy.agentInitiation && chain.depth === 0 && aliases.length === 0;
+      // Status posts remain in the room; waking every peer requires an explicit address.
+      const broadcast = aliases.includes("all");
       candidates = group.members.filter(member => member.sessionId !== message.source.sessionId &&
         (broadcast || aliases.includes(member.alias)) && permitted(member.sessionId))
         .map(member => ({ sessionId: member.sessionId, alias: member.alias, status: "connecting-native-agent" }));
