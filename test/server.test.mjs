@@ -148,7 +148,7 @@ test("real MCP SDK transport retrieves a fixture finding without invoking a mode
     }),
   );
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 16);
+  assert.equal(tools.tools.length, 18);
   const discovered = await client.callTool({
     name: "discover_permitted_work",
     arguments: { query: "retry", provider: "codex", status: "archived" },

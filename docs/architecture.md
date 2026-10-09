@@ -19,7 +19,7 @@ flowchart TB
     Service -. Owning participant / work / claim / lease / result contracts .-> Upstream[AgentSpaces authority]
 ```
 
-The work map and metadata catalog are derived views over existing sources. Conversation records and effect receipts are transport state. They do not replace AgentSpaces's participant, work, claim, lease, result or artifact contracts, and direct conversation delivery does not prove delegated-work completion. No second orchestrator, task board or resource scheduler is introduced by this application.
+The work map and metadata catalog are derived views over existing sources. Conversation records and effect receipts are transport state. They do not replace AgentSpaces's participant, work, claim, lease, result or artifact contracts, and direct conversation delivery does not prove delegated-work completion. The work-board UI projects an embedded AgentSpaces replica; its claims and completion use the owning TypeScript contracts. It adds no independent claim algorithm or resource scheduler. See [work board](work-board.md) for the single-companion topology, durability and limits.
 
 ## Source identity and connection
 

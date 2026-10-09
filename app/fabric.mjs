@@ -124,7 +124,7 @@ export class FabricAdapter {
     return {
       status: this.status,
       reason: this.reason,
-      binding: "be025e7aba72e1837e0ccb3999bb76098d012fe0",
+      binding: "d30423d2a32685a2c2bb107acf66aca5065450d8",
       capabilities: {
         signedEntries: true,
         claims: "upstream LEASE_RACE",
