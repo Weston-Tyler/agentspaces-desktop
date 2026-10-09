@@ -27,15 +27,20 @@ export class CodexQueueAdapter {
     loadReceipt = async () => null,
     persistPermissionProof,
     loadPermissionProof = async () => null,
+    pollIntervalMs = 2000,
+    queueWaitTimeoutMs = 1800000,
   } = {}) {
     if (host !== "remote") throw fail("shared_daemon_host_not_qualified");
+    if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 20 || pollIntervalMs > 5000 || !Number.isInteger(queueWaitTimeoutMs) || queueWaitTimeoutMs < 20 || queueWaitTimeoutMs > 1800000) throw fail("invalid_native_delivery_poll_bound");
     Object.assign(this, { host, spawnProcess, persistReceipt, loadReceipt, persistPermissionProof, loadPermissionProof });
     this.events = new EventEmitter();
     this.pending = new Map();
     this.proofs = new Map();
     this.inflight = new Set();
     this.bindingThreads = new Set();
+    this.activeOwnedTurns = new Map();
     this.nextId = 1;
+    this.pollIntervalMs = pollIntervalMs; this.queueWaitTimeoutMs = queueWaitTimeoutMs;
   }
   async open() {
     if (this.child) return;
@@ -92,25 +97,19 @@ export class CodexQueueAdapter {
             : request.resolve(message.result);
         }
       } else if (message.method && message.id !== undefined) {
+        const params = message.params ?? {};
+        const owned = this.activeOwnedTurns.get(params.threadId + "\0" + params.turnId);
+        if (!owned) {
+          this.events.emit("foreign-native-request", { host: this.host, method: message.method, requestId: message.id, nativeThreadId: params.threadId ?? null, nativeTurnId: params.turnId ?? null });
+          return;
+        }
         if (message.method.includes("requestApproval")) {
-          const params = message.params ?? {};
           this.events.emit("native-attention", { host: this.host, kind: "approval-required", method: message.method, requestId: message.id,
             nativeThreadId: params.threadId ?? null, nativeTurnId: params.turnId ?? null, action: "declined; native owner attention required" });
+          this.send({ id: message.id, result: { decision: "decline" } });
+        } else {
+          this.events.emit("native-attention", { host: this.host, kind: "native-interaction-required", method: message.method, requestId: message.id, nativeThreadId: params.threadId ?? null, nativeTurnId: params.turnId ?? null, action: "native owner response required" });
         }
-        const result = message.method.includes("requestApproval")
-          ? { decision: "decline" }
-          : undefined;
-        this.send(
-          result
-            ? { id: message.id, result }
-            : {
-                id: message.id,
-                error: {
-                  code: -32601,
-                  message: "Unsupported approval interaction",
-                },
-              },
-        );
       } else this.events.emit("notification", message);
     });
     await new Promise((resolve, reject) => {
@@ -252,6 +251,15 @@ export class CodexQueueAdapter {
       return { nativeThreadId: threadId, permissionProof: proof, limitations: ["Native configuration and approvals preserved; no policy overrides", "Native tools follow preserved policy; approval escalations are declined and report owner attention", "Persisted permission evidence requires explicit rebind after restart", "Output token ceiling is checked after completion"] };
     } finally { this.bindingThreads.delete(threadId); }
   }
+  async bindLoadedThread({ threadId, cwd, grant } = {}) {
+    if (grant?.execution !== true || grant.allowExistingNativePolicy !== true || !UUID.test(threadId ?? "") || typeof cwd !== "string" || !posix.isAbsolute(cwd) || cwd.includes("\0")) throw fail("loaded_native_input_grant_required");
+    const response = await this.request("thread/read", { threadId, includeTurns: false }), thread = response.thread;
+    if (!thread || thread.id !== threadId || thread.cwd !== cwd) throw fail("native_loaded_target_identity_mismatch");
+    if (!["active", "idle"].includes(thread.status?.type) || thread.canAcceptDirectInput !== true || thread.ephemeral) throw fail("native_loaded_target_not_available");
+    const proof = { nativeThreadId: threadId, host: this.host, cwd, source: "loaded-native-input-target", policyKnown: false, allowExistingNativePolicy: true, verifiedAt: new Date().toISOString() };
+    this.proofs.set(threadId, proof);
+    return { nativeThreadId: threadId, permissionProof: proof, limitations: ["Loaded native input target only; effective sandbox and approval policy are not asserted", "Explicit owner accepts existing native policy; no settings are overridden", "Only this adapter's correlated turns can receive automatic approval declines"] };
+  }
   async eligible(threadId) {
     const response = await this.request("thread/read", {
       threadId,
@@ -279,6 +287,7 @@ export class CodexQueueAdapter {
       };
     if (proof.requiresRebind) return { eligible: false, reason: "native_permission_proof_requires_rebind" };
     if (proof.host !== this.host || proof.nativeThreadId !== threadId) return { eligible: false, reason: "native_permission_proof_identity_mismatch" };
+    if (proof.source === "loaded-native-input-target" && (proof.policyKnown !== false || proof.allowExistingNativePolicy !== true || !["active", "idle"].includes(thread.status?.type) || thread.canAcceptDirectInput !== true)) return { eligible: false, reason: "native_loaded_target_not_available" };
     if (proof.source === "existing-native-thread-resume-response" && !finiteNativePolicy(proof.sandbox, proof.approvalPolicy, proof.approvalsReviewer, proof.fullAccessGranted === true)) return { eligible: false, reason: "native_existing_permission_policy_not_qualified" };
     if (
       thread.cwd !== proof.cwd ||
@@ -414,6 +423,8 @@ export class CodexQueueAdapter {
       },
       text = "",
       timer,
+      pollTimer,
+      pollDelay = this.pollIntervalMs,
       settled = false,
       stopping = false;
     let saveTail = Promise.resolve();
@@ -425,9 +436,11 @@ export class CodexQueueAdapter {
     return new Promise((resolve, reject) => {
       const cleanup = () => {
         clearTimeout(timer);
+        clearTimeout(pollTimer);
         signal?.removeEventListener("abort", cancel);
         this.events.off("notification", notification);
         this.events.off("disconnect", disconnect);
+        for (const [key, owner] of this.activeOwnedTurns) if (owner === clientId) this.activeOwnedTurns.delete(key);
       };
       const finish = async (error) => {
         if (settled) return;
@@ -457,7 +470,7 @@ export class CodexQueueAdapter {
             ],
           });
       };
-      const stop = async (code) => {
+      const stop = async (code, allowContentLookup = true) => {
         if (settled || stopping) return;
         stopping = true;
         let cancelled = false;
@@ -468,6 +481,10 @@ export class CodexQueueAdapter {
               turnId: receipt.nativeTurnId,
             });
             cancelled = true;
+          } else if (!allowContentLookup) {
+            if (receipt.queuedSubmissionId) {
+              const result = await this.request("thread/queue/delete", { threadId, queuedSubmissionId: receipt.queuedSubmissionId }); cancelled = result.deleted === true;
+            }
           } else {
             const list = await this.request("thread/queue/list", {
               threadId,
@@ -529,7 +546,13 @@ export class CodexQueueAdapter {
         if (p.threadId !== threadId || settled || stopping) return;
         const item = p.item;
         if (item?.type === "userMessage" && item.clientId === clientId) {
+          if (typeof p.turnId !== "string" || !p.turnId || p.turnId.length > 200) return;
+          if (receipt.nativeTurnId && receipt.nativeTurnId !== p.turnId) return;
+          if (!receipt.nativeTurnId && eligible.permissionProof.source === "loaded-native-input-target") {
+            clearTimeout(timer); timer = setTimeout(() => { void stop("native_queue_timeout"); }, budget.timeoutMs);
+          }
           receipt.nativeTurnId = p.turnId;
+          this.activeOwnedTurns.set(threadId + "\0" + p.turnId, clientId);
           receipt.status = "running";
           void save().catch(() => stop("receipt_persistence_failed"));
         }
@@ -553,7 +576,7 @@ export class CodexQueueAdapter {
             };
         }
         if (
-          eligible.permissionProof.source !== "existing-native-thread-resume-response" &&
+          !["existing-native-thread-resume-response", "loaded-native-input-target"].includes(eligible.permissionProof.source) &&
           item &&
           [
             "commandExecution",
@@ -595,12 +618,38 @@ export class CodexQueueAdapter {
           );
         }
       };
+      const pollOwnDelivery = async () => {
+        if (settled || stopping) return;
+        if (dispatchFence) {
+          let permitted = false; try { permitted = (await dispatchFence()) !== false; } catch { /* No private grant diagnostics. */ }
+          if (!permitted) { await stop("native_delivery_grant_revoked", false); return; }
+        }
+        try {
+          const result = await this.request("thread/turns/list", { threadId, limit: 8, itemsView: "full" });
+          if (settled || stopping) return;
+          // Inspect only the stable client-ID discriminator. Never retain or
+          // publish another native turn's messages or tool arguments.
+          const own = (result.data ?? result.turns ?? []).find(turn => turn.items?.some(item => item.type === "userMessage" && item.clientId === clientId));
+          if (own && typeof own.id === "string") {
+            notification({ method: "item/started", params: { threadId, turnId: own.id, item: { type: "userMessage", clientId } } });
+            const reported = own.tokenUsage?.last ?? own.usage;
+            if (reported) notification({ method: "thread/tokenUsage/updated", params: { threadId, turnId: own.id, tokenUsage: { last: reported } } });
+            if (["completed", "failed", "interrupted"].includes(own.status)) {
+              text = own.items.filter(item => item.type === "agentMessage").map(item => item.text ?? "").join("\n");
+              if (text.length > 16000) { await stop("native_answer_output_limit"); return; }
+              notification({ method: "turn/completed", params: { threadId, turn: { id: own.id, status: own.status, items: [] } } });
+            }
+          }
+          pollDelay = this.pollIntervalMs;
+        } catch { pollDelay = Math.min(pollDelay * 2, 5000); /* Read uncertainty never retries inference. */ }
+        if (!settled && !stopping) pollTimer = setTimeout(() => { void pollOwnDelivery(); }, pollDelay);
+      };
       this.events.on("notification", notification);
       this.events.on("disconnect", disconnect);
       signal?.addEventListener("abort", cancel, { once: true });
       timer = setTimeout(() => {
         void stop("native_queue_timeout");
-      }, budget.timeoutMs);
+      }, eligible.permissionProof.source === "loaded-native-input-target" ? this.queueWaitTimeoutMs : budget.timeoutMs);
       receipt.status = "dispatching";
       void save().then(
         async () => {
@@ -617,13 +666,16 @@ export class CodexQueueAdapter {
                     question +
                     "\nReply within " +
                     budget.maxOutputTokens +
-                    " tokens." + (eligible.permissionProof.source === "existing-native-thread-resume-response" ? "" : " Do not use tools."),
+                    " tokens." + (["existing-native-thread-resume-response", "loaded-native-input-target"].includes(eligible.permissionProof.source) ? "" : " Do not use tools."),
                 },
               ],
             });
-            receipt.queuedSubmissionId = response.queuedSubmission?.id ?? null;
+            if (typeof response.queuedSubmission?.id !== "string" || !response.queuedSubmission.id || response.queuedSubmission.clientUserMessageId !== clientId) throw fail("native_queue_ack_identity_mismatch", true);
+            receipt.queuedSubmissionId = response.queuedSubmission.id;
             if (!receipt.nativeTurnId && !settled) receipt.status = "queued";
             await save();
+            this.events.emit("queued", { threadId, clientId, queuedSubmissionId: receipt.queuedSubmissionId, status: "queued" });
+            if (eligible.permissionProof.source === "loaded-native-input-target" && !settled && !stopping) pollTimer = setTimeout(() => { void pollOwnDelivery(); }, this.pollIntervalMs);
           } catch (error) {
             if (error.code === "native_dispatch_grant_revoked" || receipt.undispatched === true) { await finish(error); return; }
             if (!settled) {

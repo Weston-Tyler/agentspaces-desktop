@@ -12,6 +12,11 @@ export async function readSdk(request, sdk) {
   )
     throw new Error("Explicit project metadata grant required");
   const p = request.project;
+  if (request.action === 'info') {
+    const info = await sdk.getSessionInfo(request.nativeThreadId);
+    if (!info || info.sessionId !== request.nativeThreadId || typeof info.cwd !== 'string') return null;
+    return { nativeThreadId: info.sessionId, cwd: info.cwd, title: String(info.customTitle ?? info.summary ?? 'Untitled native session').slice(0, 240), sourceVersion: String(info.lastModified) };
+  }
   const offset =
     request.cursor === null || request.cursor === undefined
       ? 0

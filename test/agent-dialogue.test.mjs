@@ -87,13 +87,14 @@ test("revoking a peer after targeted notification prevents its HTTP reply and su
 });
 
 function routingFixture() {
-  const { engine } = engineFixture(), template = engine.session("sample-claude-new");
+  const { root, engine } = engineFixture(), template = engine.session("sample-claude-new");
   engine.catalog = Array.from({ length: 12 }, (_, i) => ({ ...template, id: "routing-source-" + i }));
   for (const source of engine.catalog) engine.grant(source.id, { enrolled: true, content: true, share: true, retrieve: true });
   const created = engine.discussions.create({ title: "Bounded routing fixture", sessionIds: engine.catalog.map(s => s.id) });
-  const group = engine.discussions.group(created.id), deliveries = new Map();
+  const group = engine.discussions.group(created.id), deliveries = new Map(); let deliveryCalls = 0;
   const transports = { codexAgents: { dispatch() { throw new Error("No Codex transport expected"); } },
     channels: { isConnected: () => true, async deliver(value) {
+      deliveryCalls++;
       if (!deliveries.has(value.requestId)) deliveries.set(value.requestId, value);
       await Promise.resolve(); return { status: "delivered-to-native-transport" };
     } } };
@@ -103,7 +104,7 @@ function routingFixture() {
       deliveryId: "routing-contribution-" + suffix }, { sessionId: source.id });
     return group.messages.at(-1);
   };
-  return { engine, group, transports, deliveries, contribute };
+  return { root, engine, group, transports, deliveries, contribute, deliveryCalls: () => deliveryCalls };
 }
 
 test("parallel descendant mentions share a sixteen-target budget and repeated routing has no new effects", async () => {
@@ -131,4 +132,95 @@ test("orphan contributions, self mentions and third-depth replies never start an
   const depth3 = f.contribute(0, "@claude2 wake", depth2.id, "depth3");
   await routeConversation(f.engine, f.transports, f.group, depth3); assert.equal(f.deliveries.size, 0);
   assert.deepEqual(depth3.targets, []);
+});
+
+test("an enabled participant can start an unmentioned HTTP room conversation without an owner message", async t => {
+  const f = await httpSetup(t);
+  f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
+  const data = { id: f.group.id, text: "Here is my new finding", nativeTurnId: "fixture-claude-first-turn",
+    deliveryId: "participant-first-post-0001" };
+  const headers = { Authorization: "Bearer " + f.connector.token, "Content-Type": "application/json" };
+  const response = await f.post("/api/discussions/contribute", data, headers); assert.equal(response.status, 200);
+  const group = f.engine.discussions.group(f.group.id), root = group.messages[0];
+  await f.app.codexAgents.wait(id(group.id, root.id, f.codex.id));
+  assert.equal(root.source.sessionId, f.claude.id); assert.equal(root.replyTo, null);
+  assert.deepEqual(root.targets.map(target => target.sessionId), [f.codex.id]);
+  assert.equal(group.messages[1].replyTo, root.id); assert.equal(group.messages[1].source.nativeThreadId, CODEX_THREAD);
+  assert.equal(f.count(), 1); assert.equal(f.notices.length, 1);
+  const repeated = await f.post("/api/discussions/contribute", data, headers); assert.equal(repeated.status, 200);
+  assert.equal(f.count(), 1); assert.equal(group.messages.length, 2);
+});
+
+test("enabled participant roots broadcast once, mentioned roots select aliases, plain replies finish quietly", async () => {
+  const f = routingFixture(); f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
+  const root = f.contribute(0, "New finding for the room", null, "new-root");
+  await routeConversation(f.engine, f.transports, f.group, root);
+  assert.equal(root.targets.length, 11); assert.equal(f.deliveries.size, 11);
+  assert(!root.targets.some(target => target.sessionId === root.source.sessionId));
+  const plain = f.contribute(1, "Thanks, that resolves it", root.id, "plain-finish");
+  await routeConversation(f.engine, f.transports, f.group, plain); assert.deepEqual(plain.targets, []);
+  const mentioned = f.contribute(0, "@claude3 check this", null, "mentioned-root");
+  await routeConversation(f.engine, f.transports, f.group, mentioned);
+  assert.deepEqual(mentioned.targets.map(target => target.alias), ["claude3"]);
+  const count = f.deliveries.size;
+  const calls = f.deliveryCalls();
+  await routeConversation(f.engine, f.transports, f.group, root); assert.equal(f.deliveries.size, count);
+  assert.equal(f.deliveryCalls(), calls, "Already attempted transport targets must not be invoked again");
+  const restarted = new Engine(new Store(f.root), new FabricAdapter({ stateRoot: f.root }));
+  restarted.catalog = structuredClone(f.engine.catalog);
+  const restored = restarted.discussions.group(f.group.id);
+  await routeConversation(restarted, f.transports, restored, restored.messages.find(message => message.id === root.id));
+  assert.equal(f.deliveryCalls(), calls, "Persisted attempt markers must prevent delivery after restart");
+});
+
+test("room policy enablement does not replay old posts and revocation stops fresh participant roots", async () => {
+  const f = routingFixture(); const old = f.contribute(0, "Old finding", null, "old-root");
+  const unprocessedHistory = f.contribute(0, "Stored history without routing markers", null, "unprocessed-root");
+  await routeConversation(f.engine, f.transports, f.group, old); assert.equal(f.deliveries.size, 0);
+  await routeConversation(f.engine, f.transports, f.group, unprocessedHistory); assert.equal(f.deliveries.size, 0);
+  f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
+  await routeConversation(f.engine, f.transports, f.group, old); assert.equal(f.deliveries.size, 0);
+  const fresh = f.contribute(0, "Fresh finding", null, "fresh-root");
+  f.engine.grant(f.engine.catalog[0].id, { retrieve: false });
+  await routeConversation(f.engine, f.transports, f.group, fresh); assert.equal(f.deliveries.size, 0);
+  assert.equal(fresh.routing.status, "participant-access-unavailable");
+});
+
+test("enabled room limits bound each root to eight hops and thirty-two allocations, leaving new roots available", async () => {
+  const f = routingFixture(); f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
+  const root = f.contribute(0, "First root", null, "limit-root");
+  await routeConversation(f.engine, f.transports, f.group, root);
+  const aliases = f.group.members.map(member => "@" + member.alias).join(" ");
+  const A = f.contribute(1, aliases, root.id, "limit-A"), B = f.contribute(2, aliases, root.id, "limit-B");
+  await Promise.all([routeConversation(f.engine, f.transports, f.group, A), routeConversation(f.engine, f.transports, f.group, B)]);
+  assert.equal(root.targets.length + A.targets.length + B.targets.length, 32);
+  assert.equal(B.routing.status, "target-budget-exhausted");
+  let parent = root;
+  for (let depth = 1; depth <= 9; depth++) parent = f.contribute(depth % 2, "No mention", parent.id, "hop-" + depth);
+  parent.text = "@claude3 should not run";
+  await routeConversation(f.engine, f.transports, f.group, parent);
+  assert.equal(parent.routing.status, "forward-hop-limit-reached"); assert.deepEqual(parent.targets, []);
+  const next = f.contribute(0, "A new room topic", null, "independent-root");
+  await routeConversation(f.engine, f.transports, f.group, next); assert.equal(next.targets.length, 11);
+  let eighth = next;
+  for (let depth = 1; depth <= 8; depth++) eighth = f.contribute(depth % 2, "No routing yet", eighth.id, "allowed-hop-" + depth);
+  eighth.text = "@claude3 a targeted eighth hop";
+  await routeConversation(f.engine, f.transports, f.group, eighth);
+  assert.equal(eighth.routing.depth, 8); assert.equal(eighth.targets.length, 1);
+});
+
+test("cycles and room policy changes during delivery never dispatch remaining participant targets", async () => {
+  const f = routingFixture(); f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
+  const cycle = f.contribute(0, "@claude2 cycle", null, "cycle-root"); cycle.replyTo = cycle.id;
+  await routeConversation(f.engine, f.transports, f.group, cycle); assert.equal(f.deliveries.size, 0);
+  const root = f.contribute(0, "A normal finding", null, "policy-race-root");
+  const deliver = f.transports.channels.deliver;
+  f.transports.channels.deliver = async value => {
+    f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: false }); return deliver(value);
+  };
+  await routeConversation(f.engine, f.transports, f.group, root);
+  assert.equal(f.deliveries.size, 1);
+  assert(root.targets.slice(1).every(target => target.status === "room-policy-changed; not dispatched"));
+  f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
+  await routeConversation(f.engine, f.transports, f.group, root); assert.equal(f.deliveries.size, 1);
 });

@@ -12,23 +12,19 @@ export class ClaudeReadAdapter {
       throw new Error("Unsupported host");
     this.host = host;
     this.sdkLoader = sdkLoader;
-    this.spawnProcess = spawn;
+    this.spawnProcess = spawnProcess;
   }
   async open() {}
   async call(request) {
     if (this.host === "local") return readSdk(request, await this.sdkLoader());
     // Product-owned, pinned read-only SDK. SSH remains the transport/authentication owner.
-    const module =
-      "/tmp/agentspaces-desktop-sdk-read/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs";
     const helper = readFileSync(
       new URL("./claude-reader.mjs", import.meta.url),
       "utf8",
     ).replace("export async function readSdk", "async function readSdk");
     const script =
-      helper +
-      "\nconst sdk=await import(" +
-      JSON.stringify(module) +
-      ");\nconst request=" +
+      "import {homedir} from 'node:os';import {join} from 'node:path';import {readFileSync} from 'node:fs';\n" + helper +
+      "\nconst sdkRoot=join(homedir(),'.agentspaces-desktop-native','automatic','node_modules','@anthropic-ai','claude-agent-sdk');if(JSON.parse(readFileSync(join(sdkRoot,'package.json'),'utf8')).version!=='0.3.293')throw Error('Read SDK version mismatch');const sdk=await import(join(sdkRoot,'sdk.mjs'));\nconst request=" +
       JSON.stringify(request) +
       ";\ntry{console.log(JSON.stringify(await readSdk(request,sdk)));}catch(e){console.log(JSON.stringify({error:e.message}));process.exitCode=1;}";
     return new Promise((yes, no) => {

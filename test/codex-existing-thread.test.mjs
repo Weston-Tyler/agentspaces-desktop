@@ -23,7 +23,7 @@ function fixture({ status = "notLoaded", pending = false, sandbox = { type: "wor
         if (emitsTools) adapter.events.emit("notification", { method: "item/started", params: { threadId, turnId: "native-turn", item: { type: "commandExecution", command: "synthetic-native-tool" } } });
         adapter.events.emit("notification", { method: "turn/completed", params: { threadId, turn: { id: "native-turn", status: "completed", items: [{ type: "agentMessage", text: "Existing native result" }] } } });
       });
-      return { queuedSubmission: { id: "queued-request" } };
+      return { queuedSubmission: { id: "queued-request", clientUserMessageId: params.clientUserMessageId } };
     }
     if (method === "turn/interrupt") return {};
     throw new Error("Unexpected native method");
@@ -130,26 +130,117 @@ test("invalid dispatch fence refuses before native eligibility read", async () =
   await assert.rejects(f.adapter.answer({ threadId, clientId: "invalid-fence-1", question: "Question", grant: true, budget: { timeoutMs: 1000, maxOutputTokens: 800 }, dispatchFence: "not-callable" }), { code: "invalid_dispatch_fence", uncertainOutcome: false });
   assert.equal(f.calls.length, count);
 });
-test("native approval is declined and emits only safe owner-attention metadata", async t => {
+test("loaded active source accepts explicitly granted input without resume or policy assertions", async () => {
+  const f = fixture({ status: "active", emitsTools: true }), events = [];
+  const target = await f.adapter.bindLoadedThread({ threadId, cwd, grant: { execution: true, allowExistingNativePolicy: true } });
+  assert.deepEqual(f.calls, [{ method: "thread/read", params: { threadId, includeTurns: false } }]);
+  assert.equal(target.permissionProof.source, "loaded-native-input-target"); assert.equal(target.permissionProof.policyKnown, false); assert.equal(target.permissionProof.sandbox, undefined);
+  f.adapter.events.on("queued", event => events.push(event));
+  const result = await f.adapter.answer({ threadId, clientId: "loaded-busy-client", question: "A queued conversation message", grant: true, budget: { timeoutMs: 1000, maxOutputTokens: 800 } });
+  assert.equal(result.receipt.status, "completed"); assert.ok(!f.calls.some(call => call.method === "thread/resume" || call.method === "thread/start" || call.method === "turn/interrupt"));
+  assert.deepEqual(events, [{ threadId, clientId: "loaded-busy-client", queuedSubmissionId: "queued-request", status: "queued" }]);
+  assert.equal(f.adapter.activeOwnedTurns.size, 0);
+});
+test("loaded target requires explicit native-policy grant and rejects cold or stale identities", async () => {
+  const f = fixture({ status: "active" });
+  await assert.rejects(f.adapter.bindLoadedThread({ threadId, cwd, grant: true }), { code: "loaded_native_input_grant_required" }); assert.equal(f.calls.length, 0);
+  await f.adapter.bindLoadedThread({ threadId, cwd, grant: { execution: true, allowExistingNativePolicy: true } });
+  f.adapter.request = async () => ({ thread: { id: threadId, cwd, status: { type: "notLoaded" }, canAcceptDirectInput: false } });
+  assert.equal((await f.adapter.eligible(threadId)).eligible, false);
+  const g = fixture({ status: "notLoaded" });
+  await assert.rejects(g.adapter.bindLoadedThread({ threadId, cwd, grant: { execution: true, allowExistingNativePolicy: true } }), { code: "native_loaded_target_not_available" });
+  const h = fixture({ status: "idle" });
+  await assert.rejects(h.adapter.bindLoadedThread({ threadId, cwd: "/another", grant: { execution: true, allowExistingNativePolicy: true } }), { code: "native_loaded_target_identity_mismatch" });
+});
+function pollingFixture({ data, fence, queueWaitTimeoutMs = 300 } = {}) {
+  const receipts = [], calls = [];
+  const adapter = new CodexQueueAdapter({ pollIntervalMs: 20, queueWaitTimeoutMs, persistReceipt: async receipt => receipts.push(structuredClone(receipt)) });
+  adapter.request = async (method, params) => {
+    calls.push({ method, params });
+    if (method === "thread/read") return { thread: { id: threadId, cwd, status: { type: "active" }, canAcceptDirectInput: true, ephemeral: false } };
+    if (method === "thread/queue/add") return { queuedSubmission: { id: "poll-queue", clientUserMessageId: params.clientUserMessageId } };
+    if (method === "thread/turns/list") return typeof data === "function" ? data(calls.filter(call => call.method === "thread/turns/list").length) : { data: data ?? [] };
+    if (method === "thread/queue/delete") return { deleted: true };
+    if (method === "turn/interrupt") return {};
+    if (method === "thread/queue/list") return { data: [{ id: "poll-queue", clientUserMessageId: "poll-client" }] };
+    throw new Error("Unexpected method");
+  };
+  const bind = () => adapter.bindLoadedThread({ threadId, cwd, grant: { execution: true, allowExistingNativePolicy: true } });
+  const answer = extra => adapter.answer({ threadId, clientId: "poll-client", question: "Queued fixture", grant: true, dispatchFence: fence ?? (() => true), budget: { timeoutMs: 100, maxOutputTokens: 800 }, ...extra });
+  return { adapter, calls, receipts, bind, answer };
+}
+test("loaded request polls only after acknowledgement and returns exact-client result without other turn text", async () => {
+  const f = pollingFixture({ data: [{ id: "foreign-turn", status: "completed", items: [{ type: "userMessage", clientId: "foreign-client" }, { type: "agentMessage", text: "PRIVATE FOREIGN RESULT" }] }, { id: "own-polled-turn", status: "completed", usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 }, items: [{ type: "userMessage", clientId: "poll-client" }, { type: "agentMessage", text: "Own polled reply" }] }] });
+  await f.bind(); const result = await f.answer();
+  assert.equal(result.nativeTurnId, "own-polled-turn"); assert.equal(result.text, "Own polled reply"); assert.equal(result.usage.totalTokens, 6);
+  assert.ok(!JSON.stringify([result, f.receipts]).includes("PRIVATE"));
+  const calls = f.calls.map(call => call.method); assert.ok(calls.indexOf("thread/queue/add") < calls.indexOf("thread/turns/list"));
+  assert.deepEqual(f.calls.find(call => call.method === "thread/turns/list").params, { threadId, limit: 8, itemsView: "full" });
+  const count = f.calls.length; await new Promise(resolve => setTimeout(resolve, 35)); assert.equal(f.calls.length, count);
+  assert.ok(!calls.includes("thread/resume") && !calls.includes("thread/start"));
+});
+test("busy queued waiting is separate from execution timeout and repeated polls never reset running budget", async () => {
+  const f = pollingFixture({ queueWaitTimeoutMs: 500, data: count => count < 4 ? { data: [] } : { data: [{ id: "own-running", status: "inProgress", items: [{ type: "userMessage", clientId: "poll-client" }] }] } });
+  await f.bind();
+  await assert.rejects(f.answer({ budget: { timeoutMs: 30, maxOutputTokens: 800 } }), { code: "native_queue_timeout" });
+  assert.ok(f.calls.filter(call => call.method === "thread/turns/list").length >= 4, "short execution budget did not expire while waiting for a busy native owner");
+  assert.deepEqual(f.calls.find(call => call.method === "turn/interrupt").params, { threadId, turnId: "own-running" });
+});
+test("read uncertainty backs off without model retry and can recover the same native client", async () => {
+  const f = pollingFixture({ data: count => { if (count === 1) throw new Error("PRIVATE metadata diagnostic"); return { data: [{ id: "own-recovered", status: "completed", items: [{ type: "userMessage", clientId: "poll-client" }, { type: "agentMessage", text: "Recovered reply" }] }] }; } });
+  await f.bind(); const result = await f.answer();
+  assert.equal(result.text, "Recovered reply"); assert.equal(f.calls.filter(call => call.method === "thread/queue/add").length, 1);
+});
+test("poll-time grant revocation cancels exact queue without any further content lookup", async () => {
+  let checks = 0;
+  const f = pollingFixture({ fence: () => ++checks < 3 }); await f.bind();
+  await assert.rejects(f.answer(), { code: "native_delivery_grant_revoked", uncertainOutcome: true });
+  assert.equal(f.calls.filter(call => call.method === "thread/turns/list").length, 0);
+  assert.equal(f.calls.filter(call => call.method === "thread/queue/list").length, 0);
+  assert.deepEqual(f.calls.find(call => call.method === "thread/queue/delete").params, { threadId, queuedSubmissionId: "poll-queue" });
+});
+test("poll constructor bounds and queue wait ceiling are finite", async () => {
+  assert.throws(() => new CodexQueueAdapter({ pollIntervalMs: 1 }), { code: "invalid_native_delivery_poll_bound" });
+  assert.throws(() => new CodexQueueAdapter({ queueWaitTimeoutMs: 1800001 }), { code: "invalid_native_delivery_poll_bound" });
+  const f = pollingFixture({ queueWaitTimeoutMs: 35 }); await f.bind();
+  await assert.rejects(f.answer(), { code: "native_queue_timeout" });
+});
+test("only correlated owned-turn approvals are declined; foreign native requests are untouched", async t => {
   const server = createServer(), wss = new WebSocketServer({ server });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const replies = [], attention = []; let peer;
+  const replies = [], attention = [], foreign = []; let peer;
   wss.on("connection", socket => {
     peer = socket;
     socket.on("message", bytes => {
       const message = JSON.parse(bytes.toString());
       if (message.method === "initialize") socket.send(JSON.stringify({ id: message.id, result: {} }));
-      if (message.id === "approval-request") replies.push(message);
+      if (["approval-request", "foreign-approval", "uncorrelated-approval", "late-approval", "foreign-input"].includes(message.id)) replies.push(message);
     });
   });
-  const adapter = new CodexQueueAdapter({ spawnProcess: () => {
+  const adapter = new CodexQueueAdapter({ persistReceipt: async () => {}, spawnProcess: () => {
     const child = new EventEmitter(), socket = connect(server.address().port, "127.0.0.1");
     child.stdout = socket; child.stdin = socket; child.stderr = new PassThrough(); child.kill = () => socket.destroy(); socket.on("close", () => child.emit("close")); return child;
   } });
   t.after(async () => { adapter.close(); for (const socket of wss.clients) socket.terminate(); await new Promise(resolve => server.close(resolve)); wss.close(); });
   adapter.events.on("native-attention", event => attention.push(event)); await adapter.open();
+  adapter.events.on("foreign-native-request", event => foreign.push(event));
+  adapter.request = async (method, params) => method === "thread/read" ? { thread: { id: threadId, cwd, status: { type: "active" }, canAcceptDirectInput: true, ephemeral: false } } : method === "thread/queue/add" ? { queuedSubmission: { id: "fixture-queue", clientUserMessageId: params.clientUserMessageId } } : {};
+  await adapter.bindLoadedThread({ threadId, cwd, grant: { execution: true, allowExistingNativePolicy: true } });
+  const answer = adapter.answer({ threadId, clientId: "owned-approval-client", question: "Synthetic test", grant: true, budget: { timeoutMs: 1000, maxOutputTokens: 800 } });
+  await new Promise(resolve => setImmediate(resolve));
+  peer.send(JSON.stringify({ method: "item/started", params: { threadId, turnId: "native-turn", item: { type: "userMessage", clientId: "another-client" } } }));
+  peer.send(JSON.stringify({ id: "uncorrelated-approval", method: "item/commandExecution/requestApproval", params: { threadId, turnId: "native-turn", command: "PRIVATE FOREIGN INPUT" } }));
+  peer.send(JSON.stringify({ id: "foreign-input", method: "tool/requestUserInput", params: { threadId, turnId: "foreign-turn" } }));
+  peer.send(JSON.stringify({ method: "item/started", params: { threadId, turnId: "native-turn", item: { type: "userMessage", clientId: "owned-approval-client" } } }));
+  peer.send(JSON.stringify({ id: "foreign-approval", method: "item/commandExecution/requestApproval", params: { threadId, turnId: "foreign-turn" } }));
   peer.send(JSON.stringify({ id: "approval-request", method: "item/commandExecution/requestApproval", params: { threadId, turnId: "native-turn", command: "PRIVATE NATIVE TOOL INPUT" } }));
   await new Promise(resolve => setTimeout(resolve, 20));
-  assert.deepEqual(replies[0].result, { decision: "decline" }); assert.equal(attention[0].nativeThreadId, threadId);
+  assert.equal(replies.length, 1); assert.equal(replies[0].id, "approval-request"); assert.deepEqual(replies[0].result, { decision: "decline" }); assert.equal(attention[0].nativeThreadId, threadId);
+  assert.equal(foreign.length, 3);
+  peer.send(JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: "native-turn", status: "completed", items: [{ type: "agentMessage", text: "Fixture done" }] } } }));
+  await answer; assert.equal(adapter.activeOwnedTurns.size, 0);
+  peer.send(JSON.stringify({ id: "late-approval", method: "item/commandExecution/requestApproval", params: { threadId, turnId: "native-turn" } }));
+  await new Promise(resolve => setTimeout(resolve, 10)); assert.equal(replies.length, 1);
   assert.ok(!JSON.stringify(attention).includes("PRIVATE"));
+  assert.ok(!JSON.stringify(foreign).includes("PRIVATE"));
 });

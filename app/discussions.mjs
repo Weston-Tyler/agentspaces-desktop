@@ -47,13 +47,29 @@ export class Discussions {
     if (!g) throw new Error("Unknown discussion");
     return g;
   }
+  policy(g) {
+    const agentInitiation = g.policy?.agentInitiation === true;
+    return { agentInitiation, maxForwardHops: agentInitiation ? 8 : 2, maxDeliveries: agentInitiation ? 32 : 16 };
+  }
+  setPolicy({ id, agentInitiation }, participantBinding = null) {
+    if (participantBinding) throw new Error("Only the local owner may change discussion policy");
+    if (typeof agentInitiation !== "boolean") throw new Error("Agent initiation policy must be boolean");
+    const g = this.group(id);
+    if (this.policy(g).agentInitiation !== agentInitiation) {
+      g.policy = { agentInitiation, agentInitiationFromMessage: g.messages.length }; g.version++;
+      this.store.audit("Discussion policy changed", { discussionId: id, agentInitiation });
+    }
+    return this.view(g);
+  }
   view(g) {
     const members = g.members.map((m) => ({
       ...m,
       available: this.allowed(m),
       replyMode: m.fixture
         ? "synthetic"
-        : "cooperative MCP; automatic wake unavailable",
+        : m.provider === "codex" && m.host === "remote"
+          ? "shared native connection; current eligibility checked when addressed"
+          : "source-bound participant connection; enrollment and transport required",
     }));
     // Revocation hides the entire cached conversation, rather than retaining
     // another participant's contributed content through a withdrawn source grant.
@@ -78,7 +94,13 @@ export class Discussions {
       messages: available ? g.messages : [],
       available,
       fixture: members.every((m) => m.fixture),
-      automaticNativeWake: false,
+      policy: this.policy(g),
+      agentInitiation: this.policy(g).agentInitiation,
+      automaticNativeWake: {
+        availability: members.some(m => !m.fixture && m.provider === "codex" && m.host === "remote")
+          ? "requires-native-binding" : "reference-or-participant-only",
+        idlePolling: false,
+      },
       wireType: SNAPSHOT_TYPE,
     };
   }
@@ -109,7 +131,8 @@ export class Discussions {
         }
       });
   }
-  create({ title, sessionIds }) {
+  create({ title, sessionIds, agentInitiation = false }) {
+    if (typeof agentInitiation !== "boolean") throw new Error("Agent initiation policy must be boolean");
     if (typeof title !== "string" || !title.trim() || title.length > 80)
       throw new Error("Use a discussion title of 1–80 characters");
     if (
@@ -133,6 +156,7 @@ export class Discussions {
       members,
       version: 0,
       messages: [],
+      policy: { agentInitiation, agentInitiationFromMessage: 0 },
     };
     this.store.data.discussions.push(g);
     this.store.audit("Discussion created", {
@@ -258,7 +282,7 @@ export class Discussions {
       if (!g.members.some((m) => m.alias === alias))
         throw new Error("Unknown mention @" + alias);
     const selected = g.members.filter(
-      (m) => targets.includes(m.sessionId) || aliases.includes(m.alias),
+      (m) => targets.includes(m.sessionId) || aliases.includes(m.alias) || (this.policy(g).agentInitiation && !targets.length && !aliases.length),
     );
     if (
       fixtureDialogueTurns &&
@@ -285,7 +309,9 @@ export class Discussions {
       alias: m.alias,
       status: m.fixture
         ? "synthetic reply"
-        : "blocked: native controller not qualified; no wake dispatched",
+        : m.provider === "codex" && m.host === "remote"
+          ? "pending native eligibility check; no wake dispatched"
+          : "participant connection required; no wake dispatched",
     }));
     const user = this.append(g, {
       text: text.trim(),

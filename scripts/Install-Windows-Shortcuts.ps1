@@ -25,3 +25,16 @@ foreach ($shortcutEntry in @(
     $shortcut.Save()
     Write-Output $shortcutPath
 }
+# Reuse the companion-owned service; the native setup has no model calls.
+& $shortcutTarget -NoProfile -File (Join-Path $PSScriptRoot 'Start-Background.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'The owned background service could not start.' }
+Push-Location $shortcutProductRoot
+try {
+    for ($setupAttempt = 0; $setupAttempt -lt 30; $setupAttempt++) {
+        node app/cli.mjs status 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { break }
+        Start-Sleep -Milliseconds 200
+    }
+    node scripts/install-connected-tools.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Native setup needs an active Connect all scope; existing native sessions were preserved.' }
+} finally { Pop-Location }

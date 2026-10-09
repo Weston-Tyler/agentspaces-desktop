@@ -28,6 +28,15 @@ const post = (id, extra = {}) => ({
   deliveryId: "delivery-0001",
   ...extra,
 });
+
+test('an enabled room addresses everyone by default and explicit owner targets select recipients', () => {
+  const { engine, id, ids } = setup(); engine.discussions.setPolicy({ id, agentInitiation: true });
+  const all = engine.discussions.post({ id, text: 'What did we find?', deliveryId: 'room-opening-0001' });
+  assert.deepEqual(all.messages[0].targets.map(target => target.sessionId), ids);
+  const selected = engine.discussions.post({ id, text: 'One specific question', targets: [ids[0]], deliveryId: 'room-selected-0002' });
+  assert.deepEqual(selected.messages.find(message => message.deliveryId === 'room-selected-0002').targets.map(target => target.sessionId), [ids[0]]);
+  assert.equal(engine.modelCalls, 0);
+});
 test("metadata references create a group without transcript reads or enrollment", () => {
   const { engine, id } = setup();
   const g = engine.discussions.view(engine.discussions.group(id));
@@ -76,7 +85,8 @@ test("native wake requests stay visibly blocked and never invoke adapters", () =
   assert(
     g.messages[0].targets.every((t) => t.status.includes("no wake dispatched")),
   );
-  assert.equal(g.automaticNativeWake, false);
+  assert.equal(g.automaticNativeWake.availability, "reference-or-participant-only");
+  assert.equal(g.automaticNativeWake.idlePolling, false);
   assert.throws(
     () =>
       engine.discussions.post(
@@ -203,4 +213,17 @@ test("local macOS/Linux paths retain case and POSIX boundaries; remote is always
   assert.equal(hostPaths("remote", "win32").isAbsolute("/home/example"), true);
   assert.equal(hostOS("local", "darwin"), "macOS");
   assert.equal(hostOS("local", "linux"), "Linux");
+});
+test("owner room policy is explicit, bounded, persisted and cannot be changed by participants", () => {
+  const { engine, root, id } = setup();
+  assert.deepEqual(engine.discussions.view(engine.discussions.group(id)).policy,
+    { agentInitiation: false, maxForwardHops: 2, maxDeliveries: 16 });
+  assert.throws(() => engine.discussions.setPolicy({ id, agentInitiation: true }, { sessionId: "sample-codex-old" }), /owner/);
+  assert.throws(() => engine.discussions.setPolicy({ id, agentInitiation: "true" }), /boolean/);
+  const enabled = engine.discussions.setPolicy({ id, agentInitiation: true });
+  assert.deepEqual(enabled.policy, { agentInitiation: true, maxForwardHops: 8, maxDeliveries: 32 });
+  const restored = new Engine(new Store(root), new FabricAdapter({ stateRoot: root })); restored.loadSample();
+  assert.equal(restored.discussions.view(restored.discussions.group(id)).agentInitiation, true);
+  const created = engine.discussions.create({ title: "Explicit shared room", sessionIds: ["sample-codex-old"], agentInitiation: true });
+  assert.equal(created.policy.maxForwardHops, 8); assert.equal(created.policy.maxDeliveries, 32);
 });

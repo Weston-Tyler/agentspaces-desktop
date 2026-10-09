@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readSdk } from "../app/claude-reader.mjs";
 import { ClaudeReadAdapter } from "../app/claude-adapter.mjs";
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 const p = {
   id: "research",
   path: process.cwd(),
@@ -9,6 +11,21 @@ const p = {
   host: "local",
   metadataGrant: true,
 };
+
+test('remote Claude metadata uses the installed pinned read SDK and injected SSH transport', async () => {
+  let source = '', launches = 0;
+  const adapter = new ClaudeReadAdapter({ host: 'remote', spawnProcess: (command, args) => {
+    launches++; assert.equal(command, 'ssh'); assert.equal(args[0], 'remote');
+    const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.stdin = new PassThrough(); child.kill = () => {};
+    child.stdin.on('data', chunk => source += chunk);
+    child.stdin.on('finish', () => setImmediate(() => { child.stdout.end(JSON.stringify({ sessions: [], nextCursor: null })); child.emit('close', 0); }));
+    return child;
+  } });
+  const result = await adapter.discover({ ...p, host: 'remote', path: '/fictional/project' });
+  assert.equal(launches, 1); assert.deepEqual(result.sessions, []);
+  assert.match(source, /homedir\(\)/); assert.match(source, /\.agentspaces-desktop-native/); assert.match(source, /0\.3\.293/);
+  assert.doesNotMatch(source, /\/tmp\/agentspaces-desktop-sdk|sdk\.query\(/); adapter.close();
+});
 test("Claude metadata uses explicit directory, no worktree widening and no inference APIs", async () => {
   let options;
   const sdk = {

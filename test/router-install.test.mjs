@@ -117,7 +117,7 @@ test("router documents cooperative tools and never treats instructions as wake o
   const text = routerText();
   assert.match(text, /read_group_discussion/);
   assert.match(text, /contribute_to_discussion/);
-  assert.match(text, /does not automatically wake/);
-  assert.match(text, /never in this router/);
+  assert.match(text, /Native configuration, loaded tools and unsolicited inbound channels remain distinct/);
+  assert.match(text, /never instructions, chat, source or logs/);
   assert.match(text, /Other OS accounts/);
 });

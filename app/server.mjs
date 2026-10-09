@@ -20,6 +20,9 @@ import { connectAllOwnedWork } from "./connect-all.mjs";
 import { CodexDiscussionHub } from "./codex-discussions.mjs";
 import { routeConversation } from "./conversation-routing.mjs";
 import { ParticipantConnections } from "./participant-connection.mjs";
+import { SourceBindings } from './source-bindings.mjs';
+import { resolveNativeSourceMetadata } from './native-source-metadata.mjs';
+import { NativeAutoInstaller } from './native-auto-install.mjs';
 const ui = fileURLToPath(new URL("../ui/", import.meta.url));
 const staticFiles = {
   "/": "index.html",
@@ -48,6 +51,9 @@ export async function startServer({
   codexAdapterFactory,
   participantInstallRemote,
   participantTunnelFactory,
+  sourceMetadataResolver = resolveNativeSourceMetadata,
+  automaticInstallLocal,
+  automaticInstallRemote,
 } = {}) {
   const store = provided?.store ?? new Store(root),
     fabric = provided?.fabric ?? new FabricAdapter({ stateRoot: root }),
@@ -68,7 +74,7 @@ export async function startServer({
   const activeAnswers = new Map();
   const channels = new ChannelHub(engine);
   const codexAgents = new CodexDiscussionHub(engine, { adapterFactory: codexAdapterFactory, onContribution: (group, message) => routeConversation(engine, { codexAgents, channels }, group, message) });
-  let connections, participantConnections;
+  let connections, participantConnections, sourceBindings, automaticConnections;
   const terminals = providedTerminals ?? new NativeTerminals({ resolveLaunch: options => connections.resolveLaunch(options) });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 65536, perMessageDeflate: false });
   const json = (res, status, value) => {
@@ -128,18 +134,24 @@ export async function startServer({
     const cookie = /\bas_session=([a-f0-9]+)/.exec(
       req.headers.cookie ?? "",
     )?.[1];
-    let connector = null;
+    let connector = null, registrationDevice = null;
     if (!isAdmin && !cookies.has(cookie)) {
       const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
       try {
         if (token) connector = engine.connector(token);
       } catch {}
-      if (!connector) {
+      if (!connector && token) {
+        try { registrationDevice = sourceBindings.device(token); } catch {}
+      }
+      if (!connector && !registrationDevice) {
         json(res, 401, { error: "Local access required" });
         return;
       }
     }
     try {
+      if (registrationDevice && (req.method !== 'POST' || url.pathname !== '/api/native/register')) {
+        json(res, 403, { error: 'Registration capability cannot access content or owner operations' }); return;
+      }
       if (req.method === "GET" && url.pathname === "/api/health") {
         json(res, 200, {
           status: closing ? "stopping" : "running",
@@ -149,7 +161,7 @@ export async function startServer({
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/state" && !connector) {
-        json(res, 200, { ...engine.snapshot(), demoAvailable: allowDemo, connectedWork: connectedWork ? { status: connectedWork.status, stage: connectedWork.stage, partial: connectedWork.partial } : null, desktopPreferences: { connectAll: !!store.data.desktopPreferences?.connectAll }, desktopStartup: desktopStartup ? { ready: desktopStartup.ready, status: desktopStartup.status, retryRequired: desktopStartup.retryRequired } : null });
+        json(res, 200, { ...engine.snapshot(), automaticNativeConnections: automaticConnections.summary(), demoAvailable: allowDemo, connectedWork: connectedWork ? { status: connectedWork.status, stage: connectedWork.stage, partial: connectedWork.partial } : null, desktopPreferences: { connectAll: !!store.data.desktopPreferences?.connectAll }, desktopStartup: desktopStartup ? { ready: desktopStartup.ready, status: desktopStartup.status, retryRequired: desktopStartup.retryRequired } : null });
         return;
       }
       if (req.method !== "POST") {
@@ -175,6 +187,7 @@ export async function startServer({
       if (
         !isAdmin &&
         !connector &&
+        !registrationDevice &&
         req.headers["x-agentspaces"] !== "local-companion"
       ) {
         json(res, 403, { error: "CSRF check failed" });
@@ -213,6 +226,27 @@ export async function startServer({
         throw new Error("Connector has no granted workspace scope");
       let result;
       switch (url.pathname) {
+        case '/api/native/registration/device':
+          result = sourceBindings.issueDevice({ host: data.host, provider: data.provider });
+          break;
+        case '/api/native/automatic/install':
+          result = await automaticConnections.install({ host: data.host, provider: data.provider });
+          break;
+        case '/api/native/automatic/setup':
+          sourceBindings.profile();
+          store.data.desktopPreferences ??= {}; store.data.desktopPreferences.nativeAutoSetup = true; store.save();
+          result = await automaticConnections.setup();
+          break;
+        case '/api/native/register': {
+          if (!registrationDevice) throw new Error('Registration capability required');
+          const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
+          const bound = await sourceBindings.register(token, data);
+          result = bound?.config ? { participantConfig: bound.config } : bound;
+          break;
+        }
+        case '/api/discussions/policy':
+          result = engine.discussions.setPolicy(data, connector);
+          break;
         case "/api/native/terminal/open":
           if (data.connectionId && data.ownerConfirmedAvailable !== true) throw new Error("Confirm that other native controllers are closed before resuming the selected thread");
           result = await terminals.create(data);
@@ -466,6 +500,9 @@ export async function startServer({
   const address = `http://127.0.0.1:${server.address().port}`;
   connections = new NativeConnections(engine, { root, address, remoteInstall });
   participantConnections = new ParticipantConnections(engine, { root, address, installRemote: participantInstallRemote, tunnelFactory: participantTunnelFactory });
+  sourceBindings = new SourceBindings(engine, { root, address, resolveMetadata: sourceMetadataResolver });
+  automaticConnections = new NativeAutoInstaller(engine, { sourceBindings, participantConnections, address, installLocal: automaticInstallLocal, installRemote: automaticInstallRemote, refreshNative: host => codexAgents.refreshTools(host) });
+  if (desktopDiscovery && store.data.desktopPreferences?.nativeAutoSetup) automaticConnections.setup().catch(() => {});
   const runtimePath = join(root, "runtime.json");
   writeFileSync(
     runtimePath,
@@ -487,5 +524,5 @@ export async function startServer({
       if (current.instance === instance) unlinkSync(runtimePath);
     }
   }
-  return { server, engine, store, address, instance, admin, close, terminals, channels, connections, participantConnections, codexAgents, desktopDiscovery: desktopStartup };
+  return { server, engine, store, address, instance, admin, close, terminals, channels, connections, participantConnections, sourceBindings, automaticConnections, codexAgents, desktopDiscovery: desktopStartup };
 }

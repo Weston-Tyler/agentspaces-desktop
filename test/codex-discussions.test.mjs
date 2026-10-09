@@ -63,6 +63,32 @@ const until = async predicate => {
 };
 const settle = async (hub, id) => { try { return await hub.wait(id); } catch (error) { return { error }; } };
 
+test('recorded native-policy grant prefers loaded input without resume and exposes only acknowledged queue status', async t => {
+  let release; const gate = new Promise(yes => release = yes);
+  const f = setup({ controls: { answer: async (args, options, adapter) => { adapter.events.emit('queued', { threadId: args.threadId, clientId: args.clientId, queuedSubmissionId: 'own-queued' }); await gate; return { nativeThreadId: args.threadId, nativeTurnId: TURN, text: 'Own fixture reply' }; } } });
+  t.after(() => { release(); f.hub.close(); });
+  f.engine.store.data.desktopPreferences = { allowNativeFullAccess: true };
+  const factory = f.hub.adapterFactory; let loadedCalls = 0;
+  f.hub.adapterFactory = options => { const adapter = factory(options); adapter.bindLoadedThread = async input => { loadedCalls++; assert.deepEqual(input.grant, { execution: true, allowExistingNativePolicy: true }); return { nativeThreadId: input.threadId }; }; return adapter; };
+  f.hub.dispatch(f.args); await until(() => f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].status === 'queued');
+  assert.equal(loadedCalls, 1); assert.equal(f.counters.bind, 0); release();
+  assert.equal((await f.hub.wait(f.args.requestId)).status, 'native-agent-replied');
+});
+
+test('revoking acceptance of the existing native policy fences a loaded delivery after binding', async t => {
+  const f = setup(); t.after(() => f.hub.close()); f.engine.store.data.desktopPreferences = { allowNativeFullAccess: true };
+  const factory = f.hub.adapterFactory;
+  f.hub.adapterFactory = options => { const adapter = factory(options); adapter.bindLoadedThread = async () => { f.engine.store.data.desktopPreferences.allowNativeFullAccess = false; }; return adapter; };
+  f.hub.dispatch(f.args); const result = await f.hub.wait(f.args.requestId);
+  assert.equal(result.status, 'native-agent-unavailable'); assert.equal(f.counters.answer, 0); assert.equal(f.counters.bind, 0);
+});
+
+test('a binding transport error is known not to have queued this conversation message', async t => {
+  const f = setup({ controls: { bind: async () => { throw fail('native_rpc_rejected', true); } } }); t.after(() => f.hub.close());
+  f.hub.dispatch(f.args); const result = await f.hub.wait(f.args.requestId);
+  assert.equal(f.counters.answer, 0); assert.equal(result.uncertainOutcome, false); assert.equal(result.undispatched, true); assert.equal(result.status, 'native-agent-unavailable');
+});
+
 test("targeted native adapter reply retains exact source thread/turn and original discussion parent", async t => {
   const { engine, source, counters, adapters, hub, args } = setup(); t.after(() => hub.close());
   const effect = hub.dispatch(args); assert.equal(effect.status, "connecting-native-agent");

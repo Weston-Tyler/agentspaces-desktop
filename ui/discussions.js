@@ -6,7 +6,7 @@ function el(tag, text, cls) {
   return n;
 }
 function replyLabel(status) {
-  const labels = { "connecting-native-agent": "Connecting…", "awaiting-native-reply": "Waiting for reply", "native-agent-replied": "Replied", "needs-native-attention": "Needs attention in the native app", "native-reply-uncertain": "Reply status unknown", "native-agent-unavailable": "Agent unavailable", "delivered-to-native-transport": "Message delivered" };
+  const labels = { "connecting-native-agent": "Connecting…", "queued": "Queued in native chat", "conversation-budget-reached": "Automatic exchange paused", "awaiting-native-reply": "Waiting for reply", "native-agent-replied": "Replied", "needs-native-attention": "Needs attention in the native app", "native-reply-uncertain": "Reply status unknown", "native-agent-unavailable": "Agent unavailable", "delivered-to-native-transport": "Message delivered" };
   if (labels[status]) return labels[status];
   return /blocked|unavailable|access changed/.test(status ?? "") ? "Agent is not connected" : status;
 }
@@ -148,6 +148,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
       const g = await api("discussions/create", {
         title: title.value,
         sessionIds: [...chosen],
+        agentInitiation: true,
       });
       activeId = g.id;
       await load();
@@ -202,7 +203,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
       messages.append(
         el(
           "p",
-          "Ask a question. Mention the agents you want to hear from.",
+          "Start a conversation.",
           "discussion-empty",
         ),
       );
@@ -259,7 +260,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
     textarea.required = true;
     textarea.maxLength = 8000;
     textarea.rows = 3;
-    textarea.placeholder = "What can we reuse from @codex1 and @claude1?";
+    textarea.placeholder = "Message the group…";
     textarea.disabled = !g.available;
     label.htmlFor = textarea.id;
     textarea.oninput = () => {

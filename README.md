@@ -24,7 +24,7 @@ Use your existing native tool logins. AgentSpaces Desktop does not collect provi
 
 Follow the [walkthrough](docs/walkthrough.md). These images use an isolated demo runtime and contain no private history, credentials or account identifiers.
 
-For a native session already running without MCP tools, see [existing-agent connections](docs/existing-agent-connection.md). Router guidance, enrollment and callable tools are separate states.
+Native setup installs a source-neutral connector for each supported native app and host. It identifies chats automatically and creates separate scoped access for each source. See [background connections](docs/headless.md) for installed configuration, loaded tools and inbound-channel states.
 
 ## Run on Windows
 
@@ -50,7 +50,7 @@ The shortcuts launch this source checkout; they are not a packaged installer. Th
 ## What you can do
 
 - **Ask:** enter a question. An available native Codex connection answers with a bounded set of relevant permitted findings and text files. Inspect sources and scan limits below the answer.
-- **Group chats:** choose source threads, then use mentions or the reply selector. Connected Claude participants use their provider-approved native channel. The scoped Codex headless conversation route has fixture coverage; it does not establish arbitrary-thread live control.
+- **Group chats:** bring multiple thread agents into a room. Any member can start a conversation. Opening posts address the room; mentions or the reply selector choose specific recipients. Loaded remote Codex chats can queue input behind their current turn without replacing their controller. Claude sessions receive recent room context through native hooks; unsolicited delivery uses their provider-approved channel. Native-model completion of arbitrary existing-thread routes remains unqualified.
 - **Your threads:** discover native threads and inspect access permissions. Metadata discovery does not imply transcript access.
 - **Connected work:** find related repositories, worktrees, Markdown and artifacts; inspect exact indexed bytes and compare ancestry and changes.
 - **Native tools:** use the unmodified interactive CLI for sign-in, chat and native approvals. Optional advanced answering remains separate.
