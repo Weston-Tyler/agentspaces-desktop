@@ -134,10 +134,10 @@ test("orphan contributions, self mentions and third-depth replies never start an
   assert.deepEqual(depth3.targets, []);
 });
 
-test("an enabled participant can start an unmentioned HTTP room conversation without an owner message", async t => {
+test("an enabled participant can start an explicitly addressed HTTP room conversation without an owner message", async t => {
   const f = await httpSetup(t);
   f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
-  const data = { id: f.group.id, text: "Here is my new finding", nativeTurnId: "fixture-claude-first-turn",
+  const data = { id: f.group.id, text: "@codex1 Here is my new finding", nativeTurnId: "fixture-claude-first-turn",
     deliveryId: "participant-first-post-0001" };
   const headers = { Authorization: "Bearer " + f.connector.token, "Content-Type": "application/json" };
   const response = await f.post("/api/discussions/contribute", data, headers); assert.equal(response.status, 200);
@@ -151,9 +151,9 @@ test("an enabled participant can start an unmentioned HTTP room conversation wit
   assert.equal(f.count(), 1); assert.equal(group.messages.length, 2);
 });
 
-test("enabled participant roots broadcast once, mentioned roots select aliases, plain replies finish quietly", async () => {
+test("explicitly addressed participant roots broadcast once, mentioned roots select aliases, plain replies finish quietly", async () => {
   const f = routingFixture(); f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
-  const root = f.contribute(0, "New finding for the room", null, "new-root");
+  const root = f.contribute(0, "@all New finding for the room", null, "new-root");
   await routeConversation(f.engine, f.transports, f.group, root);
   assert.equal(root.targets.length, 11); assert.equal(f.deliveries.size, 11);
   assert(!root.targets.some(target => target.sessionId === root.source.sessionId));
@@ -188,7 +188,7 @@ test("room policy enablement does not replay old posts and revocation stops fres
 
 test("enabled room limits bound each root to eight hops and thirty-two allocations, leaving new roots available", async () => {
   const f = routingFixture(); f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
-  const root = f.contribute(0, "First root", null, "limit-root");
+  const root = f.contribute(0, "@all First root", null, "limit-root");
   await routeConversation(f.engine, f.transports, f.group, root);
   const aliases = f.group.members.map(member => "@" + member.alias).join(" ");
   const A = f.contribute(1, aliases, root.id, "limit-A"), B = f.contribute(2, aliases, root.id, "limit-B");
@@ -200,7 +200,7 @@ test("enabled room limits bound each root to eight hops and thirty-two allocatio
   parent.text = "@claude3 should not run";
   await routeConversation(f.engine, f.transports, f.group, parent);
   assert.equal(parent.routing.status, "forward-hop-limit-reached"); assert.deepEqual(parent.targets, []);
-  const next = f.contribute(0, "A new room topic", null, "independent-root");
+  const next = f.contribute(0, "@all A new room topic", null, "independent-root");
   await routeConversation(f.engine, f.transports, f.group, next); assert.equal(next.targets.length, 11);
   let eighth = next;
   for (let depth = 1; depth <= 8; depth++) eighth = f.contribute(depth % 2, "No routing yet", eighth.id, "allowed-hop-" + depth);
@@ -213,7 +213,7 @@ test("cycles and room policy changes during delivery never dispatch remaining pa
   const f = routingFixture(); f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
   const cycle = f.contribute(0, "@claude2 cycle", null, "cycle-root"); cycle.replyTo = cycle.id;
   await routeConversation(f.engine, f.transports, f.group, cycle); assert.equal(f.deliveries.size, 0);
-  const root = f.contribute(0, "A normal finding", null, "policy-race-root");
+  const root = f.contribute(0, "@all A normal finding", null, "policy-race-root");
   const deliver = f.transports.channels.deliver;
   f.transports.channels.deliver = async value => {
     f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: false }); return deliver(value);
@@ -259,4 +259,22 @@ test("reenabling room policy excludes prior epoch messages but permits newly add
   const fresh = f.contribute(1, "@claude3 current epoch", root.id, "current-epoch-reply");
   await routeConversation(f.engine, f.transports, f.group, fresh);
   assert.equal(f.deliveries.size, 1); assert.deepEqual(fresh.targets.map(target => target.alias), ["claude3"]);
+});
+
+
+test("unaddressed status bursts stay readable without waking peers, including after restart", async () => {
+  const f = routingFixture(); f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
+  for (let n = 0; n < 20; n++) {
+    const message = f.contribute(0, "Status checkpoint " + n, null, "quiet-status-" + n);
+    await routeConversation(f.engine, f.transports, f.group, message);
+    assert.deepEqual(message.targets, []);
+    assert.equal(message.routing.status, "no-addressed-targets");
+  }
+  assert.equal(f.deliveryCalls(), 0);
+  const restarted = new Engine(new Store(f.root), new FabricAdapter({ stateRoot: f.root }));
+  restarted.catalog = structuredClone(f.engine.catalog);
+  const restored = restarted.discussions.group(f.group.id);
+  assert.equal(restored.messages.length, 20);
+  for (const message of restored.messages) await routeConversation(restarted, f.transports, restored, message);
+  assert.equal(f.deliveryCalls(), 0);
 });
