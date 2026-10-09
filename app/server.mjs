@@ -39,6 +39,7 @@ const staticFiles = {
   "/style.css": "style.css",
   "/app.js": "app.js",
   "/native-controls.js": "native-controls.js",
+  "/work-board.js": "work-board.js",
   "/workspace.js": "workspace.js",
   "/discussions.js": "discussions.js",
   "/ask.js": "ask.js",
@@ -240,6 +241,8 @@ export async function startServer({
       if (
         connector &&
         ![
+          "/api/work-board/list",
+          "/api/work-board/change",
           "/api/discover",
           "/api/retrieve",
           "/api/workspace/search",
@@ -270,6 +273,10 @@ export async function startServer({
         throw new Error("Connector has no granted workspace scope");
       let result;
       switch (url.pathname) {
+        case "/api/work-board/list":
+          result = engine.workBoard.view(connector, data); break;
+        case "/api/work-board/change":
+          result = await engine.workBoard.mutate(data, connector); break;
         case '/api/native/registration/device':
           result = sourceBindings.issueDevice({ host: data.host, provider: data.provider });
           break;
@@ -318,7 +325,7 @@ export async function startServer({
             findings: { discover: true, retrieveShared: true },
             ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
             unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
-            availableTools: ['register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            availableTools: ['list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
           break;
         }

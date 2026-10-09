@@ -150,3 +150,21 @@ test("native creation availability reflects content, provider, policy and instal
     assert.equal(f.effects.nativeFactories, 0); assert.equal(f.effects.nativeCalls.length, 0);
   }
 });
+
+test('work board exposes headless lifecycle only to current sharing sources', async t => {
+  const f = await fixture(t);
+  const create = { action: 'create', deliveryId: 'http-board-create-0001', title: 'Synthetic work', brief: 'Test scoped work lifecycle', repository: 'https://example.invalid/synthetic', base: 'a'.repeat(40), allowedFiles: 'src/fixture.js' };
+  const made = await f.call('/api/work-board/change', create);
+  assert.equal(made.status, 200);
+  const list = await f.call('/api/work-board/list');
+  assert.equal(list.status, 200); assert.equal(list.body.items[0].entryId, made.body.entryId);
+  assert.equal(list.body.items[0].value.createdBy, f.source.id);
+  const claim = await f.call('/api/work-board/change', { action: 'claim', entryId: made.body.entryId, deliveryId: 'http-board-claim-0001' });
+  assert.equal(claim.status, 200);
+  const complete = await f.call('/api/work-board/change', { action: 'complete', entryId: made.body.entryId, deliveryId: 'http-board-finish-0001', summary: 'Synthetic checks passed', branch: 'test/synthetic', head: 'b'.repeat(40), evidence: 'HTTP fixture; no native execution' });
+  assert.equal(complete.status, 200);
+  f.engine.store.data.grants[f.source.id].share = false;
+  assert.equal((await f.call('/api/work-board/list')).status, 400);
+  assert.equal((await f.call('/api/work-board/change', create)).status, 400);
+  assert.equal(f.effects.nativeFactories, 0);
+});

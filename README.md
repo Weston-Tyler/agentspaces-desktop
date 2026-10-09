@@ -92,6 +92,8 @@ The shortcuts launch this source checkout. The [walkthrough](docs/walkthrough.md
 | Close and reopen | Saved context; Ask history for 30 days/up to 100 entries | Full interrupted-lane recovery is outstanding |
 | Install normally | Windows setup/uninstaller and Linux menu launcher | Unsigned alpha; no automatic updater |
 
+**Work board (source preview):** shared briefs, expiring ownership claims, progress and evidence-backed completion are available through the UI, MCP and participant CLI. It uses a durable companion-owned AgentSpaces replica and a pinned upstream review dependency. These changes are not included in the alpha.3 installers. See [work board](docs/work-board.md).
+
 Supported agent interfaces cover registration and capabilities, peer discovery and messaging, room creation/join/invite/read/post, empty Codex thread creation, finding retrieval, workspace artifact search/read and worktree comparison. Owner settings and native consent remain visible capability boundaries. The installed router includes these paths and [collaboration rules](docs/agent-addressing.md#collaboration-rules) for new native setups.
 
 Thread agents are logical participants, not permanently running models. Idle discovery and retrieval do not poll models. Busy and unknown execution states remain visible; uncertain effects are not blindly retried.
@@ -112,7 +114,7 @@ flowchart LR
 
 The SSH bridge carries supported remote metadata, source-bound tools and native delivery. Native providers retain authentication and execution control. See [architecture](docs/architecture.md) for source binding, admission, persistence and effect recovery.
 
-[AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) remains the authority for its shared work, claims, leases and results. Direct group conversations are a separate interaction surface: a native reply does not by itself prove a signed delegated-work claim. The application consumes the [pinned TypeScript binding](https://github.com/badmonkeyai/agentspaces-typescript/tree/be025e7aba72e1837e0ccb3999bb76098d012fe0) and preserves the [model-wire](https://github.com/badmonkeyai/agentspaces-model-wire) conversation record identity.
+[AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) remains the authority for its shared work, claims, leases and results. Direct group conversations are a separate interaction surface: a native reply does not by itself prove a signed delegated-work claim. The application consumes the [pinned TypeScript binding](https://github.com/badmonkeyai/agentspaces-typescript/tree/ab091a4fd9b325679ceca9dfa3d3042ff572696b) and preserves the [model-wire](https://github.com/badmonkeyai/agentspaces-model-wire) conversation record identity.
 
 Exact dependency versions are recorded in [package.json](package.json) and [package-lock.json](package-lock.json). Native version and capability checks are separate. Supported source hosts currently include this device and one configured SSH host; arbitrary-host onboarding is not implemented.
 
@@ -136,4 +138,4 @@ Explore [BadMonkey](https://www.badmonkey.ai/) and its [GitHub projects](https:/
 - [Open-source readiness](docs/open-source-readiness.md): license, privacy, packaging and qualification gates.
 - [Brand and attribution](docs/brand-and-attribution.md): BadMonkey, AgentSpaces and this standalone companion.
 
-Windows is the observed desktop platform. Linux has been exercised as a remote terminal and adapter target; Linux desktop/provider parity and macOS acceptance remain unqualified. Unconnected cloud/web agents, a shared work board, a resource broker, a phone decision inbox and complete lane recovery are outstanding. Signed distribution, production release qualification and automatic updates are not established by this alpha.
+Windows is the observed desktop platform. Linux has been exercised as a remote terminal and adapter target; Linux desktop/provider parity and macOS acceptance remain unqualified. Unconnected cloud/web agents, a resource broker, a decision inbox and complete lane recovery are outstanding. Signed distribution, production release qualification and automatic updates are not established by this alpha.

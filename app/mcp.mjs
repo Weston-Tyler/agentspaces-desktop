@@ -1,6 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+const workBoardTools = {
+  list_work_items: { path: '/api/work-board/list', description: 'Read shared work briefs, exact claims, progress and evidence from the scoped companion-owned AgentSpaces replica. No inference; coordination records are not native authorization.', schema: z.object({limit:z.number().int().min(1).max(200).default(100)}).strict() },
+  change_work_item: { path: '/api/work-board/change', description: 'Create, claim, update or complete shared work as this exact source. Reuse deliveryId on retries. Claims expire (default 15 minutes); only the current holder can update or complete, with evidence. No model is started or publication approved.', write:true,
+    schema: z.discriminatedUnion('action',[
+      z.object({action:z.literal('create'),deliveryId:z.string().regex(/^[A-Za-z0-9-]{8,100}$/),title:z.string().min(1).max(200),brief:z.string().min(1).max(12000),repository:z.string().min(1).max(2000),base:z.string().min(1).max(200),allowedFiles:z.string().min(1).max(4000)}).strict(),
+      z.object({action:z.enum(['claim','renew']),deliveryId:z.string().regex(/^[A-Za-z0-9-]{8,100}$/),entryId:z.string().min(1).max(100),leaseMinutes:z.number().int().min(1).max(60).optional()}).strict(),
+      ...['update','complete'].map(action=>z.object({action:z.literal(action),deliveryId:z.string().regex(/^[A-Za-z0-9-]{8,100}$/),entryId:z.string().min(1).max(100),status:z.enum(['in_progress','blocked']).optional(),summary:z.string().min(1).max(8000),branch:z.string().min(1).max(300),head:z.string().min(1).max(200),evidence:z.string().max(12000)}).strict())
+    ]) }
+};
+
 const address = process.env.AGENTSPACES_URL,
   token = process.env.AGENTSPACES_CONNECTOR_TOKEN;
 if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(address ?? "") || !token)
@@ -28,6 +38,16 @@ async function call(path, data) {
       content: [{ type: "text", text: value.error ?? "Request denied" }],
     };
   return { content: [{ type: "text", text: JSON.stringify(value) }] };
+}
+for (const [name, tool] of Object.entries(workBoardTools)) {
+  const inputSchema = name === 'list_work_items' ? { limit: z.number().int().min(1).max(200).default(100) } : {
+    action:z.enum(['create','claim','renew','update','complete']),deliveryId:z.string().regex(/^[A-Za-z0-9-]{8,100}$/),
+    entryId:z.string().max(100).optional(),title:z.string().max(200).optional(),brief:z.string().max(12000).optional(),
+    repository:z.string().max(2000).optional(),base:z.string().max(200).optional(),allowedFiles:z.string().max(4000).optional(),
+    leaseMinutes:z.number().int().min(1).max(60).optional(),status:z.enum(['in_progress','blocked']).optional(),
+    summary:z.string().max(8000).optional(),branch:z.string().max(300).optional(),head:z.string().max(200).optional(),evidence:z.string().max(12000).optional()
+  };
+  server.registerTool(name,{description:tool.description,inputSchema,annotations:{readOnlyHint:!tool.write,destructiveHint:false,openWorldHint:false}},async args => call(tool.path,tool.schema.parse(args)));
 }
 server.registerTool(
   "discover_permitted_work",
