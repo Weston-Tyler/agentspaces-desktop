@@ -70,8 +70,8 @@ export function workspacePage(summary) {
   form.id = "workspace-scope-form";
   const domains = el("div", undefined, "permission-grid");
   for (const [value, text, checked] of [
-    ["local", "This Windows device", true],
-    ["remote", "remote over existing SSH", true],
+    ["local", "This device", true],
+    ["remote", "Another computer (requires SSH setup)", false],
     ["codex", "Codex metadata", true],
     ["claude", "Claude Code metadata", true],
   ]) {

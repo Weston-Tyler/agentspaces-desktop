@@ -202,7 +202,7 @@ function render() {
   }
   if (page === "board") mountWorkBoard($("#view"), { api, notice });
   if (page === "settings") nativeControls(state, { api, notice });
-  if (page === "home") mountHomeChat($("#view"), { api, notice });
+  if (page === "home") mountHomeChat($("#view"), { api, notice, state });
   if (page === "native") mountNativeChat($("#view"), state, { api, notice });
   if (page === "advanced")
     mountAsk($("#view"), { api, notice }).catch((error) =>

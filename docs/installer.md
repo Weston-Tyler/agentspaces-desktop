@@ -16,7 +16,7 @@ Linux releases provide `AgentSpaces-Desktop-<version>-linux-x64.tar.gz`. Extract
 
 This copies the application to `~/.local/opt/agentspaces-desktop/<version>` and installs a launcher in the user's applications menu. It uses the normal desktop sandbox. Linux desktop/provider parity still requires platform acceptance; archive creation alone does not establish that qualification. To remove a version, remove its installation directory; remove the `com.agentspaces.desktop.desktop` launcher to remove the menu entry. Application data remains separate.
 
-Both packages bundle a Node.js 24 worker runtime and its license. The read-only Claude SDK JavaScript is included with its notices; its optional native inference executables are excluded. Existing Codex and Claude binaries, account sign-in, permission prompts, and provider data remain native installations under the user's account. The installer does not bundle credentials or private application state. Native provider tools and configured SSH targets must already be available.
+Both packages bundle a Node.js 24 worker runtime and its license. The read-only Claude SDK JavaScript is included with its notices; its optional native inference executables are excluded. Existing Codex and Claude binaries, account sign-in, permission prompts, and provider data remain native installations under the user's account. The installer does not bundle credentials or private application state. Native provider tools and sign-in must be available. Local use requires no SSH configuration. A remote host is optional and needs its own SSH setup.
 
 ## Build from source
 
@@ -35,3 +35,7 @@ Official references: [electron-builder release](https://github.com/electron-user
 The supported remote host uses the generic SSH alias `remote`. Configure that alias in your own SSH configuration with your chosen host and user; no personal host address, username, key or password is distributed with the application. Confirm `ssh remote` works before connecting the remote tools. Native logins stay on that host.
 
 This preview changes the old development-specific host identifier. Existing installations should keep their current private workspace and credentials backed up and use a separate workspace when evaluating this release. Old source-bound connections and delivery receipts are not automatically migrated or replayed. Do not replace an active companion mid-conversation.
+
+## First run on a new computer (next release)
+
+Open the installed application, use the provider setup links if no native tool is installed, sign in through Native chat, and select **Connect work on this device**. Discovery and Ask start locally. Adding a second computer is optional; select it in Connected work only after SSH setup. These source changes are not yet included in the alpha.3 downloads.
