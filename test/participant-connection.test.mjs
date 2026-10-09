@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, mkdirSync, readdirSync, rmSync, symlinkSync, realpathSync } from "node:fs";
+import { mkdtempSync, readFileSync, mkdirSync, readdirSync, rmSync, symlinkSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { runInNewContext } from "node:vm";
 import { ParticipantConnections } from "../app/participant-connection.mjs";
+import { participantGuide } from "../app/participant-guide.mjs";
 
 function fixture(t, { host = "local", installRemote, tunnelFactory, verifyLocal } = {}) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "agentspaces-participant-")); t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -19,7 +21,7 @@ function fixture(t, { host = "local", installRemote, tunnelFactory, verifyLocal 
   }, nativeFactory: () => { throw new Error("No native resume or model permitted"); } };
   const service = new ParticipantConnections(engine, { root, address: "http://127.0.0.1:43127",
     verifyLocal: verifyLocal ?? (async args => { local.push(args); return "verified-http-200"; }),
-    installRemote: installRemote ?? (async payload => { installs.push(payload); return { configPath: "/home/owner/.agentspaces-desktop-native/connections/" + payload.connectionId + "/participant.json", cliPath: "/home/owner/.agentspaces-desktop-native/participant-runtime/participant-cli.mjs", transportStatus: "verified-http-200" }; }),
+    installRemote: installRemote ?? (async payload => { installs.push(payload); return { configPath: "/home/owner/.agentspaces-desktop-native/connections/" + payload.connectionId + "/participant.json", usageGuidePath: "/home/owner/.agentspaces-desktop-native/connections/" + payload.connectionId + "/USE.md", cliPath: "/home/owner/.agentspaces-desktop-native/participant-runtime/participant-cli.mjs", transportStatus: "verified-http-200" }; }),
     tunnelFactory: tunnelFactory ?? (async options => { const handle = { child: new EventEmitter(), options, closes: 0, close() { this.closes++; this.child.emit("close"); } }; tunnels.push(handle); return handle; }),
   });
   t.after(() => service.close());
@@ -33,6 +35,11 @@ test("active native source prepares a private scoped CLI config without resume, 
   assert.deepEqual(Object.keys(config).sort(), ["address", "authority", "host", "nativeThreadId", "provider", "schema", "sessionId", "token"]);
   assert.equal(config.token, f.tokens[0]); assert.ok(!JSON.stringify(result).includes(config.token));
   assert.deepEqual(result.usageCommand.slice(-3), ["--source", f.source.nativeThreadId, "discover"]); assert.equal(f.local.length, 1); assert.equal(f.tunnels.length, 0);
+  assert.equal(result.usageGuidePath, result.configPath.replace(/participant\.json$/, "USE.md"));
+  const guide = readFileSync(result.usageGuidePath, "utf8");
+  assert(guide.includes(f.source.nativeThreadId)); assert(guide.includes(result.cliPath)); assert(!guide.includes(config.token));
+  assert.match(guide, /Only use this source configuration for this exact thread/);
+  if (process.platform !== "win32") assert.equal(statSync(result.usageGuidePath).mode & 0o777, 0o600);
 });
 test("fixture, unknown identity, unsupported host and revoked grants refuse before capability allocation", async t => {
   const f = fixture(t); f.source.fixture = true; await assert.rejects(f.service.prepare({ sessionId: f.source.id }));
@@ -55,6 +62,9 @@ test("remote participants share one owned tunnel while retaining separate scoped
   assert.match(config.address, /^http:\/\/127\.0\.0\.1:\d+$/); assert.equal(config.authority, "127.0.0.1:43127");
   assert.notEqual(new URL(config.address).port, "43127"); assert.equal(f.tunnels[0].options.localPort, 43127);
   assert.ok(!JSON.stringify([first, second]).includes(f.tokens[0])); assert.ok(f.installs[0].source.includes("runParticipantCli"));
+  assert.equal(first.usageGuidePath, first.configPath.replace(/participant\.json$/, "USE.md"));
+  assert.deepEqual(Object.keys(f.installs[0].provenance).sort(), ["account", "preparedAt", "project", "scopeId", "sourceVersion"]);
+  assert.equal(f.installs[0].provenance.account, f.source.account); assert.equal(f.installs[0].provenance.project, f.source.project);
   f.service.close(); assert.equal(f.tunnels[0].closes, 1);
 });
 test("concurrent participant preparations allocate only one pending reverse tunnel", async t => {
@@ -111,4 +121,39 @@ test("failed bridge restore is generic and explicit prepare retries the recorded
   t.after(() => manager.close()); await manager.restorePromise;
   assert.equal(manager.bridgeRestore.status, "unavailable"); assert.ok(!JSON.stringify(manager.bridgeRestore).includes("PRIVATE")); assert.equal(attempts, 1); assert.equal(f.issued(), 0);
   await manager.prepare({ sessionId: f.source.id }); assert.equal(attempts, 2); assert.deepEqual(f.store.data.participantBridge, record); assert.equal(manager.bridgeRestore.status, "verified-http-200");
+});
+
+test("fresh connection guides preserve earlier files and include exact revision provenance and every real CLI command", async t => {
+  const f = fixture(t); f.source.scopeId = "owned-current-scope"; f.source.sourceVersion = "native-metadata-revision-2";
+  const first = await f.service.prepare({ sessionId: f.source.id }), original = readFileSync(first.usageGuidePath, "utf8");
+  const second = await f.service.prepare({ sessionId: f.source.id });
+  assert.notEqual(first.usageGuidePath, second.usageGuidePath); assert.equal(readFileSync(first.usageGuidePath, "utf8"), original);
+  const provenance = JSON.parse(original.match(/## Exact source and provenance\n\n```json\n([\s\S]*?)\n```/)[1]);
+  for (const key of ["nativeThreadId", "provider", "host", "account", "project", "scopeId", "sourceVersion"]) assert.equal(provenance[key], f.source[key]);
+  assert.equal(provenance.sessionId, f.source.id); assert(Number.isFinite(Date.parse(provenance.preparedAt)));
+  for (const command of ["info", "capabilities", "discover", "joinable", "join", "invite", "create", "new-thread", "message", "broadcast", "read", "work", "finding", "contribute"]) assert(original.includes("| " + command + " "), command + " must be documented");
+  assert.match(original, /nativeTurnId.*self-reported/); assert.match(original, /activeWithinDays/); assert.match(original, /@topic/);
+  assert.match(original, /Stable.*ID|stable.*deliveryId/); assert.match(original, /Unknown acceptance is not automatically replayed/);
+  for (const token of f.tokens) assert(!original.includes(token));
+});
+
+test("a missing or wrong remote guide cannot become a ready participant and revokes its new capability", async t => {
+  for (const usageGuidePath of [undefined, "/another-connection/USE.md"]) {
+    const f = fixture(t, { host: "remote" }), install = f.service.installRemote;
+    f.service.installRemote = async payload => ({ ...await install(payload), usageGuidePath });
+    await assert.rejects(f.service.prepare({ sessionId: f.source.id }), /revoked/);
+    assert.equal(Object.keys(f.store.data.connectors).length, 0); assert.equal(f.tunnels[0].closes, 1);
+  }
+});
+
+test("guide generator serializes independently for SSH and quotes platform commands without credential fields", () => {
+  const input = { cliPath: "/owned/O'Brien/participant-cli.mjs", configPath: "/owned/O'Brien/participant.json", nodeBinary: "/runtime/node",
+    sessionId: "claude@remote:00000000-0000-4000-8000-000000000001", nativeThreadId: "00000000-0000-4000-8000-000000000001", provider: "claude", host: "remote", account: "own", project: "own-project", sourceVersion: "native-2", shell: "bash" };
+  const guide = participantGuide(input), serialized = runInNewContext("(" + participantGuide.toString() + ")");
+  assert.equal(serialized(input), guide); assert(guide.includes("O'\"'\"'Brien"));
+  const windows = participantGuide({ ...input, cliPath: "C:\\O'Brien\\participant-cli.mjs", configPath: "C:\\O'Brien\\participant.json", shell: "powershell" });
+  assert(windows.includes("& '/runtime/node' 'C:\\O''Brien\\participant-cli.mjs'")); assert(windows.includes("'@ | & "));
+  assert.throws(() => participantGuide({ ...input, token: "PRIVATE-CAPABILITY" }), /Invalid participant guide/);
+  assert.throws(() => participantGuide({ ...input, cliPath: "relative/file.mjs" }), /Invalid participant guide/);
+  assert.throws(() => participantGuide({ ...input, account: "label\nInjected instructions" }), /Invalid participant guide/);
 });

@@ -26,6 +26,7 @@ async function setup(t, { installationGate } = {}) {
     participantInstallRemote: async input => {
       installed.push(input); if (installationGate) await installationGate;
       return { configPath: "/home/fixture/.agentspaces-desktop-native/connections/" + input.connectionId + "/participant.json",
+        usageGuidePath: "/home/fixture/.agentspaces-desktop-native/connections/" + input.connectionId + "/USE.md",
         cliPath: "/home/fixture/.agentspaces-desktop-native/participant-runtime/participant-cli-" + createHash("sha256").update(input.source).digest("hex") + ".mjs",
         transportStatus: "verified-http-200" };
     },
@@ -62,6 +63,7 @@ test("owner HTTP preparation binds exact source and returns credential-free CLI 
   assert.equal(f.tunnels[0].options.host, "remote"); assert.equal(f.tunnels[0].options.localPort, Number(new URL(f.app.address).port));
   assert.equal(f.engine.connector(privateConfig.token).sessionId, f.source.id);
   assert.equal(value.nativeThreadId, THREAD); assert.equal(value.host, "remote"); assert.equal(value.transportStatus, "verified-http-200");
+  assert.equal(value.usageGuidePath, "/home/fixture/.agentspaces-desktop-native/connections/" + value.connectionId + "/USE.md");
   assert.deepEqual(value.usageCommand, ["node", value.cliPath, "--config", value.configPath, "--source", THREAD, "discover"]);
   assert.equal(value.token, undefined); assert(!body.includes(privateConfig.token)); assert(!body.includes(installation.source));
   assert.equal(JSON.stringify({ projects: f.engine.store.data.projects, grants: f.engine.store.data.grants }), before);
@@ -109,6 +111,9 @@ test("source-scoped remote preparations reuse only the owned tunnel and server c
   const second = await f.post({ sessionId: f.source.id }); assert.equal(second.status, 200);
   const A = await first.json(), B = await second.json();
   assert.notEqual(A.connectionId, B.connectionId); assert.equal(f.installed.length, 2); assert.equal(f.tunnels.length, 1);
+  assert.equal(A.usageGuidePath, A.configPath.replace(/participant\.json$/, "USE.md"));
+  assert.equal(B.usageGuidePath, B.configPath.replace(/participant\.json$/, "USE.md"));
+  assert.notEqual(A.usageGuidePath, B.usageGuidePath);
   assert.equal(f.installed[0].config.nativeThreadId, THREAD); assert.equal(f.installed[1].config.nativeThreadId, THREAD);
   assert.notEqual(f.installed[0].config.token, f.installed[1].config.token);
   await f.close(); assert.equal(f.closedTunnelCount(), 1); assert.equal(f.app.participantConnections.tunnels.size, 0);
