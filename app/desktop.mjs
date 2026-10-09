@@ -85,7 +85,8 @@ else {
               const target = new URL(url);
               const company = target.protocol === 'https:' && ['badmonkey.ai','www.badmonkey.ai'].includes(target.hostname);
               const project = target.protocol === 'https:' && target.hostname === 'github.com' && /^\/(?:badmonkeyai(?:\/|$)|Weston-Tyler\/agentspaces-desktop(?:\/|$))/.test(target.pathname);
-              if ((company || project) && !target.username && !target.password) void shell.openExternal(target.href);
+              const setupGuide = target.protocol === 'https:' && ((target.hostname === 'developers.openai.com' && target.pathname === '/codex/cli/') || (target.hostname === 'code.claude.com' && target.pathname === '/docs/en/setup'));
+              if ((company || project || setupGuide) && !target.username && !target.password) void shell.openExternal(target.href);
             } catch {}
             return { action: 'deny' };
           });

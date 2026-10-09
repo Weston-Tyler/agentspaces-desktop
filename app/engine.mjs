@@ -3,6 +3,7 @@ import { isAbsolute, resolve, posix } from "node:path";
 import { sampleSessions, sampleFindings } from "./fixtures.mjs";
 import { detectTools, CodexReadAdapter } from "./native.mjs";
 import { usageSummary } from "./usage.mjs";
+import { WorkBoard } from "./work-board-service.mjs";
 import { TYPES } from "./fabric.mjs";
 import { ClaudeReadAdapter } from "./claude-adapter.mjs";
 import { WorkspaceMap } from "./workspace-map.mjs";
@@ -36,6 +37,7 @@ export class Engine {
     this.fabricProject = null;
     this.published = store.data.published ?? {};
     this.workspace = new WorkspaceMap(this);
+    this.workBoard = new WorkBoard(this);
     this.discussions = new Discussions(this);
     this.ask = new Ask(this, { answerFactory });
   }

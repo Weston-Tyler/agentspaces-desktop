@@ -1,3 +1,4 @@
+import { mountWorkBoard } from "./work-board.js";
 import { nativeControls } from "./native-controls.js";
 import { mountDiscussions } from "./discussions.js";
 import { mountAsk } from "./ask.js";
@@ -103,6 +104,7 @@ function scheduleDiscoveryPoll() {
   }, 1500);
 }
 const titles = {
+  board: ["Work board", "Shared work, with an owner and evidence.", "Create a brief, claim a work item, and record progress and results."],
   home: ["Ask", "Ask about your work.", "Your threads, files and decisions—in one place."],
   help: ["How to use", "Your connected workspace.", "A guide to questions, thread agents and background connections."],
   native: ["Native chat", "Sign in with your native tools.", "Use Codex or Claude Code directly. Their native account, conversation and approval controls stay with them."],
@@ -184,6 +186,7 @@ function render() {
     native: () => "",
     advanced: () => "",
     discussions: () => "",
+    board: () => "",
     workspace: () => "",
     discover: discovery,
     activity: activity,
@@ -197,8 +200,9 @@ function render() {
       filters.project = "all";
     showResults();
   }
+  if (page === "board") mountWorkBoard($("#view"), { api, notice });
   if (page === "settings") nativeControls(state, { api, notice });
-  if (page === "home") mountHomeChat($("#view"), { api, notice });
+  if (page === "home") mountHomeChat($("#view"), { api, notice, state });
   if (page === "native") mountNativeChat($("#view"), state, { api, notice });
   if (page === "advanced")
     mountAsk($("#view"), { api, notice }).catch((error) =>
