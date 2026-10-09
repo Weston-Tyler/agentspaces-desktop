@@ -8,6 +8,7 @@ import http from "node:http";
 const exec = promisify(execFile);
 export const nativeUuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = code => Object.assign(new Error(code), { code });
+const publicRegistrationErrors = new Set(["source_pending", "native_registration_scope_unavailable", "native_registration_device_revoked", "native_registration_device_identity_mismatch", "native_registration_account_mismatch", "native_registration_source_scope_denied", "native_registration_source_excluded", "native_registration_source_cwd_mismatch", "native_registration_source_revoked", "source_connector_revoked", "native_registration_private_config_unavailable", "native_registration_private_config_changed", "native_registration_binding_failed"]);
 export async function privateFile(path) {
   const absolute = resolve(path);
   for (let p = absolute; ; p = dirname(p)) {
@@ -31,7 +32,10 @@ export async function scopedRequest(config, path, body) {
       let value = "", bytes = 0;
       res.on("data", chunk => { bytes += chunk.length; if (bytes > 1048576) req.destroy(); else value += chunk.toString(); });
       res.on("end", () => {
-        if (res.statusCode !== 200) return no(fail("scoped_registration_or_tool_denied"));
+        if (res.statusCode !== 200) {
+          let code; try { code = JSON.parse(value).code; } catch {}
+          return no(fail(path === "/api/native/register" && publicRegistrationErrors.has(code) ? code : "scoped_registration_or_tool_denied"));
+        }
         try { yes(JSON.parse(value)); } catch { no(fail("scoped_response_invalid")); }
       });
       res.on("error", () => no(fail("scoped_transport_unavailable")));

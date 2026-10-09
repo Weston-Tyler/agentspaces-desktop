@@ -49,15 +49,18 @@ export class Discussions {
   }
   policy(g) {
     const agentInitiation = g.policy?.agentInitiation === true;
-    return { agentInitiation, maxForwardHops: agentInitiation ? 8 : 2, maxDeliveries: agentInitiation ? 32 : 16 };
+    return { agentInitiation, selfRegistration: g.policy?.selfRegistration === true, maxForwardHops: agentInitiation ? 8 : 2, maxDeliveries: agentInitiation ? 32 : 16 };
   }
-  setPolicy({ id, agentInitiation }, participantBinding = null) {
+  setPolicy({ id, agentInitiation, selfRegistration }, participantBinding = null) {
     if (participantBinding) throw new Error("Only the local owner may change discussion policy");
-    if (typeof agentInitiation !== "boolean") throw new Error("Agent initiation policy must be boolean");
+    if (agentInitiation === undefined && selfRegistration === undefined || agentInitiation !== undefined && typeof agentInitiation !== "boolean" || selfRegistration !== undefined && typeof selfRegistration !== "boolean") throw new Error("Discussion policy flags must be boolean");
     const g = this.group(id);
-    if (this.policy(g).agentInitiation !== agentInitiation) {
-      g.policy = { agentInitiation, agentInitiationFromMessage: g.messages.length }; g.version++;
-      this.store.audit("Discussion policy changed", { discussionId: id, agentInitiation });
+    const current = this.policy(g), changes = {};
+    if (agentInitiation !== undefined && current.agentInitiation !== agentInitiation) Object.assign(changes, { agentInitiation, agentInitiationFromMessage: g.messages.length });
+    if (selfRegistration !== undefined && current.selfRegistration !== selfRegistration) changes.selfRegistration = selfRegistration;
+    if (Object.keys(changes).length) {
+      g.policy = { ...g.policy, ...changes }; g.version++;
+      this.store.audit("Discussion policy changed", { discussionId: id, ...changes });
     }
     return this.view(g);
   }
@@ -131,8 +134,59 @@ export class Discussions {
         }
       });
   }
-  create({ title, sessionIds, agentInitiation = false }) {
+  participant(binding) {
+    if (!binding) throw new Error("Participant connector required");
+    const caller = this.engine.session(binding.sessionId), grant = this.engine.permissions(caller);
+    if (caller.fixture || !["codex", "claude"].includes(caller.provider) || caller.id !== caller.provider + "@" + caller.host + ":" + caller.nativeThreadId || caller.account !== binding.account || caller.project !== binding.project || (caller.scopeId ?? null) !== (binding.scopeId ?? null) || !grant.enrolled || !grant.retrieve || !grant.share) throw new Error("Current enrolled sharing participant required");
+    return caller;
+  }
+  sharingBoundary(caller, ids) {
+    for (const id of ids) {
+      const source = this.engine.session(id), grant = this.engine.permissions(source);
+      if (source.fixture || source.account !== caller.account || !(source.scopeId && source.scopeId === caller.scopeId || source.project === caller.project) || !grant.enrolled || !grant.share || !grant.retrieve) throw new Error("Participants must permit sharing within the current account and scope");
+    }
+  }
+  joinEligible(g, caller) {
+    if (!this.policy(g).selfRegistration || g.members.length >= 12 || !g.members.every(m => this.allowed(m)) || !this.view(g).available) throw new Error("Discussion self-registration unavailable");
+    this.sharingBoundary(caller, g.members.map(m => m.sessionId));
+  }
+  discoverJoinable({ query = "" } = {}, binding) {
+    if (typeof query !== "string" || query.length > 200) throw new Error("Invalid discussion query");
+    const caller = this.participant(binding);
+    return this.store.data.discussions.filter(g => !g.members.some(m => m.sessionId === caller.id) && g.title.toLowerCase().includes(query.toLowerCase())).flatMap(g => {
+      try { this.joinEligible(g, caller); return [{ id: g.id, title: g.title, version: g.version }]; } catch { return []; }
+    });
+  }
+  join({ id }, binding) {
+    const caller = this.participant(binding), g = this.group(id), existing = g.members.find(m => m.sessionId === caller.id);
+    if (existing) {
+      this.context(id, binding);
+      return { id, title: g.title, version: g.version, participantAlias: existing.alias, alreadyMember: true };
+    }
+    this.joinEligible(g, caller);
+    const member = this.member(caller.id);
+    let number = 1;
+    while (g.members.some(m => m.alias === member.provider + number)) number++;
+    member.alias = member.provider + number;
+    g.members.push(member); g.version++;
+    this.store.audit("Participant joined discussion", { discussionId: id, sessionId: caller.id });
+    return { id, title: g.title, version: g.version, participantAlias: member.alias, alreadyMember: false };
+  }
+  createFor({ title, sessionIds, deliveryId }, binding) {
+    const caller = this.participant(binding);
+    if (typeof title !== "string" || !title.trim() || title.length > 80 || !Array.isArray(sessionIds) || !sessionIds.length || sessionIds.length > 11 || sessionIds.some(id => typeof id !== "string" || !id || id.length > 300 || id === caller.id) || new Set(sessionIds).size !== sessionIds.length || !/^[a-zA-Z0-9-]{8,100}$/.test(deliveryId ?? "")) throw new Error("Bounded peers and stable group creation delivery ID required");
+    this.sharingBoundary(caller, sessionIds);
+    const signature = fingerprint({ title: title.trim(), sessionIds });
+    const existing = this.store.data.discussions.find(g => g.creation?.sessionId === caller.id && g.creation.deliveryId === deliveryId);
+    if (existing) {
+      if (existing.creation.fingerprint !== signature) throw new Error("Group creation delivery ID conflicts with prior request");
+      this.context(existing.id, binding); return this.view(existing);
+    }
+    return this.create({ title, sessionIds: [caller.id, ...sessionIds], agentInitiation: true, selfRegistration: true }, { sessionId: caller.id, deliveryId, fingerprint: signature });
+  }
+  create({ title, sessionIds, agentInitiation = false, selfRegistration = false }, creation = null) {
     if (typeof agentInitiation !== "boolean") throw new Error("Agent initiation policy must be boolean");
+    if (typeof selfRegistration !== "boolean") throw new Error("Self-registration policy must be boolean");
     if (typeof title !== "string" || !title.trim() || title.length > 80)
       throw new Error("Use a discussion title of 1–80 characters");
     if (
@@ -156,7 +210,8 @@ export class Discussions {
       members,
       version: 0,
       messages: [],
-      policy: { agentInitiation, agentInitiationFromMessage: 0 },
+      policy: { agentInitiation, selfRegistration, agentInitiationFromMessage: 0 },
+      ...(creation ? { creation } : {}),
     };
     this.store.data.discussions.push(g);
     this.store.audit("Discussion created", {

@@ -154,4 +154,9 @@ server.registerTool(
   },
   async (args) => call("/api/discussions/contribute", args),
 );
+for (const [name, path, description, inputSchema, readOnlyHint] of [
+  ["discover_joinable_discussions", "/api/discussions/joinable", "Find eligible group chats permitting this connected source to join; returns room metadata only.", { query: z.string().max(200).default("") }, true],
+  ["join_group_discussion", "/api/discussions/join", "Join a group as this bound source under its self-registration policy and current sharing grants. Repeated joins retain the same alias.", { id: z.string().uuid() }, false],
+  ["create_group_discussion", "/api/discussions/create", "Start a group with selected connected peers. The bound creator is included automatically; agents can converse and eligible peers can join. Reuse deliveryId on retries.", { title: z.string().min(1).max(80), sessionIds: z.array(z.string().min(1).max(300)).min(1).max(11), deliveryId: z.string().regex(/^[a-zA-Z0-9-]{8,100}$/) }, false],
+]) server.registerTool(name, { description, inputSchema, annotations: { readOnlyHint, destructiveHint: false, openWorldHint: false } }, args => call(path, args));
 await server.connect(new StdioServerTransport());

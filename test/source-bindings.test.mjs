@@ -96,6 +96,13 @@ test("scope change during resolution and linked private parents cannot authorize
   symlinkSync(outside, join(g.root, "native-connections"), process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(g.service.register(g.device.token, { nativeThreadId: thread }), /unlinked/); assert.equal(Object.keys(g.engine.store.data.connectors).length, 0);
 });
+test("changed loopback address cannot recreate a deliberately revoked source connector", async t => {
+  const f = fixture(t), first = await f.service.register(f.device.token, { nativeThreadId: thread });
+  delete f.engine.store.data.connectors[createHash("sha256").update(first.token).digest("hex")];
+  const restarted = new SourceBindings(f.engine, { root: f.root, address: "http://127.0.0.1:43128" });
+  await assert.rejects(restarted.register(f.device.token, { nativeThreadId: thread }), { code: "source_connector_revoked" });
+  assert.equal(Object.keys(f.engine.store.data.connectors).length, 0);
+});
 test("concurrent wrong-cwd registration cannot inherit another request's scoped connector", async t => {
   let release, observations = 0; const gate = new Promise(resolve => { release = resolve; });
   const f = fixture(t, { known: false, resolveMetadata: async () => { observations++; await gate; return { nativeObserved: true, nativeThreadId: thread, host: "remote", provider: "claude", cwd: "/home/owner/work" }; } });

@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = (code) => Object.assign(new Error(code), { code });
 function argumentsOf(args) {
-  const options = {}, commands = ["info", "discover", "read", "work", "finding", "contribute"];
+  const options = {}, commands = ["info", "discover", "joinable", "join", "create", "read", "work", "finding", "contribute"];
   let command = null;
   for (let i = 0; i < args.length; i++) {
     const value = args[i];
@@ -17,7 +17,7 @@ function argumentsOf(args) {
     options[key] = args[++i];
   }
   if (!command || !options.config || !UUID.test(options.source ?? "")) throw fail("config_and_exact_source_required");
-  const allowed = { info: [], discover: ["query"], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
+  const allowed = { info: [], discover: ["query"], joinable: ["query"], join: ["discussion"], create: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
   if (Object.keys(options).some((key) => !["config", "source", ...allowed[command]].includes(key))) throw fail("invalid_command_argument");
   return { command, options };
 }
@@ -37,7 +37,7 @@ async function configuration(path, source) {
   if (config.nativeThreadId.toLowerCase() !== source.toLowerCase()) throw fail("source_identity_mismatch");
   return config;
 }
-async function inputText(input) {
+async function inputJson(input) {
   let value = "";
   if (typeof input === "string" || Buffer.isBuffer(input)) value = input.toString();
   else if (input?.[Symbol.asyncIterator]) {
@@ -48,6 +48,10 @@ async function inputText(input) {
   } else throw fail("stdin_json_text_required");
   if (Buffer.byteLength(value) > 65536) throw fail("stdin_limit_exceeded");
   let data; try { data = JSON.parse(value); } catch { throw fail("stdin_json_text_required"); }
+  return data;
+}
+async function inputText(input) {
+  const data = await inputJson(input);
   if (!data || typeof data.text !== "string" || !data.text.trim() || data.text.length > 8000 || Object.keys(data).some((key) => key !== "text")) throw fail("bounded_stdin_text_required");
   return data.text;
 }
@@ -68,17 +72,21 @@ function request({ address, authority, token, path, body }) {
 export async function runParticipantCli(args, { input, requestImpl = request } = {}) {
   const { command, options } = argumentsOf(args), config = await configuration(options.config, options.source);
   const attribution = "locally connector-bound; native caller not verified";
-  if (command === "info") return { nativeThreadId: config.nativeThreadId, sessionId: config.sessionId, provider: config.provider, host: config.host, attribution, commands: ["discover", "read", "work", "finding", "contribute"] };
+  if (command === "info") return { nativeThreadId: config.nativeThreadId, sessionId: config.sessionId, provider: config.provider, host: config.host, attribution, commands: ["discover", "joinable", "join", "create", "read", "work", "finding", "contribute"] };
   let path, body;
-  if (["discover", "work"].includes(command)) {
+  if (["discover", "joinable", "work"].includes(command)) {
     const query = options.query ?? ""; if (query.length > 200) throw fail("query_limit_exceeded");
-    path = command === "discover" ? "/api/discussions/discover" : "/api/discover"; body = { query };
+    path = command === "work" ? "/api/discover" : command === "joinable" ? "/api/discussions/joinable" : "/api/discussions/discover"; body = { query };
+  } else if (command === "create") {
+    const data = await inputJson(input);
+    if (!data || typeof data.title !== "string" || !data.title.trim() || data.title.length > 80 || !Array.isArray(data.sessionIds) || !data.sessionIds.length || data.sessionIds.length > 11 || data.sessionIds.some(id => typeof id !== "string" || !id || id.length > 300) || new Set(data.sessionIds).size !== data.sessionIds.length || !/^[a-zA-Z0-9-]{8,100}$/.test(data.deliveryId ?? "") || Object.keys(data).some(key => !["title", "sessionIds", "deliveryId"].includes(key))) throw fail("bounded_group_creation_required");
+    path = "/api/discussions/create"; body = data;
   } else if (command === "finding") {
     if (!options["source-id"] || options["source-id"].length > 300) throw fail("source_actor_id_required");
     path = "/api/retrieve"; body = { sourceId: options["source-id"] };
   } else {
     if (!UUID.test(options.discussion ?? "")) throw fail("discussion_uuid_required");
-    path = command === "read" ? "/api/discussions/context" : "/api/discussions/contribute"; body = { id: options.discussion };
+    path = command === "read" ? "/api/discussions/context" : command === "join" ? "/api/discussions/join" : "/api/discussions/contribute"; body = { id: options.discussion };
     if (command === "contribute") {
       if (!options.turn || options.turn.length > 200 || !/^[a-zA-Z0-9-]{8,100}$/.test(options.delivery ?? "") || (options["reply-to"] && !UUID.test(options["reply-to"]))) throw fail("stable_contribution_identifiers_required");
       body = { ...body, text: await inputText(input), nativeTurnId: options.turn, deliveryId: options.delivery, ...(options["reply-to"] ? { replyTo: options["reply-to"] } : {}) };

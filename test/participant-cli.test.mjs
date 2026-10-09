@@ -54,6 +54,17 @@ test("Contribution text arrives only through bounded stdin JSON and retains exac
   await assert.rejects(runParticipantCli([...options, "--text", "not-allowed"]), /invalid_arguments/);
   assert.equal(requests.length, 1);
 });
+test("Participant CLI discovers joinable rooms, joins itself and creates groups with bounded stdin", async t => {
+  const { args, requests } = await setup(t);
+  await runParticipantCli(args("joinable", "--query", "Atlas"));
+  await runParticipantCli(args("join", "--discussion", GROUP));
+  const body = { title: "Atlas peers", sessionIds: ["codex@local:" + GROUP], deliveryId: "fixture-create-room-0001" };
+  await runParticipantCli(args("create"), { input: JSON.stringify(body) });
+  assert.deepEqual(requests.map(r => r.path), ["/api/discussions/joinable", "/api/discussions/join", "/api/discussions/create"]);
+  assert.deepEqual(requests[2].body, body);
+  await assert.rejects(runParticipantCli(args("create"), { input: JSON.stringify({ ...body, selfRegistration: true }) }), /bounded_group_creation_required/);
+  assert.equal(requests.length, 3);
+});
 test("Revocation and server diagnostics never expose credentials; successful echo redacts capability", async (t) => {
   let status = 401;
   const { args } = await setup(t, () => ({ status, body: { secret: TOKEN, privateDiagnostic: "Should never appear in CLI error" } }));

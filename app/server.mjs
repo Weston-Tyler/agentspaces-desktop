@@ -211,6 +211,9 @@ export async function startServer({
           "/api/workspace/inspect",
           "/api/discussions/context",
           "/api/discussions/discover",
+          "/api/discussions/joinable",
+          "/api/discussions/join",
+          "/api/discussions/create",
           "/api/discussions/contribute",
           "/api/native/channel/reply",
         ].includes(url.pathname)
@@ -246,6 +249,12 @@ export async function startServer({
         }
         case '/api/discussions/policy':
           result = engine.discussions.setPolicy(data, connector);
+          break;
+        case '/api/discussions/joinable':
+          result = engine.discussions.discoverJoinable(data, connector);
+          break;
+        case '/api/discussions/join':
+          result = engine.discussions.join(data, connector);
           break;
         case '/api/native/discussions/recover':
           result = data.reconcileOnly === true ? await codexAgents.reconcileSubmitted() : await codexAgents.recoverUndispatched({ includeLegacy: data.includeLegacy === true });
@@ -334,7 +343,7 @@ export async function startServer({
             });
           break;
         case "/api/discussions/create":
-          result = engine.discussions.create(data);
+          result = connector ? engine.discussions.createFor(data, connector) : engine.discussions.create(data);
           break;
         case "/api/desktop/connect-all":
           if (data.nativePolicyGranted === true) { store.data.desktopPreferences ??= {}; store.data.desktopPreferences.allowNativeFullAccess = true; store.save(); }

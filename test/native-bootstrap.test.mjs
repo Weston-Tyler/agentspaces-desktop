@@ -114,7 +114,7 @@ test("Configured resolved Claude binary matches versioned executable and Session
   await writeFile(configPath, JSON.stringify({ ...device, nativeExecutable: "/usr/bin/node" }));
   await assert.rejects(runNativeSessionHook(event(), { configPath, ancestors: async () => [process] }), /native_executable_invalid/);
 });
-test("MCP protocol advertises seven tools and preserves native request metadata per call", async () => {
+test("MCP protocol advertises source and group tools and preserves native request metadata per call", async () => {
   const { configPath, participantConfig } = await setup("codex");
   const nativeIds = [];
   const bootstrap = await createNativeBootstrap({ configPath, requestImpl: async (_, path, body) => {
@@ -123,7 +123,7 @@ test("MCP protocol advertises seven tools and preserves native request metadata 
   } });
   const client = new Client({ name: "fixture-native-bootstrap-client", version: "1" }), [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   await bootstrap.server.connect(serverTransport); await client.connect(clientTransport);
-  assert.equal((await client.listTools()).tools.length, 7);
+  assert.equal((await client.listTools()).tools.length, 11);
   const reply = await client.callTool({ name: "discover_group_discussions", arguments: {}, _meta: { threadId: UUID } });
   assert.equal(reply.isError, undefined); assert.deepEqual(nativeIds, [UUID]);
   const denied = await client.callTool({ name: "discover_group_discussions", arguments: {} });

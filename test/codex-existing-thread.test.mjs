@@ -296,13 +296,16 @@ test("only correlated owned-turn approvals are declined; foreign native requests
   peer.send(JSON.stringify({ method: "item/started", params: { threadId, turnId: "native-turn", item: { type: "userMessage", clientId: "owned-approval-client" } } }));
   peer.send(JSON.stringify({ id: "foreign-approval", method: "item/commandExecution/requestApproval", params: { threadId, turnId: "foreign-turn" } }));
   peer.send(JSON.stringify({ id: "approval-request", method: "item/commandExecution/requestApproval", params: { threadId, turnId: "native-turn", command: "PRIVATE NATIVE TOOL INPUT" } }));
-  await new Promise(resolve => setTimeout(resolve, 20));
+  const approvalDeadline = Date.now() + 1000;
+  while (replies.length < 1 && Date.now() < approvalDeadline) await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(replies.length, 1); assert.equal(replies[0].id, "approval-request"); assert.deepEqual(replies[0].result, { decision: "decline" }); assert.equal(attention[0].nativeThreadId, threadId);
   assert.equal(foreign.length, 3);
   peer.send(JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: "native-turn", status: "completed", items: [{ type: "agentMessage", text: "Fixture done" }] } } }));
   await answer; assert.equal(adapter.activeOwnedTurns.size, 0);
   peer.send(JSON.stringify({ id: "late-approval", method: "item/commandExecution/requestApproval", params: { threadId, turnId: "native-turn" } }));
-  await new Promise(resolve => setTimeout(resolve, 10)); assert.equal(replies.length, 1);
+  const foreignDeadline = Date.now() + 1000;
+  while (foreign.length < 4 && Date.now() < foreignDeadline) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(foreign.length, 4); assert.equal(replies.length, 1);
   assert.ok(!JSON.stringify(attention).includes("PRIVATE"));
   assert.ok(!JSON.stringify(foreign).includes("PRIVATE"));
 });

@@ -217,11 +217,11 @@ test("local macOS/Linux paths retain case and POSIX boundaries; remote is always
 test("owner room policy is explicit, bounded, persisted and cannot be changed by participants", () => {
   const { engine, root, id } = setup();
   assert.deepEqual(engine.discussions.view(engine.discussions.group(id)).policy,
-    { agentInitiation: false, maxForwardHops: 2, maxDeliveries: 16 });
+    { agentInitiation: false, selfRegistration: false, maxForwardHops: 2, maxDeliveries: 16 });
   assert.throws(() => engine.discussions.setPolicy({ id, agentInitiation: true }, { sessionId: "sample-codex-old" }), /owner/);
   assert.throws(() => engine.discussions.setPolicy({ id, agentInitiation: "true" }), /boolean/);
   const enabled = engine.discussions.setPolicy({ id, agentInitiation: true });
-  assert.deepEqual(enabled.policy, { agentInitiation: true, maxForwardHops: 8, maxDeliveries: 32 });
+  assert.deepEqual(enabled.policy, { agentInitiation: true, selfRegistration: false, maxForwardHops: 8, maxDeliveries: 32 });
   const restored = new Engine(new Store(root), new FabricAdapter({ stateRoot: root })); restored.loadSample();
   assert.equal(restored.discussions.view(restored.discussions.group(id)).agentInitiation, true);
   const created = engine.discussions.create({ title: "Explicit shared room", sessionIds: ["sample-codex-old"], agentInitiation: true });

@@ -149,6 +149,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
         title: title.value,
         sessionIds: [...chosen],
         agentInitiation: true,
+        selfRegistration: true,
       });
       activeId = g.id;
       await load();
@@ -189,6 +190,15 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
       details.append(p);
     }
     header.append(chips, details);
+    const registration = el("label", null, "check-row"), allowJoin = el("input");
+    allowJoin.type = "checkbox";
+    allowJoin.checked = g.policy?.selfRegistration === true;
+    allowJoin.onchange = run(async () => {
+      await api("discussions/policy", { id: g.id, selfRegistration: allowJoin.checked });
+      await load(); render();
+    });
+    registration.append(allowJoin, document.createTextNode("Connected agents can join this group"));
+    header.append(registration);
     const messages = el("div", null, "discussion-messages");
     messages.setAttribute("aria-live", "polite");
     if (!g.available)

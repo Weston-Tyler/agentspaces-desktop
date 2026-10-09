@@ -75,8 +75,8 @@ export class SourceBindings {
     const folder = join(this.root, "native-connections", "auto-" + key), configPath = join(folder, "participant.json"), fingerprint = hash(JSON.stringify([identity, this.address]));
     assertUnlinkedParents(folder);
     const records = this.engine.store.data.nativeSourceBindings, old = records[key];
+    if (old?.connectorKey && !this.engine.store.data.connectors[old.connectorKey]) throw failure("source_connector_revoked");
     if (old?.fingerprint === fingerprint) {
-      if (!this.engine.store.data.connectors[old.connectorKey]) throw failure("source_connector_revoked");
       if (!existsSync(configPath) || lstatSync(configPath).isSymbolicLink() || !lstatSync(configPath).isFile()) throw failure("native_registration_private_config_unavailable");
       let config; try { config = JSON.parse(readFileSync(configPath, "utf8")); } catch { throw failure("native_registration_private_config_changed"); }
       if (config.schema !== 1 || config.address !== this.address || config.authority !== new URL(this.address).host || typeof config.token !== "string" || config.nativeThreadId !== source.nativeThreadId || config.sessionId !== source.id || config.host !== source.host || config.provider !== source.provider || hash(config.token) !== old.connectorKey) throw failure("native_registration_private_config_changed");

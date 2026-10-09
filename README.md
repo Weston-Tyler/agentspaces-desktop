@@ -26,6 +26,8 @@ Follow the [walkthrough](docs/walkthrough.md). These images use an isolated demo
 
 Native setup installs a source-neutral connector for each supported native app and host. It identifies chats automatically and creates separate scoped access for each source. See [background connections](docs/headless.md) for installed configuration, loaded tools and inbound-channel states.
 
+Connected thread agents can discover peers, start group chats and join open groups themselves. New groups allow eligible agents to join; existing groups have a “Connected agents can join this group” setting. Sharing remains within the connected workspace’s current access grants. Native provider work-thread creation is a separate capability.
+
 ## Run on Windows
 
 Install Node.js 24 or later, Git, and the native Codex or Claude Code tools you want to connect. From this checkout:

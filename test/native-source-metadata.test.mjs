@@ -1,8 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveNativeSourceMetadata } from "../app/native-source-metadata.mjs";
+import { resolveNativeSourceMetadata, codexMetadataAdapter } from "../app/native-source-metadata.mjs";
 
 const thread = "00000000-0000-4000-8000-000000000001", tree = "00000000-0000-4000-8000-000000000002";
+test('remote metadata reuses the existing daemon and refuses content and controller operations', async () => {
+  const calls = []; let closed = false;
+  const adapter = codexMetadataAdapter('remote', { daemonFactory: options => {
+    assert.equal(options.host, 'remote');
+    return { open: async () => {}, request: async (method, params) => { calls.push({ method, params }); return { thread: { id: thread, cwd: '/fictional/work' } }; }, close: () => { closed = true; } };
+  } });
+  await adapter.open(); await adapter.rpc('thread/read', { threadId: thread, includeTurns: false });
+  for (const method of ['thread/resume', 'thread/start', 'thread/queue/add', 'turn/start']) assert.throws(() => adapter.rpc(method, {}), /refuses/);
+  assert.throws(() => adapter.rpc('thread/read', { threadId: thread, includeTurns: true }), /refuses/);
+  adapter.close(); assert.equal(closed, true); assert.equal(calls.length, 1);
+});
+test('unavailable daemon handshake ends within the registration bound and closes its transport', async () => {
+  let closed = false;
+  const adapter = codexMetadataAdapter('remote', { timeoutMs: 20, daemonFactory: () => ({ open: () => new Promise(() => {}), close: () => { closed = true; } }) });
+  await assert.rejects(adapter.open(), /unavailable/); assert.equal(closed, true);
+});
 function codex(handler) {
   const calls = []; let closed = false;
   return { calls, closed: () => closed, factory: () => ({ open: async () => {}, close: () => { closed = true; }, rpc: async (method, params) => { calls.push({ method, params }); return handler(method, params); } }) };
