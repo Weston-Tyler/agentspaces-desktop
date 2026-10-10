@@ -8,6 +8,10 @@ For source development on Windows, install the locked dependencies with npm ci, 
 
 `AGENTSPACES_STATE` can retain the existing owner-private workspace when selecting a new source checkout. CLI, background startup and desktop attachment use the same runtime file; changing source code does not require copying credentials or creating another workspace.
 
+For installations with an existing named SSH host, preserve its identity and
+configure the SSH alias separately using [remote host compatibility](remote-host-compatibility.md).
+Do not rename persisted sources or connector grants during an update.
+
 ## Retained state and owner access
 
 Connected native metadata, access settings, room membership, shared messages and delivery receipts live in the owner-private application workspace. Closing and reopening the window restores them. Restarting the companion restores that state and reconciles its existing delivery evidence; it does not automatically restart every interrupted native work lane.

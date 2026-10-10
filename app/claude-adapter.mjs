@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { readSdk } from "./claude-reader.mjs";
@@ -10,7 +11,7 @@ export class ClaudeReadAdapter {
     spawnProcess = spawn,
     sdkPin = CLAUDE_SDK_PIN,
   } = {}) {
-    if (!["local", "remote"].includes(host))
+    if (!["local", REMOTE_HOST].includes(host))
       throw new Error("Unsupported host");
     this.host = host;
     this.sdkLoader = sdkLoader;
@@ -34,7 +35,7 @@ export class ClaudeReadAdapter {
     return new Promise((yes, no) => {
       const child = this.spawnProcess(
         "ssh",
-        ["remote", "node", "--input-type=module", "-"],
+        [SSH_ALIAS, "node", "--input-type=module", "-"],
         { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
       );
       this.child = child;

@@ -1,3 +1,4 @@
+import { REMOTE_HOST, assertSavedHostIdentity } from "./remote-host.mjs";
 import { readFileSync, existsSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -165,6 +166,7 @@ export class WorkspaceMap {
       !Array.isArray(this.index?.sessions)
     )
       this.index = null;
+    assertSavedHostIdentity(engine.store.data, this.index);
     if (this.index?.profile?.active) {
       this.index.stale = true;
       this.restore(this.index.sessions ?? []);
@@ -213,7 +215,7 @@ export class WorkspaceMap {
       providers = input.providers ?? ["codex", "claude"];
     if (
       !hosts.length ||
-      hosts.some((h) => !["local", "remote"].includes(h)) ||
+      hosts.some((h) => !["local", REMOTE_HOST].includes(h)) ||
       !providers.length ||
       providers.some((p) => !["codex", "claude"].includes(p))
     )
@@ -448,6 +450,27 @@ export class WorkspaceMap {
       }
       if (this.cancelled)
         throw new Error("Inventory cancelled; previous index preserved");
+      // Registration can complete during any awaited discovery call. A paginated
+      // catalog snapshot is not a revocation of that durable source binding.
+      // Reconcile at commit, retaining only the current owning profile boundary.
+      for (const record of Object.values(e.store.data.nativeSourceBindings ?? {})) {
+        const identity = record.identity, connector = e.store.data.connectors[record.connectorKey];
+        if (!identity || !connector || connector.sessionId !== identity.sessionId ||
+          identity.scopeId !== profile.id || identity.account !== profile.account ||
+          !profile.hosts.includes(identity.host) || !profile.providers.includes(identity.provider) ||
+          identity.sessionId !== identity.provider + '@' + identity.host + ':' + identity.nativeThreadId ||
+          collected.has(identity.sessionId)) continue;
+        const denied = e.store.data.grants[identity.sessionId] ?? {};
+        if (['enrolled','content','retrieve','share'].some(key => denied[key] === false)) continue;
+        const retained = this.index?.sessions?.find(source => source.id === identity.sessionId);
+        const cwd = e.store.data.projects[identity.project]?.targets?.[identity.host + ':' + identity.provider]?.path ?? identity.cwd;
+        if (!cwd || normalizeHostPath(cwd,identity.host) !== identity.cwd) continue;
+        const source = retained ?? { ...identity, id:identity.sessionId, cwd, fixture:false,
+          title:'Registered native thread', sourceVersion:'retained-native-registration', status:'unknown',
+          registrationProvenance:{metadataObserved:true,retained:true,executionState:'unknown'} };
+        if (source.scopeId !== profile.id || source.account !== profile.account) continue;
+        collected.set(identity.sessionId,source);
+      }
       const sessions = [...collected.values()].filter(
           (s) =>
             profile.hosts.includes(s.host) &&

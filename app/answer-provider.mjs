@@ -1,8 +1,12 @@
+import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname, basename } from "node:path";
 import { NATIVE_VERSION_PINS, qualifiedNativeVersion } from './native-versions.mjs';
+
+const activeNativeProcesses = new Set();
+export const activeNativeProcessCount = () => activeNativeProcesses.size;
 
 export const ANSWER_VERSION_PINS = NATIVE_VERSION_PINS;
 const failure = (code, uncertainOutcome = false) =>
@@ -54,6 +58,7 @@ function collect(
         stdio: ["pipe", "pipe", "pipe"],
         ...(cwd ? { cwd } : {}),
       });
+      if (preserveProcess) activeNativeProcesses.add(child);
       onProcessStart?.();
       child.on("error", () =>
         finish(failure("native_process_unavailable", dispatched)),
@@ -77,6 +82,7 @@ function collect(
         }
       });
       child.on("close", async (code) => {
+        activeNativeProcesses.delete(child);
         try { await onProcessClose?.(); }
         catch { return finish(failure("native_cleanup_failed", dispatched)); }
         if (settled) return;
@@ -113,12 +119,12 @@ export async function detectAnswerProviders({
 } = {}) {
   hostCheck(host);
   let records;
-  if (host === "remote") {
+  if (host === REMOTE_HOST) {
     try {
       const r = await collect(
         spawnProcess,
         "ssh",
-        ["remote", "node --input-type=module"],
+        [SSH_ALIAS, "node --input-type=module"],
         { input: remoteProbe, timeoutMs: 12000 },
       );
       records = r.code === 0 ? JSON.parse(r.output) : [];
@@ -372,7 +378,7 @@ export class NativeAnswerProvider {
                 throw failure("answer_output_budget_exceeded", true);
             }
           : undefined;
-      const remote = this.host === "remote";
+      const remote = this.host === REMOTE_HOST;
       if (beforeDispatch) {
         try {
           await beforeDispatch();
@@ -386,7 +392,7 @@ export class NativeAnswerProvider {
         this.spawnProcess,
         remote ? "ssh" : this.provider,
         remote
-          ? ["remote", "node --input-type=module"]
+          ? [SSH_ALIAS, "node --input-type=module"]
           : nativeArgs(this.provider, scratch, budget),
         {
           input: remote

@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, lstatSync, realpathSync, chmodSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -125,11 +126,14 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
   return { host: config.host, provider: config.provider, status: 'native-config-installed', configPath, bootstrapPath: bootstrap, activeSessionReloaded: false, inboundChannelConnected: false };
 }
 
+export function remoteInstallScript(payload) {
+  const source = readFileSync(fileURLToPath(import.meta.url), 'utf8').replace('import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";', 'const REMOTE_HOST=' + JSON.stringify(REMOTE_HOST) + ',SSH_ALIAS=' + JSON.stringify(SSH_ALIAS) + ';');
+  return source + '\nconst result=await installOnCurrentHost(' + JSON.stringify(payload) + ');console.log(JSON.stringify(result));';
+}
 async function remoteInstall(payload) {
-  const source = readFileSync(fileURLToPath(import.meta.url), 'utf8');
-  const script = source + '\nconst result=await installOnCurrentHost(' + JSON.stringify(payload) + ');console.log(JSON.stringify(result));';
+  const script = remoteInstallScript(payload);
   return new Promise((yes, no) => {
-    const child = spawn('ssh', ['remote', 'node --input-type=module -'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); let output = '', settled = false;
+    const child = spawn('ssh', [SSH_ALIAS, 'node --input-type=module -'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); let output = '', settled = false;
     const finish = (error, result) => { if (settled) return; settled = true; clearTimeout(timer); if (error) { child.kill(); no(error); } else yes(result); };
     const timer = setTimeout(() => finish(new Error('Automatic remote setup timed out')), 60000);
     child.stderr.on('data', () => {}); child.stdout.on('data', data => { output += data; if (output.length > 16384) finish(new Error('Automatic remote setup response too large')); });
@@ -154,7 +158,7 @@ export class NativeAutoInstaller {
   async setup() {
     const profile = this.sourceBindings.profile(), results = [];
     for (const host of profile.hosts) {
-      if (!['local', 'remote'].includes(host)) continue;
+      if (!['local', REMOTE_HOST].includes(host)) continue;
       try { await this.engine.probe(host); } catch { results.push({ host, status: 'native-host-unavailable' }); continue; }
       for (const provider of profile.providers) {
         if (!this.engine.tools.some(tool => tool.host === host && tool.provider === provider && tool.installed)) { results.push({ host, provider, status: 'native-app-not-installed' }); continue; }
@@ -172,15 +176,15 @@ export class NativeAutoInstaller {
     if (old?.device) { this.sourceBindings.device(old.device.token); device = old.device; }
     else { const issued = this.sourceBindings.issueDevice({ host, provider }); device = { schemaVersion: 1, ...issued, address: this.address, authority: new URL(this.address).host }; }
     device = { ...device, address: this.address, authority: new URL(this.address).host };
-    if (host === 'remote') { tunnel = await this.participantConnections.tunnel(); device = { ...device, address: 'http://127.0.0.1:' + tunnel.remotePort }; }
+    if (host === REMOTE_HOST) { tunnel = await this.participantConnections.tunnel(); device = { ...device, address: 'http://127.0.0.1:' + tunnel.remotePort }; }
     const sources = { bootstrap: readFileSync(new URL('./native-bootstrap-mcp.mjs', import.meta.url), 'utf8'), hook: readFileSync(new URL('./native-session-hook.mjs', import.meta.url), 'utf8') };
     try {
-      const result = await (host === 'remote' ? this.installRemote : this.installLocal)({ config: device, sources, versions });
+      const result = await (host === REMOTE_HOST ? this.installRemote : this.installLocal)({ config: device, sources, versions });
       this.sourceBindings.device(device.token); // Recheck after installation; never undo a revocation.
       const refresh = provider === 'codex' ? await this.refreshNative(host) : { status: 'new-session-load-required' };
       result.nativeRefresh = refresh.status;
       records[key] = { device, status: result.status, nativeRefresh: result.nativeRefresh, activeSessionReloaded: false, inboundChannelConnected: false, at: new Date().toISOString(), configPath: result.configPath, bootstrapPath: result.bootstrapPath }; this.engine.store.save();
-      if (host === 'remote') this.participantConnections.retain(tunnel);
+      if (host === REMOTE_HOST) this.participantConnections.retain(tunnel);
       return result;
     } catch {
       if (!old?.device) delete this.engine.store.data.nativeRegistrationDevices[digest(device.token)]; this.engine.store.save();

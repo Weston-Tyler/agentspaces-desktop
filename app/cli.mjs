@@ -33,7 +33,7 @@ try {
         2,
       ),
     );
-  } else if (["status", "stop", "owner-password"].includes(command)) {
+  } else if (["status", "stop", "owner-password", "update-status", "update-prepare", "update-abort", "update-commit"].includes(command)) {
     const r = JSON.parse(readFileSync(join(root, "runtime.json"), "utf8"));
     if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(r.address))
       throw new Error("Invalid local runtime address");
@@ -44,7 +44,12 @@ try {
     }).then((v) => v.json());
     if (health.instance !== r.instance || health.pid !== r.pid)
       throw new Error("Runtime identity mismatch");
-    if(command==='owner-password') {
+    if (command.startsWith('update-')) {
+      const action=command.slice(7), isStatus=action==='status';
+      const response=await fetch(r.address+'/api/updates/'+action,{method:isStatus?'GET':'POST',headers:{...headers,'Content-Type':'application/json'},
+        ...(!isStatus?{body:JSON.stringify(action==='prepare'?{candidate:process.argv[3]}:{token:process.env.AGENTSPACES_UPDATE_TOKEN})}:{}),signal:AbortSignal.timeout(5000)});
+      const value=await response.json();if(!response.ok)throw Error(value.error??'Update control failed');console.log(JSON.stringify(value));
+    } else if(command==='owner-password') {
       const {hiddenPassword}=await import('./owner-password-prompt.mjs');
       const post=async(path,data)=>{const response=await fetch(r.address+path,{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(10000)});const value=await response.json();if(!response.ok)throw Error(value.error??'Owner setup failed');return value;};
       const status=await post('/api/approvals/status',{});
@@ -62,7 +67,7 @@ try {
             signal: AbortSignal.timeout(2000),
           }).then((v) => v.text()),
     );
-  } else throw new Error("Commands: serve, status, stop, diagnostics, owner-password");
+  } else throw new Error("Commands: serve, status, stop, diagnostics, owner-password, update-status, update-prepare <candidate-sha256>, update-abort, update-commit (lease via AGENTSPACES_UPDATE_TOKEN)");
 } catch (e) {
   console.error(e.message);
   process.exitCode = 1;

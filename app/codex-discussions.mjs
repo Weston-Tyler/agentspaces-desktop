@@ -1,7 +1,8 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 import { createHash } from "node:crypto";
 import { CodexQueueAdapter } from "./codex-queue.mjs";
 import { nativeAdapterCompatible, observedVersion, qualifiedNativeVersion } from './native-versions.mjs';
-const transientTransport = new Set(['native_proxy_disconnected', 'native_proxy_not_connected', 'native_websocket_handshake_failed', 'native_websocket_not_ready', 'native_rpc_timeout']);
+const transientTransport = new Set(['companion_update_deferred', 'native_proxy_disconnected', 'native_proxy_not_connected', 'native_websocket_handshake_failed', 'native_websocket_not_ready', 'native_rpc_timeout']);
 const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 // Direct user-addressed conversation transport. These receipts are not work
 // claims, a task queue, a scheduler or upstream completion authority.
@@ -17,7 +18,7 @@ export class CodexDiscussionHub {
   validate(sessionId, discussionId, messageId) {
     if (this.closed) throw new Error("Native conversation service is closed");
     const source = this.engine.session(sessionId), grant = this.engine.permissions(source);
-    if (source.fixture || source.provider !== "codex" || source.host !== "remote") throw new Error("Shared native Codex connection is available on remote only");
+    if (source.fixture || source.provider !== "codex" || source.host !== REMOTE_HOST) throw new Error("Shared native Codex connection is available on remote only");
     if (!grant.enrolled || !grant.content || !grant.share || !grant.retrieve) throw new Error("Native agent connection was revoked or unavailable");
     if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(source.nativeThreadId ?? "")) throw new Error("Original native thread identity is unavailable");
     const group = this.engine.discussions.group(discussionId);
@@ -100,6 +101,7 @@ export class CodexDiscussionHub {
       this.engine.store.save();
     };
     try {
+      if (this.engine.dispatchAllowed?.() === false) throw Object.assign(Error('Update drain'), {code:'companion_update_deferred'});
       let source = this.validate(effect.sessionId, effect.discussionId, effect.messageId);
       const snapshot = { ...source, cwd: source.cwd ?? this.engine.target(source).path };
       const connected = await this.bind(snapshot, effect);
@@ -161,7 +163,7 @@ export class CodexDiscussionHub {
   }
   wait(requestId) { return this.pending.get(requestId) ?? Promise.resolve(this.engine.store.data.codexDiscussionDeliveries[requestId]); }
   async recoverUndispatched({ includeLegacy = false } = {}) {
-    if (this.recoveryRunning || this.closed) return { recovered: [], skipped: true };
+    if (this.recoveryRunning || this.closed || this.engine.dispatchAllowed?.() === false) return { recovered: [], skipped: true };
     const candidates = Object.values(this.engine.store.data.codexDiscussionDeliveries).filter(effect => effect.undispatched === true && !this.engine.store.data.codexDiscussionNativeReceipts[effect.requestId] && !effect.nativeTurnId && !this.aborters.has(effect.requestId) && ((transientTransport.has(effect.reasonCode) && !effect.uncertainOutcome && Date.parse(effect.recoveryDeadline) > Date.now() && Date.parse(effect.nextRetryAt) <= Date.now()) || ((effect.retryCount ?? 0) < 3 && (effect.reasonCode === 'native_protocol_unavailable' || (includeLegacy && !effect.reasonCode)))));
     if (!candidates.length) return { recovered: [] };
     this.recoveryRunning = true;
@@ -232,7 +234,7 @@ export class CodexDiscussionHub {
     } finally { this.reconciling = false; }
   }
   async refreshTools(host) {
-    if (host !== 'remote') return { status: 'new-session-load-required' };
+    if (host !== REMOTE_HOST) return { status: 'new-session-load-required' };
     const adapter = this.adapterFactory({ host });
     try { await adapter.open(); await adapter.request('config/mcpServer/reload', null); return { status: 'refresh-requested-for-next-native-turn' }; }
     catch { return { status: 'native-refresh-unavailable' }; }

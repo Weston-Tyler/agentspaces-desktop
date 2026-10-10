@@ -1,3 +1,4 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { isAbsolute, resolve, posix } from "node:path";
 import { sampleSessions, sampleFindings } from "./fixtures.mjs";
@@ -376,7 +377,7 @@ export class Engine {
     cursor = null,
   }) {
     if (
-      !["local", "remote"].includes(host) ||
+      !["local", REMOTE_HOST].includes(host) ||
       !["codex", "claude"].includes(provider)
     )
       throw new Error("Unsupported host or provider");
@@ -385,14 +386,14 @@ export class Engine {
       ["constructor", "__proto__", "prototype"].includes(id)
     )
       throw new Error("Invalid project label");
-    const normalize = host === "remote" ? posix.normalize : resolve;
+    const normalize = host === REMOTE_HOST ? posix.normalize : resolve;
     if (
       typeof id !== "string" ||
       !id ||
       typeof account !== "string" ||
       !account ||
       typeof path !== "string" ||
-      !(host === "remote" ? posix.isAbsolute(path) : isAbsolute(path))
+      !(host === REMOTE_HOST ? posix.isAbsolute(path) : isAbsolute(path))
     )
       throw new Error(
         "Explicit project ID, absolute path and account boundary required",
@@ -523,6 +524,7 @@ export class Engine {
     return {
       answerUsage,
       localOS: hostOS("local"),
+      remoteHost: REMOTE_HOST,
       mode: this.mode,
       tools: this.tools,
       projects: Object.values(this.store.data.projects),

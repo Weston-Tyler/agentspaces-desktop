@@ -1,3 +1,4 @@
+import { UpdateGate } from './update-gate.mjs';
 import { OwnerApprovalAuth } from './owner-approval-auth.mjs';
 import { notifyApproval } from './approval-notification.mjs';
 import http from "node:http";
@@ -22,7 +23,7 @@ import { parseAgentSelectors } from './agent-selection.mjs';
 import { protectStateDirectory } from "./state-security.mjs";
 import { loadWorkspaceFixture } from "./workspace-fixture.mjs";
 import { installHostRouter } from "./router-install.mjs";
-import { detectAnswerProviders } from "./answer-provider.mjs";
+import { detectAnswerProviders, activeNativeProcessCount } from "./answer-provider.mjs";
 import { WebSocketServer } from "ws";
 import { NativeTerminals } from "./native-terminal.mjs";
 import { NativeConnections } from "./native-connections.mjs";
@@ -89,6 +90,20 @@ export async function startServer({
     instance = randomBytes(16).toString("hex");
   let closing = false;
   const activeAnswers = new Map();
+  let activeMutations = 0;
+  const updateGate = new UpdateGate({ blockers: () => {
+    const blockers = [];
+    if (activeMutations) blockers.push('request-in-progress');
+    if (activeAnswers.size || activeNativeProcessCount()) blockers.push('embedded-native-process');
+    if (terminals.list().some(item => ['starting','running'].includes(item.status))) blockers.push('embedded-native-terminal');
+    for (const requestId of codexAgents.aborters.keys()) {
+      if (!store.data.codexDiscussionNativeReceipts?.[requestId]?.queuedSubmissionId) blockers.push('native-submission-unacknowledged');
+    }
+    if (Object.values(store.data.channelReceipts ?? {}).some(item => item.status === 'dispatch-allocated')) blockers.push('channel-submission-unacknowledged');
+    if (automaticConnections?.pending?.size) blockers.push('native-setup-running');
+    return blockers;
+  } });
+  engine.dispatchAllowed = () => !closing && !updateGate.draining;
   const channels = new ChannelHub(engine);
   const codexAgents = new CodexDiscussionHub(engine, { adapterFactory: codexAdapterFactory, onContribution: (group, message) => routeConversation(engine, { codexAgents, channels }, group, message) });
   const nativeThreads = new NativeThreadCreation(engine, { adapterFactory: nativeThreadAdapterFactory, registerSource: async input => {
@@ -189,7 +204,28 @@ export async function startServer({
         return;
       }
     }
+    let countedMutation = false;
     try {
+      if (url.pathname.startsWith('/api/updates/')) {
+        if (!isAdmin) { json(res, 403, {error:'Local administration required'}); return; }
+        if (req.method === 'GET' && url.pathname === '/api/updates/status') { json(res, 200, updateGate.status()); return; }
+        if (req.method !== 'POST') { json(res, 405, {error:'Method denied'}); return; }
+        let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 4096) throw Error('Update request too large'); }
+        const data = JSON.parse(body || '{}');
+        let result;
+        if (url.pathname === '/api/updates/prepare') result = updateGate.prepare(data);
+        else if (url.pathname === '/api/updates/abort') result = updateGate.abort(data.token);
+        else if (url.pathname === '/api/updates/commit') { result = updateGate.commit(data.token); closing = true; setImmediate(() => close()); }
+        else { json(res, 404, {error:'Unknown update operation'}); return; }
+        json(res, 200, result); return;
+      }
+      if (req.method === 'POST') {
+        if (updateGate.draining) {
+          res.setHeader('Retry-After', '5');
+          json(res, 503, {error:'companion_update_draining', undispatched:true, retryAllowed:true}); return;
+        }
+        activeMutations++; countedMutation = true;
+      }
       if (registrationDevice && (req.method !== 'POST' || url.pathname !== '/api/native/register')) {
         json(res, 403, { error: 'Registration capability cannot access content or owner operations' }); return;
       }
@@ -626,7 +662,7 @@ export async function startServer({
         code: e.code ?? null,
         uncertainOutcome: e.uncertainOutcome ?? null,
       });
-    }
+    } finally { if (countedMutation) activeMutations--; }
   });
   server.on("upgrade", (req, socket, head) => {
     const expected = "127.0.0.1:" + server.address().port;
@@ -675,7 +711,13 @@ export async function startServer({
     JSON.stringify({ address, admin, instance, pid: process.pid }),
     { mode: 0o600 },
   );
+  const updateResumeTimer = setInterval(() => {
+    if (!engine.dispatchAllowed()) return;
+    for (const sessionId of channels.connections.keys()) void channels.flush(sessionId).catch(() => {});
+  }, 5000);
+  updateResumeTimer.unref?.();
   async function close() {
+    clearInterval(updateResumeTimer);
     await participantConnections.close();
     await codexAgents.close();
     if (engine.workspace.running) engine.workspace.cancel();
@@ -690,5 +732,5 @@ export async function startServer({
       if (current.instance === instance) unlinkSync(runtimePath);
     }
   }
-  return { server, engine, store, address, instance, admin, close, terminals, channels, connections, participantConnections, sourceBindings, automaticConnections, codexAgents, desktopDiscovery: desktopStartup };
+  return { server, engine, store, address, instance, admin, close, updateGate, terminals, channels, connections, participantConnections, sourceBindings, automaticConnections, codexAgents, desktopDiscovery: desktopStartup };
 }

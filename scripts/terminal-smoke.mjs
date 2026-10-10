@@ -1,3 +1,4 @@
+import { REMOTE_HOST } from "../app/remote-host.mjs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
@@ -18,7 +19,7 @@ async function smoke(remote) {
     child.on("exit", code => { clearTimeout(timer); assert.equal(code, 0); assert.equal(exitCode, 0); assert(observed); resolve(); });
     child.send({ type: "smoke", remote });
   });
-  return { host: remote ? "remote" : "local", markerObserved: true, workerExited: true };
+  return { host: remote ? REMOTE_HOST : "local", markerObserved: true, workerExited: true };
 }
 const proofs = [await smoke(false)];
 if (process.argv.includes("--ssh")) proofs.push(await smoke(true));

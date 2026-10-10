@@ -13,7 +13,7 @@ const delivery = string(100, { minLength: 8, pattern: "^[a-zA-Z0-9-]{8,100}$" })
 const objectSchema = (properties, required, extra = {}) => ({ type: "object", properties, required, additionalProperties: false, ...extra });
 const MESSAGE_PROPERTIES = { text: string(8000, { pattern: "\\S" }), nativeTurnId: string(200), deliveryId: delivery };
 const STDIN_SCHEMAS = {
-  message: objectSchema({ ...MESSAGE_PROPERTIES, sessionId: string(300), nativeThreadId: uuid, host: { enum: ["local", "remote"] }, provider: { enum: ["codex", "claude"] }, title: string(80, { pattern: "\\S" }) }, Object.keys(MESSAGE_PROPERTIES), { oneOf: [{ required: ["sessionId"] }, { required: ["nativeThreadId"] }] }),
+  message: objectSchema({ ...MESSAGE_PROPERTIES, sessionId: string(300), nativeThreadId: uuid, host: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$" }, provider: { enum: ["codex", "claude"] }, title: string(80, { pattern: "\\S" }) }, Object.keys(MESSAGE_PROPERTIES), { oneOf: [{ required: ["sessionId"] }, { required: ["nativeThreadId"] }] }),
   broadcast: objectSchema({ ...MESSAGE_PROPERTIES, query: string(500, { minLength: 0 }), activeWithinDays: { type: "integer", minimum: 1, maximum: 3650 }, sessionIds: { type: "array", minItems: 1, maxItems: 200, items: string(300) }, nativeThreadIds: { type: "array", minItems: 1, maxItems: 200, items: uuid }, discussionId: uuid }, Object.keys(MESSAGE_PROPERTIES)),
   "verify-approval": objectSchema({ entryId: string(100), requestHash: string(64, { minLength: 64, pattern: "^[a-f0-9]{64}$" }), receiptId: string(100) }, ["entryId", "requestHash", "receiptId"]),
 };
@@ -136,7 +136,7 @@ export async function runParticipantCli(args, { input, requestImpl = request } =
   }
   else if (command === 'new-thread') {
     const data = await inputJson(input);
-    if (!data || typeof data.title !== 'string' || !data.title.trim() || data.title.length > 200 || !/^[a-zA-Z0-9-]{8,100}$/.test(data.deliveryId ?? '') || data.host !== undefined && !['local','remote'].includes(data.host) || data.cwd !== undefined && (typeof data.cwd !== 'string' || !data.cwd || data.cwd.length > 4096) || Object.keys(data).some(key => !['title','deliveryId','host','cwd'].includes(key))) throw fail('bounded_native_thread_creation_required');
+    if (!data || typeof data.title !== 'string' || !data.title.trim() || data.title.length > 200 || !/^[a-zA-Z0-9-]{8,100}$/.test(data.deliveryId ?? '') || data.host !== undefined && (typeof data.host !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(data.host)) || data.cwd !== undefined && (typeof data.cwd !== 'string' || !data.cwd || data.cwd.length > 4096) || Object.keys(data).some(key => !['title','deliveryId','host','cwd'].includes(key))) throw fail('bounded_native_thread_creation_required');
     path = '/api/native/thread/create'; body = data;
   } else if (["discover", "joinable", "work"].includes(command)) {
     const query = options.query ?? ""; if (query.length > 200) throw fail("query_limit_exceeded");

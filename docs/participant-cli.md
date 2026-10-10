@@ -32,14 +32,16 @@ Both `message` and `broadcast` require these stdin JSON fields:
 | `deliveryId` | 8–100 ASCII letters, digits or hyphens |
 
 `message` additionally requires exactly one destination: a discovered `sessionId`
-(1–300 characters) or `nativeThreadId` (UUID). Optional `host` (`local`/`remote`),
+(1–300 characters) or `nativeThreadId` (UUID). Optional `host` (`local` or the configured remote identity),
 `provider` (`codex`/`claude`) and nonblank `title` (at most 80 characters) help
 identify or label the destination.
 
 `broadcast` optionally accepts `query` (at most 500 characters),
 `activeWithinDays` (integer 1–3,650), `sessionIds` or `nativeThreadIds` (1–200
 entries), and `discussionId` (UUID). See [agent addressing](agent-addressing.md)
-for selection and delivery behavior. Unknown fields are rejected.
+for selection and delivery behavior. Unknown fields are rejected. Host labels accept 1–100 ASCII letters, digits, dots,
+underscores or hyphens, starting with a letter or digit; the service still rejects
+hosts outside its configured scope.
 
 Keep the same `deliveryId` when retrying the same request. Do not create a new ID
 merely because a response timed out: the service may already have accepted it.

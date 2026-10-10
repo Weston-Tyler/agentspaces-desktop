@@ -1,3 +1,4 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 import { CodexReadAdapter } from './native.mjs';
 import { ClaudeReadAdapter } from './claude-adapter.mjs';
 import { CodexQueueAdapter } from './codex-queue.mjs';
@@ -5,7 +6,7 @@ import { CodexQueueAdapter } from './codex-queue.mjs';
 // New remote chats may exist only in the owning daemon's live catalog. Reuse
 // its transport for metadata; this wrapper never binds/resumes a controller.
 export function codexMetadataAdapter(host, { daemonFactory = options => new CodexQueueAdapter(options), timeoutMs = 8000 } = {}) {
-  if (host !== 'remote') return new CodexReadAdapter({ host });
+  if (host !== REMOTE_HOST) return new CodexReadAdapter({ host });
   const adapter = daemonFactory({ host });
   return {
     async open() {
@@ -26,7 +27,7 @@ export function codexMetadataAdapter(host, { daemonFactory = options => new Code
 // for an exact Codex thread ID; an ambiguous tree remains unbound.
 export async function resolveNativeSourceMetadata(input, { codexFactory = codexMetadataAdapter, claudeFactory = host => new ClaudeReadAdapter({ host }) } = {}) {
   const { host, provider, nativeThreadId, nativeSessionId, cwd } = input;
-  if (!['local', 'remote'].includes(host) || !['codex', 'claude'].includes(provider)) return null;
+  if (!['local', REMOTE_HOST].includes(host) || !['codex', 'claude'].includes(provider)) return null;
   const adapter = provider === 'codex' ? codexFactory(host) : claudeFactory(host);
   try {
     await adapter.open();

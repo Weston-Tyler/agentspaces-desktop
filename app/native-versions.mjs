@@ -1,12 +1,13 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 import { checkCodexProtocol } from './codex-protocol.mjs';
 
 export const NATIVE_VERSION_PINS = Object.freeze({
   local: { codex: '0.162.0-alpha.2', claude: '2.1.113' },
-  remote: { codex: '0.162.0', claude: '2.1.283' },
+  [REMOTE_HOST]: { codex: '0.162.0', claude: '2.1.283' },
 });
 const qualifiedVersions = {
   local: { codex: ['0.162.0-alpha.2', '0.162.0'], claude: ['2.1.113'] },
-  remote: { codex: ['0.161.0', '0.162.0'], claude: ['2.1.283'] },
+  [REMOTE_HOST]: { codex: ['0.161.0', '0.162.0'], claude: ['2.1.283'] },
 };
 export const observedVersion = output => /\b\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?\b/.exec(String(output ?? ''))?.[0] ?? null;
 export const qualifiedNativeVersion = (host, provider, output) => qualifiedVersions[host]?.[provider]?.includes(observedVersion(output)) === true;

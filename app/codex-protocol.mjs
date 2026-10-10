@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -132,9 +133,9 @@ function run(spawnProcess, command, args, input = "", capture = false) {
   });
 }
 async function collect({ host, spawnProcess }) {
-  if (host === "remote") {
+  if (host === REMOTE_HOST) {
     const script = "import{spawn}from'node:child_process';import{mkdtemp,readFile,rm}from'node:fs/promises';import{tmpdir}from'node:os';import{join,resolve,dirname,basename}from'node:path';const root=await mkdtemp(join(tmpdir(),'agentspaces-protocol-'));try{await new Promise((yes,no)=>{const c=spawn('codex',['app-server','generate-json-schema','--experimental','--out',root],{stdio:['ignore','ignore','ignore']});const t=setTimeout(()=>{c.kill();no(new Error())},18000);c.on('error',()=>{clearTimeout(t);no(new Error())});c.on('close',n=>{clearTimeout(t);n===0?yes():no(new Error())})});const names=" + JSON.stringify(names) + ";const schemas={};for(const n of names)schemas[n]=JSON.parse(await readFile(join(root,'v2',n+'.json'),'utf8'));const text=JSON.stringify(schemas);if(Buffer.byteLength(text)>2097152)throw new Error();process.stdout.write(text)}finally{if(dirname(resolve(root))!==resolve(tmpdir())||!/^agentspaces-protocol-[A-Za-z0-9_-]+$/.test(basename(root)))throw new Error();await rm(root,{recursive:true,force:true})}";
-    try { return JSON.parse(await run(spawnProcess, "ssh", ["remote", "node --input-type=module -"], script, true)); } catch { throw fail("protocol_probe_unavailable"); }
+    try { return JSON.parse(await run(spawnProcess, "ssh", [SSH_ALIAS, "node --input-type=module -"], script, true)); } catch { throw fail("protocol_probe_unavailable"); }
   }
   const folder = await mkdtemp(join(tmpdir(), "agentspaces-protocol-"));
   try {
@@ -147,7 +148,7 @@ async function collect({ host, spawnProcess }) {
 }
 export async function checkCodexProtocol(host, { version, spawnProcess = spawn, collectSchemas = collect } = {}) {
   const safeVersion = typeof version === "string" && /^[A-Za-z0-9. +_-]{1,100}$/.test(version) ? version : null;
-  if (!["local", "remote"].includes(host) || !safeVersion) return { compatible: false, status: "protocol-probe-unavailable", version: safeVersion, reason: "protocol_probe_unavailable", contractHash: null, checkedAt: new Date().toISOString() };
+  if (!["local", REMOTE_HOST].includes(host) || !safeVersion) return { compatible: false, status: "protocol-probe-unavailable", version: safeVersion, reason: "protocol_probe_unavailable", contractHash: null, checkedAt: new Date().toISOString() };
   const key = host + "\0" + safeVersion, old = cache.get(key);
   if (old && old.expiresAt > Date.now()) return { ...old.verdict };
   if (pending.has(key)) return pending.get(key);

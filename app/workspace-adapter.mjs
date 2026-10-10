@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import {
@@ -7,7 +8,7 @@ import {
 } from "./workspace-reader.mjs";
 export class WorkspaceAdapter {
   constructor(host = "local") {
-    if (!["local", "remote"].includes(host))
+    if (!["local", REMOTE_HOST].includes(host))
       throw new Error("Unsupported workspace host");
     this.host = host;
     this.abort = new AbortController();
@@ -31,7 +32,7 @@ export class WorkspaceAdapter {
     return new Promise((yes, no) => {
       const child = spawn(
         "ssh",
-        ["remote", "node", "--input-type=module", "-"],
+        [SSH_ALIAS, "node", "--input-type=module", "-"],
         { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
       );
       this.child = child;

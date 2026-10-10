@@ -1,3 +1,4 @@
+let configuredRemoteHost = "remote";
 let graph = null,
   query = "",
   kind = "all",
@@ -39,6 +40,7 @@ function choice(labelText, name, options, value) {
   return label;
 }
 export function workspacePage(summary) {
+  configuredRemoteHost = summary.remoteHost ?? "remote";
   const root = el("div");
   root.append(
     el(
@@ -71,14 +73,14 @@ export function workspacePage(summary) {
   const domains = el("div", undefined, "permission-grid");
   for (const [value, text, checked] of [
     ["local", "This device", true],
-    ["remote", "Another computer (requires SSH setup)", false],
+    [configuredRemoteHost, "Another computer (requires SSH setup)", false],
     ["codex", "Codex metadata", true],
     ["claude", "Claude Code metadata", true],
   ]) {
     const label = el("label", undefined, "check-row"),
       input = el("input");
     input.type = "checkbox";
-    input.name = ["local", "remote"].includes(value) ? "hosts" : "providers";
+    input.name = ["local", configuredRemoteHost].includes(value) ? "hosts" : "providers";
     input.value = value;
     input.checked = summary?.profile?.[input.name]?.includes(value) ?? checked;
     label.append(input, document.createTextNode(text));
@@ -131,7 +133,7 @@ export function workspacePage(summary) {
     textarea.rows = 3;
     textarea.value = Object.entries(summary?.profile?.[name] ?? {})
       .flatMap(([host, paths]) =>
-        paths.map((path) => (host === "remote" ? "remote|" : "") + path),
+        paths.map((path) => (host === configuredRemoteHost ? "remote|" : "") + path),
       )
       .join("\n");
     textarea.placeholder =
@@ -600,7 +602,7 @@ export async function workspaceSubmit(form, context) {
       .split("\n")
       .map((v) => v.trim())
       .filter(Boolean)) {
-      const host = line.startsWith("remote|") ? "remote" : "local",
+      const host = line.startsWith("remote|") ? configuredRemoteHost : "local",
         path = line.replace(/^remote\|/, "");
       (target[host] ??= []).push(path);
     }

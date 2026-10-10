@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import {
   existsSync,
   readFileSync,
@@ -256,20 +257,20 @@ export function installRouter({
   };
 }
 export async function installHostRouter(host, dryRun = true) {
-  if (!["local", "remote"].includes(host))
+  if (!["local", REMOTE_HOST].includes(host))
     throw new Error("Unsupported router installation host");
   if (host === "local") return { host, ...installRouter({ dryRun }) };
   const source = readFileSync(
     new URL("./router-install.mjs", import.meta.url),
     "utf8",
-  ).replace(/^export /gm, "");
+  ).replace('import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";', 'const REMOTE_HOST=' + JSON.stringify(REMOTE_HOST) + ',SSH_ALIAS=' + JSON.stringify(SSH_ALIAS) + ';').replace(/^export /gm, "");
   const script =
     source +
     "\ntry { console.log(JSON.stringify(installRouter({dryRun:" +
     JSON.stringify(dryRun) +
     "}))); } catch { console.log(JSON.stringify({error:'Remote router install refused; inspect existing files and managed blocks'})); process.exitCode=1; }";
   return new Promise((yes, no) => {
-    const child = spawn("ssh", ["remote", "node", "--input-type=module", "-"], {
+    const child = spawn("ssh", [SSH_ALIAS, "node", "--input-type=module", "-"], {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });

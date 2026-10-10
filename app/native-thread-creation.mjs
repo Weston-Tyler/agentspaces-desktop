@@ -1,3 +1,4 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 import { createHash } from "node:crypto";
 import { CodexReadAdapter } from "./native.mjs";
 import { CodexQueueAdapter } from "./codex-queue.mjs";
@@ -15,7 +16,7 @@ function bounded(operation, milliseconds, code) {
     timer = setTimeout(() => reject(fail(code)), milliseconds);
   })]).finally(() => clearTimeout(timer));
 }
-const defaultAdapter = ({ host }) => host === "remote"
+const defaultAdapter = ({ host }) => host === REMOTE_HOST
   ? new CodexQueueAdapter({ host })
   : new CodexReadAdapter({ host, enableThreadCreation: true });
 
@@ -35,7 +36,7 @@ export class NativeThreadCreation {
     if (!grant.content || !UUID.test(caller.nativeThreadId ?? "")) throw fail("native_thread_creation_source_denied");
     if (!profile?.active || index.fixture || profile.policy !== "local-retrieval" || caller.scopeId !== profile.id || caller.account !== profile.account) throw fail("native_thread_creation_scope_unavailable");
     const targetHost = host ?? caller.host;
-    if (!["local", "remote"].includes(targetHost) || !profile.hosts.includes(targetHost) || !profile.providers.includes("codex")) throw fail("native_thread_creation_target_denied");
+    if (!["local", REMOTE_HOST].includes(targetHost) || !profile.hosts.includes(targetHost) || !profile.providers.includes("codex")) throw fail("native_thread_creation_target_denied");
     if (targetHost !== caller.host && cwd === undefined) throw fail("native_thread_creation_cross_host_cwd_required");
     const targetCwd = cwd ?? caller.cwd;
     if (typeof targetCwd !== "string" || !targetCwd || targetCwd.length > 4096 || /[\x00-\x1f\x7f]/.test(targetCwd) || !hostPaths(targetHost).isAbsolute(targetCwd)) throw fail("native_thread_creation_absolute_cwd_required");
@@ -84,7 +85,7 @@ export class NativeThreadCreation {
       // unknown acceptance, even if no native UUID has reached this process.
       receipt.state = "dispatching";
       this.engine.store.save();
-      const response = await bounded(target.host === "remote"
+      const response = await bounded(target.host === REMOTE_HOST
         ? adapter.request("thread/start", { cwd: target.cwd, ephemeral: false }, 8000)
         : adapter.createEmptyThread(target.cwd), 12000, "native_thread_creation_request_timeout");
       const id = response?.thread?.id;
@@ -104,7 +105,7 @@ export class NativeThreadCreation {
       }
       try {
         this.assertCurrent(receipt, binding);
-        await bounded(target.host === "remote"
+        await bounded(target.host === REMOTE_HOST
           ? adapter.request("thread/name/set", { threadId: id, name: receipt.title }, 8000)
           : adapter.setThreadName(id, receipt.title), 12000, "native_thread_creation_naming_timeout");
         receipt.naming = "named";

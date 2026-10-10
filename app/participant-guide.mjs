@@ -8,7 +8,7 @@ export function participantGuide(input) {
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => !allowed.includes(key))
     || !absolute(input.cliPath) || !absolute(input.configPath)
     || !UUID.test(input.nativeThreadId ?? "") || !bounded(input.sessionId, 300)
-    || !["codex", "claude"].includes(input.provider) || !["local", "remote"].includes(input.host)
+    || !["codex", "claude"].includes(input.provider) || !(typeof input.host === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(input.host))
     || !bounded(input.account, 512) || !bounded(input.project, 512)
     || input.scopeId !== undefined && input.scopeId !== null && !bounded(input.scopeId, 512)
     || input.sourceVersion !== undefined && !bounded(input.sourceVersion, 2048)

@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import { randomUUID, randomInt, createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync, lstatSync, existsSync, renameSync } from "node:fs";
 import { join, isAbsolute, posix, resolve, dirname } from "node:path";
@@ -51,25 +52,25 @@ export class NativeConnections {
   }
   source(id) {
     const source = this.engine.session(id), grant = this.engine.permissions(source);
-    if (!["local", "remote"].includes(source.host ?? "local")) throw new Error("Native source host is unsupported");
+    if (!["local", REMOTE_HOST].includes(source.host ?? "local")) throw new Error("Native source host is unsupported");
     if (source.fixture || source.provider !== "claude") throw new Error("Choose a discovered native Claude Code thread");
     if (!grant.enrolled || !grant.content || !grant.share || !grant.retrieve) throw new Error("Enroll the native source and grant content, sharing and retrieval before connecting");
     if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(source.nativeThreadId ?? "")) throw new Error("Native source UUID is unavailable");
     if (source.status === "current") throw new Error("This source is marked active; use its native owner rather than open another controller");
     const cwd = source.cwd ?? this.engine.target(source).path;
-    if (typeof cwd !== "string" || !(source.host === "remote" ? posix.isAbsolute(cwd) : isAbsolute(cwd))) throw new Error("Native source working directory is unavailable");
+    if (typeof cwd !== "string" || !(source.host === REMOTE_HOST ? posix.isAbsolute(cwd) : isAbsolute(cwd))) throw new Error("Native source working directory is unavailable");
     return { source, cwd };
   }
   async prepare({ sessionId }) {
     const { source, cwd } = this.source(sessionId), host = source.host ?? "local", id = randomUUID();
     if (host === "local") assertUnlinkedParents(join(this.root, "native-connections", id));
     const connector = this.engine.issueConnector(sessionId);
-    const remotePort = host === "remote" ? randomInt(40000, 60000) : null;
-    const bridgeAddress = host === "remote" ? "http://127.0.0.1:" + remotePort : this.address;
+    const remotePort = host === REMOTE_HOST ? randomInt(40000, 60000) : null;
+    const bridgeAddress = host === REMOTE_HOST ? "http://127.0.0.1:" + remotePort : this.address;
     const entry = new URL("./claude-channel.mjs", import.meta.url);
     let configPath;
     try {
-    if (host === "remote") configPath = await this.remoteInstall({ id, token: connector.token, address: bridgeAddress, authority: new URL(this.address).host, source: readFileSync(entry, "utf8") });
+    if (host === REMOTE_HOST) configPath = await this.remoteInstall({ id, token: connector.token, address: bridgeAddress, authority: new URL(this.address).host, source: readFileSync(entry, "utf8") });
     else {
       const folder = join(this.root, "native-connections", id); mkdirSync(folder, { recursive: true, mode: 0o700 });
       assertUnlinkedParents(folder);
@@ -92,7 +93,7 @@ export class NativeConnections {
     const { source, cwd: currentCwd } = this.source(item.sessionId);
     if (source.nativeThreadId !== item.nativeThreadId || (source.host ?? "local") !== item.host || currentCwd !== item.cwd || source.project !== item.project || source.account !== item.account || (source.scopeId ?? null) !== item.scopeId) throw new Error("Prepared native source changed");
     return { args: ["--resume", item.nativeThreadId, "--mcp-config", item.configPath, "--dangerously-load-development-channels", "server:agentspaces"],
-      sshOptions: item.host === "remote" ? ["-o", "ExitOnForwardFailure=yes", "-R", "127.0.0.1:" + item.remotePort + ":127.0.0.1:" + new URL(this.address).port] : [] };
+      sshOptions: item.host === REMOTE_HOST ? ["-o", "ExitOnForwardFailure=yes", "-R", "127.0.0.1:" + item.remotePort + ":127.0.0.1:" + new URL(this.address).port] : [] };
   }
 }
 async function installRemoteChannel({ id, token, address, authority, source }) {
@@ -104,7 +105,7 @@ async function installRemoteChannel({ id, token, address, authority, source }) {
     "const verifyDependencies=runtime=>spawnSync(process.execPath,['--input-type=module','-e',\"import{readFileSync}from'node:fs';for(const[name,version]of[['@modelcontextprotocol/sdk','1.32.1'],['ws','8.22.0'],['zod','4.6.5']]){if(JSON.parse(readFileSync('node_modules/'+name+'/package.json','utf8')).version!==version)throw Error('Dependency version mismatch');}await import('@modelcontextprotocol/sdk/server/mcp.js');await import('ws');await import('zod');\"],{cwd:runtime,stdio:'ignore',timeout:10000}).status===0;\n" +
     "const configPath=installChannelAssets({base,payload,installDependencies,verifyDependencies});console.log(JSON.stringify({configPath}));";
   return new Promise((yes, no) => {
-    const child = spawn("ssh", ["remote", "node --input-type=module -"], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn("ssh", [SSH_ALIAS, "node --input-type=module -"], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
     let output = ""; const timeout = setTimeout(() => { child.kill(); no(new Error("Native bridge preparation timed out")); }, 100000);
     child.stdout.on("data", bytes => { output += bytes; if (output.length > 65536) child.kill(); }); child.stderr.on("data", () => {});
     child.on("error", () => { clearTimeout(timeout); no(new Error("Native bridge preparation unavailable")); });

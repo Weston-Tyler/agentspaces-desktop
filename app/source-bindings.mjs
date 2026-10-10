@@ -1,3 +1,4 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync, lstatSync, existsSync, renameSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
@@ -23,7 +24,7 @@ export class SourceBindings {
   }
   issueDevice({ host, provider }) {
     const profile = this.profile();
-    if (!["local", "remote"].includes(host) || !["codex", "claude"].includes(provider) || !profile.hosts.includes(host) || !profile.providers.includes(provider)) throw failure("native_registration_device_scope_denied");
+    if (!["local", REMOTE_HOST].includes(host) || !["codex", "claude"].includes(provider) || !profile.hosts.includes(host) || !profile.providers.includes(provider)) throw failure("native_registration_device_scope_denied");
     const token = randomBytes(32).toString("hex");
     this.engine.store.data.nativeRegistrationDevices[hash(token)] = { host, provider, scopeId: profile.id, account: profile.account, role: "native-registration-only", at: new Date().toISOString() };
     this.engine.store.save();

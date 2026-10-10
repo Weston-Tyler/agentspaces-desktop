@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import { randomUUID, randomInt, createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync, lstatSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
@@ -23,7 +24,7 @@ function runPrivateProcess(command, args, { input = "", timeoutMs = 20000 } = {}
   });
 }
 function createTunnel({ remotePort, localPort, host }) {
-  const child = spawn("ssh", ["-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3", "-R", "127.0.0.1:" + remotePort + ":127.0.0.1:" + localPort, host], { windowsHide: true, shell: false, stdio: ["ignore", "ignore", "pipe"] });
+  const child = spawn("ssh", ["-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3", "-R", "127.0.0.1:" + remotePort + ":127.0.0.1:" + localPort, SSH_ALIAS], { windowsHide: true, shell: false, stdio: ["ignore", "ignore", "pipe"] });
   child.stderr.on("data", () => {});
   let exited = false; child.on("error", () => { exited = true; }); child.on("close", () => { exited = true; });
   return { child, get exited() { return exited; }, close: () => child.kill("SIGTERM") };
@@ -35,7 +36,7 @@ async function verifyLocalDiscovery({ cliPath, configPath, nativeThreadId }) {
   return "verified-http-200";
 }
 export async function installRemoteParticipant({ connectionId, config, source, provenance }) {
-  if (!UUID.test(connectionId ?? "") || config?.schema !== 1 || !UUID.test(config.nativeThreadId ?? "") || !/^[a-f0-9]{64}$/.test(config.token ?? "") || !/^http:\/\/127\.0\.0\.1:\d+$/.test(config.address ?? "") || !/^127\.0\.0\.1:\d+$/.test(config.authority ?? "") || config.host !== "remote" || !["codex", "claude"].includes(config.provider) || typeof source !== "string" || !source || source.length > 131072) throw error("Invalid managed participant installation payload");
+  if (!UUID.test(connectionId ?? "") || config?.schema !== 1 || !UUID.test(config.nativeThreadId ?? "") || !/^[a-f0-9]{64}$/.test(config.token ?? "") || !/^http:\/\/127\.0\.0\.1:\d+$/.test(config.address ?? "") || !/^127\.0\.0\.1:\d+$/.test(config.authority ?? "") || config.host !== REMOTE_HOST || !["codex", "claude"].includes(config.provider) || typeof source !== "string" || !source || source.length > 131072) throw error("Invalid managed participant installation payload");
   participantGuide({ ...provenance, cliPath: "/pending/participant-cli.mjs", configPath: "/pending/participant.json", sessionId: config.sessionId, nativeThreadId: config.nativeThreadId, provider: config.provider, host: config.host });
   const payload = JSON.stringify({ connectionId, config, source, provenance });
   const script = `import{mkdirSync,writeFileSync,readFileSync,lstatSync,existsSync,renameSync}from'node:fs';import{homedir}from'node:os';import{join,resolve,dirname}from'node:path';import{createHash,randomUUID}from'node:crypto';import{spawnSync}from'node:child_process';
@@ -49,7 +50,7 @@ const dir=join(base,'connections',p.connectionId);assertUnlinkedParents(dir);mkd
 const usageGuidePath=join(dir,'USE.md');writeFileSync(usageGuidePath,participantGuide({...p.provenance,cliPath,configPath,nodeBinary:process.execPath,shell:'bash',sessionId:p.config.sessionId,nativeThreadId:p.config.nativeThreadId,provider:p.config.provider,host:p.config.host}),{flag:'wx',mode:0o600});
 let verified=false;const deadline=Date.now()+12000;while(Date.now()<deadline){const check=spawnSync(process.execPath,[cliPath,'--config',configPath,'--source',p.config.nativeThreadId,'discover'],{encoding:'utf8',timeout:2000,maxBuffer:65536});if(check.status===0){try{const result=JSON.parse(check.stdout);if(result.nativeThreadId===p.config.nativeThreadId&&Array.isArray(result.result)){verified=true;break;}}catch{}}await new Promise(resolve=>setTimeout(resolve,250));}
 if(!verified)throw Error('Participant discovery unavailable');console.log(JSON.stringify({configPath,cliPath,usageGuidePath,transportStatus:'verified-http-200'}));`;
-  const result = await runPrivateProcess("ssh", ["remote", "node --input-type=module -"], { input: script, timeoutMs: 30000 });
+  const result = await runPrivateProcess("ssh", [SSH_ALIAS, "node --input-type=module -"], { input: script, timeoutMs: 30000 });
   if (typeof result.configPath !== "string" || !result.configPath.endsWith("/connections/" + connectionId + "/participant.json") || result.usageGuidePath !== result.configPath.slice(0, -"participant.json".length) + "USE.md" || typeof result.cliPath !== "string" || !/\/participant-runtime\/participant-cli-[a-f0-9]{64}\.mjs$/.test(result.cliPath) || result.transportStatus !== "verified-http-200") throw error("Participant installation result was not verified");
   return result;
 }
@@ -61,7 +62,7 @@ export class ParticipantConnections {
     this.reconnectMinMs = reconnectMinMs; this.reconnectMaxMs = reconnectMaxMs; this.reconnectAttempts = 0; this.reconnectTimer = null;
     this.tunnels = new Map(); this.tunnelPending = new Map(); this.closed = false;
     const saved = engine.store.data.participantBridge;
-    const valid = saved && typeof saved === "object" && !Array.isArray(saved) && Object.keys(saved).length === 3 && saved.host === "remote" && Number.isInteger(saved.remotePort) && saved.remotePort > 1023 && saved.remotePort <= 65535 && saved.authority === new URL(address).host;
+    const valid = saved && typeof saved === "object" && !Array.isArray(saved) && Object.keys(saved).length === 3 && saved.host === REMOTE_HOST && Number.isInteger(saved.remotePort) && saved.remotePort > 1023 && saved.remotePort <= 65535 && saved.authority === new URL(address).host;
     this.savedBridge = valid ? { ...saved } : null;
     this.bridgeRestore = { status: valid ? "restoring" : saved ? "ignored-invalid-record" : "not-configured" };
     // Restore only the app-owned transport. This never creates a connector,
@@ -76,7 +77,7 @@ export class ParticipantConnections {
   }
   retain(tunnel) {
     if (this.closed || tunnel.exited || this.tunnels.get(tunnel.key) !== tunnel) throw error('Owned participant tunnel unavailable');
-    const record = { host: 'remote', remotePort: tunnel.remotePort, authority: new URL(this.address).host };
+    const record = { host: REMOTE_HOST, remotePort: tunnel.remotePort, authority: new URL(this.address).host };
     this.engine.store.data.participantBridge = record; this.engine.store.save();
     this.savedBridge = record; tunnel.uses++;
   }
@@ -94,20 +95,20 @@ export class ParticipantConnections {
   source(sessionId) {
     if (this.closed) throw error("Participant connection service closed");
     const source = this.engine.session(sessionId), grant = this.engine.permissions(source);
-    if (source.fixture || !["codex", "claude"].includes(source.provider) || !["local", "remote"].includes(source.host ?? "local") || !UUID.test(source.nativeThreadId ?? "")) throw error("Supported discovered native source required");
+    if (source.fixture || !["codex", "claude"].includes(source.provider) || !["local", REMOTE_HOST].includes(source.host ?? "local") || !UUID.test(source.nativeThreadId ?? "")) throw error("Supported discovered native source required");
     if (!grant.enrolled || !grant.retrieve || !grant.share) throw error("Participant enrollment, retrieval and sharing grants required");
     return source;
   }
   async tunnel() {
     if (this.closed) throw error("Participant connection service closed");
-    const key = "remote:" + new URL(this.address).port;
+    const key = REMOTE_HOST + ":" + new URL(this.address).port;
     const existing = this.tunnels.get(key); if (existing && !existing.exited) return existing;
     if (this.tunnelPending.has(key)) return this.tunnelPending.get(key);
     if (this.tunnels.size + this.tunnelPending.size >= 4) throw error("Owned participant tunnel limit reached");
     const pending = (async () => {
       let remotePort = this.savedBridge?.remotePort ?? randomInt(40000, 60000); const localPort = Number(new URL(this.address).port);
       if (!this.savedBridge && remotePort === localPort) remotePort = remotePort < 59999 ? remotePort + 1 : remotePort - 1;
-      const handle = await this.tunnelFactory({ remotePort, localPort, host: "remote" });
+      const handle = await this.tunnelFactory({ remotePort, localPort, host: REMOTE_HOST });
       if (this.closed || handle.exited || handle.child?.exitCode != null) { handle.close(); throw error("Owned participant tunnel unavailable"); }
       const tunnel = { key, remotePort, handle, exited: false, uses: this.savedBridge ? 1 : 0 };
       const exited = () => { tunnel.exited = true; this.bridgeRestore.status = "unavailable"; if (this.tunnels.get(key) === tunnel) { this.tunnels.delete(key); this.scheduleReconnect(); } };
@@ -124,7 +125,7 @@ export class ParticipantConnections {
     if (snapshot.host === "local") assertUnlinkedParents(join(this.root, "native-connections", connectionId));
     const connector = this.engine.issueConnector(sessionId); let tunnel;
     try {
-      if (snapshot.host === "remote") tunnel = await this.tunnel();
+      if (snapshot.host === REMOTE_HOST) tunnel = await this.tunnel();
       if (tunnel?.exited) throw error("Participant tunnel exited before verification");
       const address = tunnel ? "http://127.0.0.1:" + tunnel.remotePort : this.address;
       const config = { schema: 1, address, authority: new URL(this.address).host, token: connector.token, sessionId, nativeThreadId: snapshot.nativeThreadId, host: snapshot.host, provider: snapshot.provider };

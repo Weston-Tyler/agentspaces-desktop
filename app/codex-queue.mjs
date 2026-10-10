@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { Duplex } from "node:stream";
@@ -21,7 +22,7 @@ function finiteNativePolicy(sandbox, approval, reviewer, fullAccessGranted = fal
 }
 export class CodexQueueAdapter {
   constructor({
-    host = "remote",
+    host = REMOTE_HOST,
     spawnProcess = spawn,
     persistReceipt,
     loadReceipt = async () => null,
@@ -30,7 +31,7 @@ export class CodexQueueAdapter {
     pollIntervalMs = 2000,
     queueWaitTimeoutMs = 1800000,
   } = {}) {
-    if (host !== "remote") throw fail("shared_daemon_host_not_qualified");
+    if (host !== REMOTE_HOST) throw fail("shared_daemon_host_not_qualified");
     if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 20 || pollIntervalMs > 5000 || !Number.isInteger(queueWaitTimeoutMs) || queueWaitTimeoutMs < 20 || queueWaitTimeoutMs > 1800000) throw fail("invalid_native_delivery_poll_bound");
     Object.assign(this, { host, spawnProcess, persistReceipt, loadReceipt, persistPermissionProof, loadPermissionProof });
     this.events = new EventEmitter();
@@ -48,7 +49,7 @@ export class CodexQueueAdapter {
     const { default: WebSocket } = await import("ws");
     this.child = this.spawnProcess(
       "ssh",
-      ["remote", "codex app-server proxy"],
+      [SSH_ALIAS, "codex app-server proxy"],
       { windowsHide: true, shell: false, stdio: ["pipe", "pipe", "pipe"] },
     );
     this.child.stderr.on("data", () => {});

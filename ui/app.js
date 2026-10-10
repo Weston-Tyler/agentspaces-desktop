@@ -211,7 +211,7 @@ function render() {
   if (page === "home") mountHomeChat($("#view"), { api, notice, state });
   if (page === "native") mountNativeChat($("#view"), state, { api, notice });
   if (page === "advanced")
-    mountAsk($("#view"), { api, notice }).catch((error) =>
+    mountAsk($("#view"), { api, notice, remoteHost: state.remoteHost }).catch((error) =>
       notice(error.message, true),
     );
   if (page === "discussions")
@@ -219,7 +219,7 @@ function render() {
       notice(error.message, true),
     );
   if (page === "workspace") {
-    $("#view").replaceChildren(workspacePage({ ...state.workspace, demoAvailable: state.demoAvailable }));
+    $("#view").replaceChildren(workspacePage({ ...state.workspace, demoAvailable: state.demoAvailable, remoteHost: state.remoteHost }));
     workspaceHydrate(api).catch((error) => notice(error.message, true));
   }
   if (page === "workspace" && state.workspace.profile?.active) {
@@ -437,7 +437,7 @@ document.addEventListener("click", async (event) => {
       await refresh();
     }
     if (a === "probe-remote") {
-      await api("native/probe", { host: "remote" });
+      await api("native/probe", { host: state.remoteHost ?? "remote" });
       notice(
         "Native versions detected on remote over existing SSH. No session metadata or content was accessed.",
       );

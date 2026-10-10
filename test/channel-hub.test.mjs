@@ -163,3 +163,11 @@ test('pending channel input cannot cross a changed source boundary through a fre
   f.hub.connect(replacement, async data => f.sent.push(data)); await f.hub.flush(f.ids[1]);
   assert.equal(f.sent.length, 0); assert.equal(f.engine.store.data.channelReceipts[f.args.requestId].status, 'channel-access-changed; not dispatched');
 });
+test('update drain retains known-unsent channel message and resumes exactly once', async t => {
+  const f=setup(t); let allowed=false; f.engine.dispatchAllowed=()=>allowed;
+  const receipt=await f.hub.deliver(f.args);
+  assert.equal(receipt.status,'waiting-for-native-transport');assert.equal(f.sent.length,0);
+  await f.hub.flush(f.ids[1]); assert.equal(f.sent.length,0);
+  allowed=true; await f.hub.flush(f.ids[1]);await f.hub.flush(f.ids[1]);
+  assert.equal(f.sent.length,1);assert.equal(f.sent[0].meta.request_id,f.args.requestId);
+});

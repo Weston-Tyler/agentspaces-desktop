@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "../app/remote-host.mjs";
 import { spawn } from "node:child_process";
 import {
   existsSync,
@@ -126,7 +127,7 @@ child.stdout.on("data", (b) => {
                 JSON.stringify([
                   request.entryId,
                   request.nativeThreadId,
-                  "remote",
+                  SSH_ALIAS,
                 ]),
               )
               .digest("hex")
@@ -214,7 +215,7 @@ try {
   await fabric.connect({ host: "127.0.0.1", port, groupId });
   if (!recovery)
     await new Promise((yes, no) => {
-      const mkdir = spawn("ssh", ["remote", "mkdir -m 700 -- " + scratch], {
+      const mkdir = spawn("ssh", [SSH_ALIAS, "mkdir -m 700 -- " + scratch], {
         windowsHide: true,
         stdio: "ignore",
       });
