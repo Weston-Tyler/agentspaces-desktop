@@ -319,3 +319,13 @@ test('pre-dispatch transport failure remains recoverable beyond three attempts w
   await f.hub.wait(f.args.requestId); assert.equal(f.counters.answer, 1);
   await f.hub.recoverUndispatched(); assert.equal(f.counters.answer, 1);
 });
+test('update drain records known-unsent Codex input without opening native client and recovers once', async t => {
+  const f=setup();t.after(()=>f.hub.close());let allowed=false;f.engine.dispatchAllowed=()=>allowed;
+  f.hub.dispatch(f.args);const receipt=await f.hub.wait(f.args.requestId);
+  assert.equal(receipt.reasonCode,'companion_update_deferred');assert.equal(receipt.undispatched,true);
+  assert.equal(f.adapters.length,0);assert.deepEqual((await f.hub.recoverUndispatched()).recovered,[]);
+  allowed=true;f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].nextRetryAt=new Date(0).toISOString();
+  assert.deepEqual((await f.hub.recoverUndispatched()).recovered,[f.args.requestId]);
+  await f.hub.wait(f.args.requestId);assert.deepEqual((await f.hub.recoverUndispatched()).recovered,[]);
+  assert.equal(f.adapters.length,1);
+});

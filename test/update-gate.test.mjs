@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { UpdateGate } from '../app/update-gate.mjs';
+test('update drain defers for active resources, requires exact lease and rechecks before commit', () => {
+  let blockers = ['embedded-native-process']; let now = 1000;
+  const gate = new UpdateGate({ blockers: () => blockers, clock: () => now });
+  assert.equal(gate.status().draining, false);
+  const lease = gate.prepare({ candidate: 'a'.repeat(64) });
+  assert.equal(lease.ready, false);
+  assert.throws(() => gate.commit(lease.token), /update_busy/);
+  blockers = []; assert.equal(gate.status().ready, true);
+  assert.throws(() => gate.commit('wrong'), /update_lease_invalid/);
+  blockers = ['native-submission-unacknowledged'];
+  assert.throws(() => gate.commit(lease.token), /update_busy/);
+  blockers = []; assert.equal(gate.commit(lease.token).committed, true);
+  assert.equal(gate.draining, true);
+});
+test('abandoned drain expires without cancelling work; only exact owner lease can abort', () => {
+  let now = 0;
+  const gate = new UpdateGate({ blockers: () => [], clock: () => now });
+  assert.throws(() => gate.prepare({ candidate: 'bad' }), /candidate_hash_required/);
+  const lease = gate.prepare({ candidate: 'b'.repeat(64) });
+  assert.throws(() => gate.prepare({ candidate: 'c'.repeat(64) }), /update_already_prepared/);
+  assert.throws(() => gate.abort('wrong'), /update_lease_invalid/);
+  assert.equal(gate.status().token, undefined);
+  now = 300001; assert.equal(gate.draining, false);
+  assert.throws(() => gate.commit(lease.token), /update_lease_invalid/);
+  const next = gate.prepare({ candidate: 'b'.repeat(64) }); gate.abort(next.token);
+  assert.equal(gate.draining, false);
+});

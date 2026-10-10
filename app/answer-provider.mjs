@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join, resolve, dirname, basename } from "node:path";
 import { NATIVE_VERSION_PINS, qualifiedNativeVersion } from './native-versions.mjs';
 
+const activeNativeProcesses = new Set();
+export const activeNativeProcessCount = () => activeNativeProcesses.size;
+
 export const ANSWER_VERSION_PINS = NATIVE_VERSION_PINS;
 const failure = (code, uncertainOutcome = false) =>
   Object.assign(new Error(code), { code, uncertainOutcome });
@@ -54,6 +57,7 @@ function collect(
         stdio: ["pipe", "pipe", "pipe"],
         ...(cwd ? { cwd } : {}),
       });
+      if (preserveProcess) activeNativeProcesses.add(child);
       onProcessStart?.();
       child.on("error", () =>
         finish(failure("native_process_unavailable", dispatched)),
@@ -77,6 +81,7 @@ function collect(
         }
       });
       child.on("close", async (code) => {
+        activeNativeProcesses.delete(child);
         try { await onProcessClose?.(); }
         catch { return finish(failure("native_cleanup_failed", dispatched)); }
         if (settled) return;

@@ -264,3 +264,28 @@ test('browser module dependencies are served as JavaScript',async t=>{
  }
  assert(seen.has('/answer-connection.js'));assert(seen.has('/coordination.js'));
 });
+test('update API defers embedded work, blocks new mutations before dispatch and preserves reads', async t => {
+  const app = await setup(t), headers = {Authorization:`Bearer ${app.admin}`, 'Content-Type':'application/json'};
+  const post = (path, data) => fetch(app.address+path,{method:'POST',headers,body:JSON.stringify(data)});
+  const page = await fetch(app.address), cookie = page.headers.get('set-cookie').split(';')[0];
+  assert.equal((await fetch(app.address+'/api/updates/status',{headers:{Cookie:cookie}})).status,403);
+  const original = app.terminals.list;
+  app.terminals.list = () => [{status:'running'}];
+  const prepared = await (await post('/api/updates/prepare',{candidate:'a'.repeat(64)})).json();
+  assert.equal(prepared.ready,false); assert.ok(prepared.blockers.includes('embedded-native-terminal'));
+  const refused = await post('/api/sample',{}); assert.equal(refused.status,503);
+  assert.equal((await refused.json()).undispatched,true);
+  assert.equal((await fetch(app.address+'/api/state',{headers})).status,200);
+  assert.equal((await post('/api/updates/commit',{token:prepared.token})).status,400);
+  app.terminals.list = original;
+  assert.equal((await (await fetch(app.address+'/api/updates/status',{headers})).json()).ready,true);
+  // Native daemon work with an acknowledged input is independent of the companion.
+  app.codexAgents.aborters.set('acked',new AbortController());
+  app.store.data.codexDiscussionNativeReceipts.acked={queuedSubmissionId:'retained-input'};
+  assert.equal(app.updateGate.status().ready,true);
+  app.codexAgents.aborters.set('unknown',new AbortController());
+  assert.ok(app.updateGate.status().blockers.includes('native-submission-unacknowledged'));
+  app.codexAgents.aborters.clear();
+  await post('/api/updates/abort',{token:prepared.token});
+  assert.equal(app.engine.dispatchAllowed(),true);
+});

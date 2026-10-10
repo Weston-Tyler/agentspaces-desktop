@@ -98,7 +98,7 @@ export class ChannelHub {
   async sendPending(receipt) {
     // Change this durable state before calling transport, including a transport
     // that throws synchronously. Never retry an allocated/uncertain send.
-    if (receipt.status !== 'waiting-for-native-transport') return;
+    if (receipt.status !== 'waiting-for-native-transport' || this.engine.dispatchAllowed?.() === false) return;
     const connection = this.connections.get(receipt.sessionId); if (!connection) return;
     let message;
     try {

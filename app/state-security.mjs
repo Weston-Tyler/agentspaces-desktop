@@ -2,18 +2,21 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, chmodSync } from "node:fs";
 import { resolve, parse } from "node:path";
 const protectedRoots = new Set();
-export function protectStateDirectory(directory, extraNames = []) {
-  const root = resolve(directory);
-  if (protectedRoots.has(root)) return;
-  if (root === parse(root).root)
-    throw new Error("Refusing a filesystem root as application state");
-  mkdirSync(root, { recursive: true });
+export function assertStateDirectoryNames(root, extraNames = []) {
   const allowed =
     /^(settings\.json|runtime\.json|workspace-index\.json(?:\.tmp)?|founding\.cbor(?:\.tmp)?|fabric-keys|agent-keys|effect-receipts|native-connections|work-board|stdout\.log|stderr\.log|settings\.json\.\d+\.tmp)$/;
   if (readdirSync(root).some((name) => !allowed.test(name) && !extraNames.includes(name)))
     throw new Error(
       "State directory contains unrelated files; choose an application-owned directory",
     );
+}
+export function protectStateDirectory(directory, extraNames = []) {
+  const root = resolve(directory);
+  if (protectedRoots.has(root)) return;
+  if (root === parse(root).root)
+    throw new Error("Refusing a filesystem root as application state");
+  mkdirSync(root, { recursive: true });
+  assertStateDirectoryNames(root, extraNames);
   if (process.platform === "win32") {
     // Replace the DACL atomically: removing inheritance alone retains explicit
     // grants to unrelated accounts. Canonical privileged OS identities remain;

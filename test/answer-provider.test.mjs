@@ -1,3 +1,4 @@
+import { activeNativeProcessCount } from '../app/answer-provider.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -350,9 +351,11 @@ test("availability exposes no credentials and known exec output may omit turn id
 });
 
 test('timed-out native answer keeps its scratch until the native process exits',async()=>{
+ const before=activeNativeProcessCount();
  const f=fixture({hang:true});await assert.rejects(provider(f).answer({question:'Q',budget:{...budget,timeoutMs:15}}),{code:'native_timeout'});
+ assert.equal(activeNativeProcessCount(),before+1);
  const call=f.calls.at(-1);assert.equal(existsSync(call.options.cwd),true);
  call.child.emit('close',0);
  for(let n=0;n<30&&existsSync(call.options.cwd);n++)await new Promise(r=>setTimeout(r,10));
- assert.equal(existsSync(call.options.cwd),false);assert.ok(!call.child.killed);
+ assert.equal(existsSync(call.options.cwd),false);assert.ok(!call.child.killed);assert.equal(activeNativeProcessCount(),before);
 });
