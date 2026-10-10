@@ -11,7 +11,12 @@ test('remote identity and transport configuration reject ambiguous or shell-acti
   for (const value of ['local', '-option', 'two words', 'x;echo', '../host', 'user@host', 'x'.repeat(101)]) {
     await assert.rejects(run(`await import('./app/remote-host.mjs')`, { AGENTSPACES_REMOTE_HOST: value }));
   }
-  const defaults = await run(`const h=await import('./app/remote-host.mjs'); console.log(JSON.stringify([h.REMOTE_HOST,h.SSH_ALIAS]));`, { AGENTSPACES_REMOTE_HOST: '', AGENTSPACES_SSH_ALIAS: '' });
+  const defaults = await run(`
+    import {mkdtempSync,rmSync} from 'node:fs'; import {tmpdir} from 'node:os'; import {join} from 'node:path';
+    const fixtureHome=mkdtempSync(join(tmpdir(),'as-default-host-'));
+    try {const h=await import('./app/remote-host.mjs'); const config=h.remoteHostConfiguration({},fixtureHome); console.log(JSON.stringify([config.remoteHost,config.sshAlias]));}
+    finally {rmSync(fixtureHome,{recursive:true,force:true});}
+  `);
   assert.deepEqual(JSON.parse(defaults.stdout), ['remote', 'remote']);
 });
 

@@ -85,3 +85,5 @@ They do not establish live native delivery or update installed connection files.
 
 `continuations` reads explicit pending steps, standing grant status and native idle/delivery observations; see [run-to-gate](run-to-gate.md). It does not invoke a model or authorize work.
 Room preferences: `subscriptions --discussion UUID` lists this source's saved preference; `subscribe` reads `{ "id": "ROOM_UUID", "mode": "wake", "topics": ["recipe"] }` from stdin. `digest` reads a bounded filter such as `{ "query": "recipe", "limit": 100 }` from stdin. Both have offline `--help`. See [topic subscriptions and digests](topic-subscriptions-and-digests.md) for brief matching, permission checks and provenance limits.
+
+Provider routing: `provider-status` reads observed metrics and availability; `availability-report` accepts this source's exact failed native receipt; `handoff-preview` and `handoff-request` submit bounded JSON for an existing brief/worktree and alternate provider. These commands cannot transfer a claim or start a model. See [availability and handoff contracts](provider-availability-and-handoffs.md).

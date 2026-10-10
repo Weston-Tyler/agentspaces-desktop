@@ -1,6 +1,7 @@
 import { UpdateGate } from './update-gate.mjs';
 import {nativeWakeReadiness,ensureNativeConnection} from './native-readiness.mjs';
 import {ContinuationWaker} from './work-continuation.mjs';
+import { ProviderRouting } from "./provider-routing.mjs";
 import { RoomSubscriptions } from "./room-subscriptions.mjs";
 import { HeadlessJobs } from './headless-jobs.mjs';
 import { OwnerApprovalAuth } from './owner-approval-auth.mjs';
@@ -48,6 +49,7 @@ const staticFiles = {
   "/native-controls.js": "native-controls.js",
   "/work-board.js": "work-board.js",
   "/digest.js": "digest.js",
+  "/provider-routing.js": "provider-routing.js",
   "/coordination.js": "coordination.js",
   "/workspace.js": "workspace.js",
   "/discussions.js": "discussions.js",
@@ -91,6 +93,7 @@ export async function startServer({
     if (engine.workspace.running) desktopStartup.promise.then(() => { connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts }); });
     else connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts });
   }
+  const providerRouting = new ProviderRouting(engine);
   const roomSubscriptions = new RoomSubscriptions(engine);
   const ownerApprovals = new OwnerApprovalAuth(store, {clock:engine.clock});
   const ownerBrowser = new OwnerBrowserSession(store), recentHistory = new RecentHistory(store);
@@ -295,6 +298,10 @@ export async function startServer({
       if (
         connector &&
         ![
+          "/api/providers/status",
+          "/api/providers/availability",
+          "/api/providers/handoff/preview",
+          "/api/providers/handoff/request",
           "/api/digest",
           "/api/discussions/subscriptions",
           "/api/discussions/subscription",
@@ -360,6 +367,14 @@ export async function startServer({
         }
         case "/api/approvals/verify":
           result = await engine.workBoard.verifyApproval(connector, data); break;
+        case "/api/providers/status":
+          result = providerRouting.view(data, connector); break;
+        case "/api/providers/availability":
+          result = providerRouting.report(data, connector); break;
+        case "/api/providers/handoff/preview":
+          result = providerRouting.preview(data, connector); break;
+        case "/api/providers/handoff/request":
+          result = await providerRouting.request(data, connector); break;
         case "/api/digest":
           result = roomSubscriptions.digest(data, connector); break;
         case "/api/discussions/subscriptions":
@@ -448,7 +463,7 @@ export async function startServer({
             ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
             unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
             headlessJobs: headlessJobs.capabilities(),
-            availableTools: ['ensure_native_connection','request_headless_job','list_headless_jobs','read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            availableTools: ['read_provider_status','report_native_availability','preview_provider_handoff','request_provider_handoff','ensure_native_connection','request_headless_job','list_headless_jobs','read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
           break;
         }

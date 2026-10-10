@@ -124,7 +124,7 @@ test("MCP protocol advertises source and group tools and preserves native reques
   } });
   const client = new Client({ name: "fixture-native-bootstrap-client", version: "1" }), [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   await bootstrap.server.connect(serverTransport); await client.connect(clientTransport);
-  assert.equal((await client.listTools()).tools.length, 35);
+  assert.equal((await client.listTools()).tools.length, 39);
   const reply = await client.callTool({ name: "discover_group_discussions", arguments: {}, _meta: { threadId: UUID } });
   assert.equal(reply.isError, undefined); assert.deepEqual(nativeIds, [UUID]);
   const denied = await client.callTool({ name: "discover_group_discussions", arguments: {} });
@@ -235,4 +235,17 @@ test('scoped room errors expose only allowlisted actionable codes and hide provi
  const address='http://127.0.0.1:'+server.address().port,config={address,authority:new URL(address).host,token:scopedToken};
  for(code of ['discussion_source_unavailable','discussion_participant_required','discussion_retrieval_denied','discussion_sharing_denied','discussion_self_registration_disabled','discussion_member_limit'])await assert.rejects(scopedRequest(config,'/api/discussions/context',{}),error=>error.message===code&&!error.message.includes('private'));
  code='arbitrary_private_diagnostic';await assert.rejects(scopedRequest(config,'/api/discussions/context',{}),error=>error.code==='scoped_registration_or_tool_denied');
+});
+
+test('Provider MCP status and handoff preview retain bound source; availability cannot submit owner settings',async()=>{
+ const {configPath,participantConfig}=await setup('codex'),calls=[];
+ const bootstrap=await createNativeBootstrap({configPath,requestImpl:async(config,path,body)=>{calls.push({path,body});return path==='/api/native/register'?{participantConfig}:{synthetic:true};}});
+ const invoke=(name,args)=>bootstrap.callTool({params:{name,arguments:args,_meta:{threadId:UUID}}});
+ try{
+  await invoke('read_provider_status',{});
+  await invoke('report_native_availability',{nativeRequestId:'synthetic-receipt',minutes:5});
+  await invoke('preview_provider_handoff',{workEntryId:'synthetic-work',workHash:'a'.repeat(64),worktreeId:'worktree:synthetic',targetSessionId:'claude@local:'+OTHER});
+  assert.deepEqual(calls.filter(row=>row.path!=='/api/native/register').map(row=>row.path),['/api/providers/status','/api/providers/availability','/api/providers/handoff/preview']);
+  const count=calls.length;await assert.rejects(invoke('report_native_availability',{provider:'claude',state:'available'}),/bounded_native_tool/);assert.equal(calls.length,count);
+ }finally{await bootstrap.server.close();}
 });

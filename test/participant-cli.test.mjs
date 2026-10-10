@@ -236,3 +236,15 @@ test('Topic subscriptions and digest expose offline schemas and preserve scoped 
   await assert.rejects(runParticipantCli(args('digest'),{input:JSON.stringify({limit:201})}),/bounded_subscription/);
   assert.equal(requests.length,3);
 });
+
+test('Provider status and exact handoff CLI requests preserve scope and reject owner impersonation',async t=>{
+ const {args,requests}=await setup(t),input={workEntryId:'synthetic-work',workHash:'a'.repeat(64),worktreeId:'worktree:synthetic',targetSessionId:'claude@local:'+GROUP};
+ await runParticipantCli(args('provider-status'));
+ await runParticipantCli(args('availability-report'),{input:JSON.stringify({nativeRequestId:'synthetic-receipt',minutes:5})});
+ await runParticipantCli(args('handoff-preview'),{input:JSON.stringify(input)});
+ await runParticipantCli(args('handoff-request'),{input:JSON.stringify({...input,proposalHash:'b'.repeat(64),deliveryId:'handoff-cli-001'})});
+ assert.deepEqual(requests.map(row=>row.path),['/api/providers/status','/api/providers/availability','/api/providers/handoff/preview','/api/providers/handoff/request']);
+ await assert.rejects(runParticipantCli(args('availability-report'),{input:JSON.stringify({provider:'claude',state:'available'})}),/bounded_provider/);
+ assert.equal((await runParticipantCli(['handoff-request','--help'])).stdinSchema.required.includes('proposalHash'),true);
+ assert.equal(requests.length,4);
+});
