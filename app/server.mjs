@@ -1,3 +1,5 @@
+import { OwnerApprovalAuth } from './owner-approval-auth.mjs';
+import { notifyApproval } from './approval-notification.mjs';
 import http from "node:http";
 import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
@@ -81,6 +83,7 @@ export async function startServer({
     if (engine.workspace.running) desktopStartup.promise.then(() => { connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts }); });
     else connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts });
   }
+  const ownerApprovals = new OwnerApprovalAuth(store, {clock:engine.clock});
   const ownerBrowser = new OwnerBrowserSession(store), recentHistory = new RecentHistory(store);
   const admin = randomBytes(32).toString("hex"),
     instance = randomBytes(16).toString("hex");
@@ -279,8 +282,24 @@ export async function startServer({
         throw new Error("Connector has no granted workspace scope");
       let result;
       switch (url.pathname) {
+        case '/api/approvals/status':
+          result=ownerApprovals.status();break;
+        case '/api/approvals/configure':
+          if(!isAdmin)throw Error('Local administration required for owner password setup');
+          if(Object.keys(data).some(k=>!['password','currentPassword'].includes(k)))throw Error('Unknown owner setup field');
+          result=await ownerApprovals.configure(data.password,data.currentPassword);break;
+        case '/api/approvals/answer': {
+          if(connector)throw Error('Owner authentication required');
+          if(Object.keys(data).some(k=>!['password','decision'].includes(k)))throw Error('Unknown approval field');
+          if(!['decision_approve','decision_revoke'].includes(data.decision?.action))throw Error('Approval action required');
+          const proof=await ownerApprovals.verify(data.password,data.decision);
+          result=await engine.workBoard.mutate(data.decision,null,proof);
+          try {result.notification=await notifyApproval(engine,result,(group,message)=>routeConversation(engine,{codexAgents,channels},group,message));}
+          catch(error){result.notification={status:'not_delivered',reason:error.message};}
+          break;
+        }
         case "/api/decisions/list":
-          result = engine.workBoard.decisions(connector, data); break;
+          result = {...engine.workBoard.decisions(connector, data),ownerAuthentication:ownerApprovals.status()}; break;
         case "/api/machines/list":
           result = engine.workBoard.machines(connector, data); break;
         case "/api/decisions/change":
