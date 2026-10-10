@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -30,7 +31,7 @@ for (const variant of ['fixed-source', 'native-bootstrap', 'claude-channel']) {
     } else {
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
       if (variant === 'native-bootstrap') {
-        const root = await mkdtemp(join(tmpdir(), 'as-pagination-tools-'));
+        const root = await mkdtemp(join(realpathSync(tmpdir()), 'as-pagination-tools-'));
         t.after(() => rm(root, { recursive: true, force: true }));
         const configPath = join(root, 'device.json');
         await writeFile(configPath, JSON.stringify({ schemaVersion: 1, address: 'http://127.0.0.1:45111', authority: '127.0.0.1:45111', token: 'a'.repeat(64), host: 'local', provider: 'codex' }), { mode: 0o600 });
