@@ -149,6 +149,7 @@ test("real MCP SDK transport retrieves a fixture finding without invoking a mode
   );
   const tools = await client.listTools();
   assert.equal(tools.tools.length, 38);
+  assert.equal(tools.tools.find(tool=>tool.name==='request_headless_job').annotations.readOnlyHint, false);
   assert.ok(tools.tools.some(tool=>tool.name==='verify_owner_approval'));
   const discovered = await client.callTool({
     name: "discover_permitted_work",

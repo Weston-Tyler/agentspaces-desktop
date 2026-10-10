@@ -228,7 +228,12 @@ test('agents request exact headless payload through existing decisions without l
  const f=await fixture(t);
  const made=await f.call('/api/work-board/change',{action:'create',deliveryId:'headless-http-work',title:'Headless request',brief:'Synthetic',repository:'https://example.invalid/synthetic',base:'a'.repeat(40),allowedFiles:'src/test.js'});
  const payload={deliveryId:'headless-http-request',provider:'codex',cwd:f.source.cwd,workEntryId:made.body.entryId,briefText:'Synthetic exact brief',budget:{observationMs:1000,maxTurns:2,maxCostUsd:1}};
- const request=await f.call('/api/headless/request',payload);assert.equal(request.status,200);assert.equal(request.body.state,'blocked_requires_owner_launch');assert.deepEqual(request.body.launch,payload);
+ const {Client}=await import('@modelcontextprotocol/sdk/client/index.js'),{StdioClientTransport}=await import('@modelcontextprotocol/sdk/client/stdio.js'),{fileURLToPath}=await import('node:url');
+ const client=new Client({name:'synthetic-headless-decision-client',version:'1'});t.after(()=>client.close());
+ await client.connect(new StdioClientTransport({command:process.execPath,args:[fileURLToPath(new URL('../app/mcp.mjs',import.meta.url))],env:{...process.env,AGENTSPACES_URL:f.app.address,AGENTSPACES_CONNECTOR_TOKEN:f.token}}));
+ const tool=(await client.listTools()).tools.find(tool=>tool.name==='request_headless_job');assert.equal(tool.annotations.readOnlyHint,false);
+ const dispatched=await client.callTool({name:'request_headless_job',arguments:payload});assert.notEqual(dispatched.isError,true);
+ const request={body:JSON.parse(dispatched.content[0].text)};assert.equal(request.body.state,'blocked_requires_owner_launch');assert.deepEqual(request.body.launch,payload);
  const rows=await f.call('/api/decisions/list');assert.match(rows.body.items[0].value.question,/Synthetic exact brief/);
  const answered=await f.call('/api/decisions/change',{action:'decision_answer',deliveryId:'headless-http-answer',entryId:request.body.entryId,optionId:'approve_owner_launch',rationale:'Synthetic owner decision'},f.app.admin);assert.equal(answered.status,200);
  assert.equal((await f.call('/api/headless/list')).body.items.length,0);assert.equal(f.effects.nativeFactories,0);
