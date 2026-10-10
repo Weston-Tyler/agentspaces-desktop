@@ -1,6 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+const coordinationTools = {
+  list_decisions: {path:'/api/decisions/list',description:'Read shared questions, options, recommendations, blocked work and owner answers. Answers do not override native approvals.',schema:z.object({limit:z.number().int().min(1).max(200).default(100)}).strict()},
+  change_decision: {path:'/api/decisions/change',description:'Submit or withdraw your decision request. Only the owner can answer in the owner interface. Reuse deliveryId on retry.',write:true,schema:z.object({action:z.enum(['decision_create','decision_withdraw']),deliveryId:z.string().regex(/^[A-Za-z0-9-]{8,100}$/),entryId:z.string().max(100).optional(),title:z.string().max(200).optional(),question:z.string().max(12000).optional(),options:z.array(z.object({id:z.string().min(1).max(80),label:z.string().min(1).max(2000)}).strict()).min(2).max(8).optional(),recommendation:z.string().max(80).optional(),blockedWork:z.array(z.string().max(100)).max(20).optional(),rationale:z.string().max(8000).optional()}).strict()},
+  list_machine_queue: {path:'/api/machines/list',description:'Inspect configured machine slots, fair queue positions, runtime deadlines and reconciliation blockers. No machine job is started.',schema:z.object({}).strict()},
+  change_machine_request: {path:'/api/machines/change',description:'Request, heartbeat, acquire, cancel or release your machine reservation. Waiting requests need a heartbeat within 10 minutes. Runtime cap 15 minutes. Admission still requires actual host locks and gate; report release only after the process exits. Expired running work blocks admission until owner reconciliation. Reuse deliveryId on retry.',write:true,schema:z.object({action:z.enum(['machine_request','machine_heartbeat','machine_acquire','machine_cancel','machine_release']),deliveryId:z.string().regex(/^[A-Za-z0-9-]{8,100}$/),entryId:z.string().max(100).optional(),machineId:z.string().max(100).optional(),title:z.string().max(200).optional(),minutes:z.number().int().min(1).max(15).optional(),exclusive:z.boolean().optional(),priority:z.literal('normal').optional(),summary:z.string().max(8000).optional()}).strict()}
+};
 const workBoardTools = {
   list_work_items: { path: '/api/work-board/list', description: 'Read shared work briefs, exact claims, progress and evidence from the scoped companion-owned AgentSpaces replica. No inference; coordination records are not native authorization.', schema: z.object({limit:z.number().int().min(1).max(200).default(100)}).strict() },
   change_work_item: { path: '/api/work-board/change', description: 'Create, claim, update or complete shared work as this exact source. Reuse deliveryId on retries. Claims expire (default 15 minutes); only the current holder can update or complete, with evidence. No model is started or publication approved.', write:true,
@@ -38,6 +44,9 @@ async function call(path, data) {
       content: [{ type: "text", text: value.error ?? "Request denied" }],
     };
   return { content: [{ type: "text", text: JSON.stringify(value) }] };
+}
+for (const [name, tool] of Object.entries(coordinationTools)) {
+  server.registerTool(name,{description:tool.description,inputSchema:tool.schema.shape,annotations:{readOnlyHint:!tool.write,destructiveHint:false,openWorldHint:false}},async args=>call(tool.path,tool.schema.parse(args)));
 }
 for (const [name, tool] of Object.entries(workBoardTools)) {
   const inputSchema = name === 'list_work_items' ? { limit: z.number().int().min(1).max(200).default(100) } : {

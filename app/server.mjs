@@ -40,11 +40,13 @@ const staticFiles = {
   "/app.js": "app.js",
   "/native-controls.js": "native-controls.js",
   "/work-board.js": "work-board.js",
+  "/coordination.js": "coordination.js",
   "/workspace.js": "workspace.js",
   "/discussions.js": "discussions.js",
   "/ask.js": "ask.js",
   "/native-chat.js": "native-chat.js",
   "/home-chat.js": "home-chat.js",
+  "/answer-connection.js": "answer-connection.js",
 };
 const vendorFiles = {
   "/vendor/xterm.js": fileURLToPath(new URL("../node_modules/@xterm/xterm/lib/xterm.js", import.meta.url)),
@@ -241,6 +243,10 @@ export async function startServer({
       if (
         connector &&
         ![
+          "/api/decisions/list",
+          "/api/decisions/change",
+          "/api/machines/list",
+          "/api/machines/change",
           "/api/work-board/list",
           "/api/work-board/change",
           "/api/discover",
@@ -273,6 +279,16 @@ export async function startServer({
         throw new Error("Connector has no granted workspace scope");
       let result;
       switch (url.pathname) {
+        case "/api/decisions/list":
+          result = engine.workBoard.decisions(connector, data); break;
+        case "/api/machines/list":
+          result = engine.workBoard.machines(connector, data); break;
+        case "/api/decisions/change":
+          if (!String(data.action).startsWith('decision_')) throw new Error('Decision action required');
+          result = await engine.workBoard.mutate(data, connector); break;
+        case "/api/machines/change":
+          if (!String(data.action).startsWith('machine_')) throw new Error('Machine action required');
+          result = await engine.workBoard.mutate(data, connector); break;
         case "/api/work-board/list":
           result = engine.workBoard.view(connector, data); break;
         case "/api/work-board/change":
@@ -325,7 +341,7 @@ export async function startServer({
             findings: { discover: true, retrieveShared: true },
             ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
             unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
-            availableTools: ['list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            availableTools: ['list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
           break;
         }

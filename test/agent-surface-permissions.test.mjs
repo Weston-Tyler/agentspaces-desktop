@@ -168,3 +168,17 @@ test('work board exposes headless lifecycle only to current sharing sources', as
   assert.equal((await f.call('/api/work-board/change', create)).status, 400);
   assert.equal(f.effects.nativeFactories, 0);
 });
+
+test('coordination HTTP surfaces deny agent owner powers and revoked reads',async t=>{
+ const f=await fixture(t);
+ const create={action:'decision_create',deliveryId:'http-decision-0001',title:'Choose',question:'Which?',options:[{id:'a',label:'A'},{id:'b',label:'B'}],recommendation:'a'};
+ const made=await f.call('/api/decisions/change',create);assert.equal(made.status,200);
+ assert.equal((await f.call('/api/decisions/list')).body.items.length,1);
+ assert.equal((await f.call('/api/decisions/change',{action:'decision_answer',deliveryId:'http-answer-0001',entryId:made.body.entryId,optionId:'a',rationale:'Forged owner answer'})).status,400);
+ assert.equal((await f.call('/api/machines/change',{action:'machine_create',deliveryId:'http-machine-0001',name:'Synthetic',host:'remote',lockPaths:['/tmp/synthetic-lock']})).status,400);
+ assert.equal((await f.call('/api/machines/list')).status,200);
+ f.engine.store.data.grants[f.source.id].share=false;
+ assert.equal((await f.call('/api/decisions/list')).status,400);assert.equal((await f.call('/api/machines/list')).status,400);
+ assert.equal((await f.call('/api/decisions/change',create)).status,400);
+ assert.equal(f.effects.nativeFactories,0);
+});
