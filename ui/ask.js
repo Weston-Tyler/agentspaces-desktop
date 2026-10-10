@@ -112,7 +112,7 @@ export async function mountAsk(root, { api, notice }) {
   search.type = "button";
   const submit = node("button", "Ask", "primary");
   submit.type = "submit";
-  const cancel = node("button", "Cancel question", "secondary");
+  const cancel = node("button", "Stop waiting", "secondary");
   cancel.type = "button";
   cancel.hidden = true;
   form.append(

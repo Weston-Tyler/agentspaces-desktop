@@ -232,8 +232,7 @@ export class CodexDiscussionHub {
     catch { return { status: 'native-refresh-unavailable' }; }
     finally { adapter.close(); }
   }
-  close({ cancelNative = false } = {}) {
-    if (typeof cancelNative !== 'boolean') throw new Error('Native cancellation choice must be boolean');
+  close() {
     if (this.closePromise) return this.closePromise;
     this.closed = true; clearInterval(this.recoveryTimer);
     this.closePromise = (async () => {
@@ -245,12 +244,11 @@ export class CodexDiscussionHub {
       };
       // Closing the companion is not permission to cancel input already owned
       // by the native daemon. Disconnect persists uncertainty for later reads.
-      if (cancelNative) for (const abort of this.aborters.values()) abort.abort();
-      else detach();
+      detach();
       let timer;
       try { await Promise.race([Promise.allSettled([...pending, ...closures]), new Promise(resolve => { timer = setTimeout(resolve, 2000); })]); }
-      finally { clearTimeout(timer); if (cancelNative) detach(); }
-      return { status: 'closed', nativeCancellationRequested: cancelNative };
+      finally { clearTimeout(timer); }
+      return { status: 'closed', nativeCancellationRequested: false };
     })();
     return this.closePromise;
   }

@@ -41,7 +41,7 @@ export class NativeTerminals {
     if (resolveLaunch !== undefined && typeof resolveLaunch !== "function") throw new Error("Internal launch resolver must be a function");
     this.spawnProcess = spawnProcess; this.launchArgs = launchArgs; this.resolveLaunch = resolveLaunch; this.items = new Map();
   }
-  metadata(t) { return { id: t.id, provider: t.provider, host: t.host, status: t.status, intent: t.intent, connectionId: t.connectionId ?? null }; }
+  metadata(t) { return { id: t.id, provider: t.provider, host: t.host, status: t.status, intent: t.intent, attached: Boolean(t.attachment), connectionId: t.connectionId ?? null }; }
   list() { return [...this.items.values()].map(t => this.metadata(t)); }
   get(id) { const t = this.items.get(id); if (!t) throw new Error("Unknown native terminal"); return this.metadata(t); }
   active(id) { const t = this.items.get(id); if (!t || !["starting", "running"].includes(t.status)) throw new Error("Native terminal is closed"); return t; }
@@ -62,6 +62,7 @@ export class NativeTerminals {
     this.items.set(id, t);
     let resolveReady, rejectReady;
     const ready = new Promise((yes, no) => { resolveReady = yes; rejectReady = no; });
+    t.rejectReady = rejectReady;
     t.finish = event => {
       if (["closed", "exited", "failed"].includes(t.status)) return;
       t.status = event.status ?? "exited"; t.pendingOutput = ""; clearTimeout(t.timer);
@@ -87,7 +88,7 @@ export class NativeTerminals {
             }
           }
         } else if (message.type === "exit") t.finish({ status: "exited", exitCode: message.exitCode, signal: message.signal });
-        else if (message.type === "error") { t.finish({ status: "failed", code: "native_terminal_failed" }); t.child.kill(); }
+        else if (message.type === "error") { if (t.ready) this.close(id); else t.finish({ status: "failed", code: "native_terminal_failed" }); }
       });
       t.child.on("error", () => t.finish({ status: "failed", code: "native_terminal_failed" }));
       t.child.on("exit", () => t.finish({ status: "exited" }));
@@ -117,14 +118,21 @@ export class NativeTerminals {
   }
   close(id) {
     const t = this.items.get(id); if (!t || ["closed", "exited", "failed"].includes(t.status)) return;
-    t.finish({ status: "closed" });
-    try { t.child?.send({ type: "close" }); } catch {}
-    const kill = setTimeout(() => t.child?.kill(), 1000); kill.unref?.();
-    t.child?.once("exit", () => clearTimeout(kill));
+    clearTimeout(t.timer);
+    if (!t.ready) t.rejectReady(new Error("Native terminal observation ended before readiness"));
+    const attachment = t.attachment; t.attachment = null; t.pendingOutput = "";
+    try { attachment?.onExit?.({ status: "detached", id }); } catch {}
+
     while (this.items.size > 40) {
       const old = [...this.items].find(([, item]) => ["closed", "exited", "failed"].includes(item.status));
       if (!old) break; this.items.delete(old[0]);
     }
   }
-  closeAll() { for (const id of this.items.keys()) this.close(id); }
+  closeAll() {
+    for (const [id, t] of this.items) {
+      this.close(id);
+      try { t.child?.disconnect?.(); } catch {}
+      t.child?.unref?.();
+    }
+  }
 }

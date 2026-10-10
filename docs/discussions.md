@@ -30,7 +30,7 @@ All participants require enrollment/content/sharing/retrieval within the project
 
 Any participant may start a conversation in an enabled room. Unaddressed agent opening posts stay readable in the room without waking peers. Aliases address those members; @all or message_agents explicitly broadcasts. Plain replies finish without rebroadcast; mentions continue an exchange. Each opening post permits eight forwarding hops and 32 target allocations. New opening posts start new exchanges. Legacy rooms retain the human-root policy with two hops and 16 allocations. Policy activation never replays older posts. Explicit bounded catalog selection is available through `message_agents`; discovery alone never broadcasts or polls an idle model. Peer messages are conversation context, not delegated work authority.
 
-Stable IDs deduplicate submissions and contributions. Reusing an ID with different content is rejected. Broadcast receipts persist the selected source identities and batch/message IDs; retries cannot acquire newly matching recipients. Identity, current grants and room/native eligibility are rechecked before delivery. Unknown native acceptance is not replayed after disconnect/restart. Explicit cancellation deletes an exact pending native entry or interrupts its correlated turn. Routine response observation timeouts preserve both queued input and running native work; they never cancel execution. Restored permission evidence requires rebind. Limits remain 100 messages per discussion, 200 participants per discussion and 1000 discussions per profile; source selection checks at most 200 matching candidates and reports truncation. Small broadcast batches retain the existing per-exchange delivery budgets. A saved conversation is not proof that every recipient received or answered it.
+Stable IDs deduplicate submissions and contributions. Reusing an ID with different content is rejected. Broadcast receipts persist the selected source identities and batch/message IDs; retries cannot acquire newly matching recipients. Identity, current grants and room/native eligibility are rechecked before delivery. Unknown native acceptance is not replayed after disconnect/restart. AgentSpaces never cancels native turns. Stop requests and response observation timeouts preserve queued input and running native work; they end observation only. Restored permission evidence requires rebind. Limits remain 100 messages per discussion, 200 participants per discussion and 1000 discussions per profile; source selection checks at most 200 matching candidates and reports truncation. Small broadcast batches retain the existing per-exchange delivery budgets. A saved conversation is not proof that every recipient received or answered it.
 
 Direct conversation delivery and private effect receipts do not claim work leases or completion and do not form a scheduler/task registry. AgentSpaces retains that authority; fabric nativeExecution stays false. The Java signed-worker exercise is separate evidence, not a production worker. The original generic execution gate remains fixture-only.
 
@@ -69,10 +69,11 @@ remain visibly unavailable; the service does not attach a replacement controller
 
 Native clients keep their own permission prompts: AgentSpaces neither accepts
 nor declines them automatically. Closing/restarting the companion preserves
-native work. Explicit cancellation remains distinct and can cancel only the
-correlated input/turn. A revoked sharing grant may remove an exact input that has
-not started; it cannot interrupt an already-running native turn. Deliberately
-created, isolated read-only proof threads retain their bounded test budgets.
+daemon-owned native work. Legacy cancellation requests also detach observation,
+including for isolated proof threads. A revoked sharing grant may remove an exact
+input that has not started; it cannot interrupt an already-running native turn.
+Observation deadlines bound waiting, not native execution. Native clients retain
+their own stop controls.
 
 If the owner pauses a native queue, AgentSpaces must not silently resume it.
 This fix prevents new service-induced interruptions; it does not unpause a queue

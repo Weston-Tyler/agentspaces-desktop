@@ -37,7 +37,7 @@ test("isolated Node worker has no stdout/stderr logs; metadata contains no termi
   terms.write(meta.id, "user-owned-input"); terms.resize(meta.id, 120, 40);
   assert.equal(children[0].messages.at(-2).type, "input");
   assert.equal(children[0].messages.at(-1).type, "resize");
-  detach(); assert.equal(terms.get(meta.id).status, "closed");
+  detach(); assert.equal(terms.get(meta.id).status, "running");
 });
 test("terminal count, caller args, input and dimensions are bounded", async t => {
   const { terms } = fixture(); t.after(() => terms.closeAll());
@@ -55,14 +55,14 @@ test("ephemeral pre-attachment output stays bounded and disappears on close", as
   for (let i = 0; i < 80; i++) children[0].emit("message", { type: "data", data: "界".repeat(2730) });
   let bytes = 0; terms.attach(meta.id, { onData: data => { bytes += Buffer.byteLength(data); }, onExit() {} });
   assert(bytes <= 256 * 1024);
-  terms.close(meta.id); assert.throws(() => terms.write(meta.id, "input"), /closed/);
+  terms.close(meta.id); assert.equal(terms.get(meta.id).status, "running");
 });
 test("worker failure exposes a generic code and never the native error stream", async () => {
   const { terms, children } = fixture();
   const meta = await terms.create({ provider: "codex" }); let event;
   terms.attach(meta.id, { onData() {}, onExit: value => event = value });
   children[0].emit("message", { type: "error", code: "PRIVATE_ERROR_DETAIL" });
-  assert.equal(event.code, "native_terminal_failed"); assert.equal(terms.get(meta.id).status, "failed");
+  assert.equal(event.status, "detached"); assert.equal(terms.get(meta.id).status, "running");
 });
 test("prepared connection resolver is internal, validated and supports only loopback SSH reverse forwarding", async t => {
   const { children } = fixture(); let observed;
@@ -79,4 +79,17 @@ test("prepared connection resolver is internal, validated and supports only loop
   assert(children[0].messages[0].launch.args.includes("127.0.0.1:43145:127.0.0.1:43127"));
   await assert.rejects(terms.create({ provider: "claude", connectionId: "shell;command" }), /identifier/);
   assert.throws(() => terminalLaunch({ provider: "claude", host: "remote" }, [], ["-R", "0.0.0.0:3:evil:4"]), /loopback/);
+});
+
+test('view close and backpressure preserve native work and allow reattachment', async () => {
+  const { terms, children } = fixture();
+  const meta = await terms.create({ provider: 'claude' });
+  let killed = false; children[0].kill = () => { killed = true; };
+  terms.attach(meta.id, { onData: () => false, onExit() {} });
+  children[0].emit('message', { type: 'data', data: 'output' });
+  assert.equal(terms.get(meta.id).status, 'running');
+  const detach = terms.attach(meta.id, { onData() {}, onExit() {} });
+  detach(); terms.close(meta.id); terms.closeAll();
+  assert.equal(killed, false);
+  assert.equal(children[0].messages.some(m => m.type === 'close'), false);
 });

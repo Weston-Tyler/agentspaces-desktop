@@ -137,7 +137,7 @@ test("Ask HTTP cancellation persists uncertainty and never repeats the native ef
   const cancelled = await (
     await post("/api/ask/cancel", { deliveryId: args.deliveryId })
   ).json();
-  assert.equal(cancelled.status, "cancellation requested");
+  assert.equal(cancelled.status, "stopped waiting");
   assert.equal((await pending).status, 400);
   assert.equal((await post("/api/ask/answer", args)).status, 400);
   assert.equal(calls, 1);

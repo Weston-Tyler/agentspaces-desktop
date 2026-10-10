@@ -6,22 +6,24 @@ let terminal, started = false, ending = false, pendingBytes = 0;
 const send = message => {
   if (!process.connected) return;
   const bytes = typeof message.data === "string" ? Buffer.byteLength(message.data) : 0;
+  if (pendingBytes + bytes > 256 * 1024) return; // Drop display output, never native work.
   pendingBytes += bytes;
-  if (pendingBytes > 256 * 1024) { stop(1, "terminal_output_backpressure"); return; }
-  process.send(message, error => { pendingBytes -= bytes; if (error) stop(1); });
+  try { process.send(message, () => { pendingBytes -= bytes; }); }
+  catch { pendingBytes -= bytes; }
 };
 const stop = (exitCode = 0, code) => {
   if (ending) return; ending = true;
-  try { terminal?.kill(); } catch {}
   const message = code ? { type: "error", code } : { type: "exit", exitCode };
   if (process.connected) process.send(message, () => process.exit(exitCode));
   setTimeout(() => process.exit(exitCode), 100).unref();
 };
-process.on("disconnect", () => stop());
-process.on("SIGTERM", () => stop());
+// A disconnected companion is not a native stop command. Keep the PTY alive
+// and draining until its own exit; reattachment across service restarts is not supported.
+process.on("disconnect", () => { if (!terminal) stop(); });
+process.on("SIGTERM", () => { if (!terminal) stop(); });
 process.on("message", message => {
   try {
-    if (message.type === "close") { stop(); return; }
+    if (message.type === "close") { if (!terminal) stop(); return; }
     if (message.type === "start" || message.type === "smoke") {
       if (started) throw new Error("Already started"); started = true;
       const launch = message.type === "smoke" ? message.remote
@@ -56,5 +58,5 @@ process.on("message", message => {
       if (!Number.isInteger(message.cols) || message.cols < 20 || message.cols > 300 || !Number.isInteger(message.rows) || message.rows < 5 || message.rows > 150) throw new Error("Invalid dimensions");
       terminal?.resize(message.cols, message.rows);
     }
-  } catch { stop(1, "native_terminal_start_failed"); }
+  } catch { if (terminal) send({ type: "error", code: "native_terminal_input_failed" }); else stop(1, "native_terminal_start_failed"); }
 });

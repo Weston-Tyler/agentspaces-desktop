@@ -89,7 +89,8 @@ test("owned scratch tool guard cannot be raced by a following completion event",
   const f = fixture({ status: "idle", emitsTools: true });
   f.adapter.proofs.set(threadId, { nativeThreadId: threadId, host: "remote", cwd, sandbox: { type: "readOnly" }, approvalPolicy: "never", source: "owned-native-thread-start-response" });
   await assert.rejects(f.adapter.answer({ threadId, clientId: "owned-request-1", question: "Short answer only", grant: true, budget: { timeoutMs: 1000, maxOutputTokens: 800 } }), { code: "unexpected_native_tool_execution", uncertainOutcome: true });
-  assert.ok(f.calls.some(call => call.method === "turn/interrupt"));
+  assert.ok(!f.calls.some(call => call.method === "turn/interrupt"));
+  assert.equal(f.receipts.at(-1).nativeCancellationRequested,false);
 });
 test("revocation during eligible metadata read is fenced before native queue insertion", async () => {
   const f = fixture(); await f.bind(); let release, granted = true;

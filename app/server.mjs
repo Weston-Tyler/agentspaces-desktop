@@ -381,7 +381,7 @@ export async function startServer({
           result = await terminals.create(data);
           break;
         case "/api/native/terminal/close":
-          terminals.close(data.id); result = { status: "closed" };
+          terminals.close(data.id); result = { status: "detached", nativeCancellationRequested: false };
           break;
         case "/api/native/terminal/list":
           result = terminals.list();
@@ -458,9 +458,9 @@ export async function startServer({
           if (activeAnswers.has(data.deliveryId)) {
             activeAnswers.get(data.deliveryId).abort();
             result = {
-              status: "cancellation requested",
+              status: "stopped waiting",
               outcome:
-                "Native completion must be reconciled; cancellation is not proof of no effect",
+                "Native work is not cancelled; completion may still occur",
             };
           } else result = { status: "not running" };
           break;

@@ -16,7 +16,7 @@ This direct conversation route does not acquire delegated-work claims. AgentSpac
 
 ## Claude channels and visible native tools
 
-Native chat opens the unmodified CLI in a visible terminal on this device or remote. Native login, model selection, configuration, history and approvals stay with the provider. The node-pty worker and xterm renderer keep bounded output in memory; native tools may retain their ordinary history. Closing/disconnecting the owned terminal stops its process. No provider password or token is collected.
+Native chat opens the unmodified CLI in a visible terminal on this device or remote. Native login, model selection, configuration, history and approvals stay with the provider. The node-pty worker and xterm renderer keep bounded output in memory; native tools may retain their ordinary history. Closing/disconnecting the view preserves its native process. Reattach a running terminal while the companion remains open; detached terminals still count toward the three-terminal limit. Companion shutdown does not send a native stop, but reattachment across service restarts and survival of host shutdown are not supported. Stop work through the native client when needed. No provider password or token is collected.
 
 An enrolled Claude source with content, sharing and retrieval grants can prepare a participant-specific MCP channel. Owner-private application capabilities and configuration preserve global native settings. Remote preparation verifies pinned dependencies and uses loopback SSH reverse forwarding. After closing other controllers, the owner visibly resumes the selected UUID and confirms the preview development channel in Claude. This does not bypass organization policy or relay approvals.
 
