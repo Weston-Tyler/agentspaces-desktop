@@ -8,7 +8,7 @@ import http from "node:http";
 const exec = promisify(execFile);
 export const nativeUuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = code => Object.assign(new Error(code), { code });
-const publicDiscussionErrors=new Set(['discussion_source_unavailable','discussion_participant_required','discussion_retrieval_denied','discussion_sharing_denied','discussion_self_registration_disabled','discussion_member_limit']);
+const publicDiscussionErrors=new Set(['discussion_source_unavailable','discussion_participant_required','discussion_retrieval_denied','discussion_sharing_denied','discussion_self_registration_disabled','discussion_member_limit','discussion_page_invalid','discussion_cursor_invalid','discussion_cursor_stale','discussion_page_record_too_large']);
 const publicRegistrationErrors = new Set(["source_pending", "native_registration_scope_unavailable", "native_registration_device_revoked", "native_registration_device_identity_mismatch", "native_registration_account_mismatch", "native_registration_source_scope_denied", "native_registration_source_excluded", "native_registration_source_cwd_mismatch", "native_registration_source_revoked", "source_connector_revoked", "native_registration_private_config_unavailable", "native_registration_private_config_changed", "native_registration_binding_failed"]);
 export async function privateFile(path) {
   const absolute = resolve(path);
@@ -30,9 +30,14 @@ export async function readDeviceConfig(path) {
 export async function scopedRequest(config, path, body) {
   return new Promise((yes, no) => {
     const text = JSON.stringify(body), req = http.request(new URL(path, config.address), { method: "POST", headers: { Host: config.authority, Authorization: "Bearer " + config.token, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(text) } }, res => {
-      let value = "", bytes = 0;
-      res.on("data", chunk => { bytes += chunk.length; if (bytes > 1048576) req.destroy(); else value += chunk.toString(); });
+      const chunks = []; let bytes = 0;
+      res.on("data", chunk => {
+        bytes += chunk.length;
+        if (bytes > 1048576) { no(fail("response_limit_exceeded")); req.destroy(); }
+        else chunks.push(chunk);
+      });
       res.on("end", () => {
+        const value = Buffer.concat(chunks).toString("utf8");
         if (res.statusCode !== 200) {
           let code; try { code = JSON.parse(value).code; } catch {}
           return no(fail((path === "/api/native/register" && publicRegistrationErrors.has(code)) || publicDiscussionErrors.has(code) ? code : "scoped_registration_or_tool_denied"));
@@ -42,9 +47,10 @@ export async function scopedRequest(config, path, body) {
       res.on("error", () => no(fail("scoped_transport_unavailable")));
     });
     const timeout = Number.isInteger(config.requestTimeoutMs) ? Math.max(500, Math.min(config.requestTimeoutMs, 12000)) : 12000;
-    const timer = setTimeout(() => req.destroy(), timeout);
+    const timedOut = () => { no(fail("scoped_transport_timeout")); req.destroy(); };
+    const timer = setTimeout(timedOut, timeout);
     req.once("close", () => clearTimeout(timer));
-    req.setTimeout(timeout, () => req.destroy()); req.on("error", () => no(fail("scoped_transport_unavailable"))); req.end(text);
+    req.setTimeout(timeout, timedOut); req.on("error", () => no(fail("scoped_transport_unavailable"))); req.end(text);
   });
 }
 // Keep only whether the exact managed channel was selected, never native argv.

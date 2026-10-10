@@ -79,3 +79,5 @@ If the owner pauses a native queue, AgentSpaces must not silently resume it.
 This fix prevents new service-induced interruptions; it does not unpause a queue
 that was already stopped. Client-specific live scheduling still needs native
 qualification; fixture tests establish the adapter's non-interruption behavior.
+
+See [reading discussion history](discussion-history.md) for bounded latest pages, stable older-page cursors and refreshing existing agent tools without interrupting native work.

@@ -129,7 +129,7 @@ test("Self-contained CLI executes from a copied hash filename without repo depen
 });
 test("Real HTTP response over byte bound is rejected", async (t) => {
   const { args } = await setup(t, () => ({ status: 200, body: JSON.stringify({ text: "x".repeat(1048577) }) }));
-  await assert.rejects(runParticipantCli(args("discover")), /scoped_transport_failed/);
+  await assert.rejects(runParticipantCli(args("discover")), /response_limit_exceeded/);
 });
 
 test('decision and machine CLI commands keep source binding and route bounded JSON',async t=>{
@@ -258,4 +258,15 @@ test('Headless CLI validates nested budget numbers and rejects nested extra fiel
     await assert.rejects(runParticipantCli(args('job-request'),{input:JSON.stringify({...body,budget})}),error=>error.code==='bounded_headless_request_required'&&error.details.invalidFields.includes('budget'));
   }
   assert.equal(requests.length,1);
+});
+
+test('Room read forwards bounded pagination without fetching extra pages automatically',async t=>{
+  const {args,requests}=await setup(t);
+  await runParticipantCli(args('read','--discussion',GROUP,'--limit','12','--cursor','opaque-fixture-cursor'));
+  assert.deepEqual(requests[0].body,{id:GROUP,limit:12,cursor:'opaque-fixture-cursor'});
+  for(const limit of ['0','101','1.5','NaN','-1']) await assert.rejects(runParticipantCli(args('read','--discussion',GROUP,'--limit',limit)),/discussion_page_invalid/);
+  assert.equal(requests.length,1);
+  const help=await runParticipantCli(['read','--help']);
+  assert(help.options.includes('cursor'));assert(help.options.includes('limit'));
+  assert.match(help.notes.join(' '),/nextCursor/);
 });

@@ -5,7 +5,8 @@ import { pathToFileURL } from "node:url";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = (code, details) => Object.assign(new Error(code), { code, ...(details ? { details } : {}) });
-const COMMAND_OPTIONS = { "provider-status": [], "availability-report": [], "handoff-preview": [], "handoff-request": [], "ensure-connection": [], "job-request": [], jobs: [], subscriptions: ["discussion"], subscribe: [], digest: [], continuations: [], lanes: [], artifacts: [], "artifact-read": [], "artifact-drop": [], decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
+const publicPageErrors = new Set(["discussion_page_invalid", "discussion_cursor_invalid", "discussion_cursor_stale", "discussion_page_record_too_large"]);
+const COMMAND_OPTIONS = { "provider-status": [], "availability-report": [], "handoff-preview": [], "handoff-request": [], "ensure-connection": [], "job-request": [], jobs: [], subscriptions: ["discussion"], subscribe: [], digest: [], continuations: [], lanes: [], artifacts: [], "artifact-read": [], "artifact-drop": [], decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion", "limit", "cursor"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
 const COMMANDS = Object.keys(COMMAND_OPTIONS);
 const string = (maxLength, extra = {}) => ({ type: "string", minLength: 1, maxLength, ...extra });
 const uuid = { type: "string", pattern: UUID.source.replaceAll("a-f", "a-fA-F") };
@@ -35,6 +36,7 @@ function helpFor(command) {
   if (command === "continuations") notes.push("Read explicit pending steps, standing grant status and native idle observations. No force-resume, cancellation or model polling; only owner-enabled scoped wakes may execute.");
   if (["provider-status","availability-report","handoff-preview","handoff-request"].includes(command)) notes.push("Observed metrics and reported availability are not provider quota/billing. Preview/request handoff preserves the existing claim and starts no native work; owner decision and native approvals remain required.");
   if (["subscribe","subscriptions","digest"].includes(command)) notes.push("Delivery preferences do not authorize work. Explicit mentions remain honored; plain replies stay quiet. Digests are bounded persisted evidence; since is inclusive ISO time and discussionId filters only messages.");
+  if (command === "read") notes.push("Returns the latest 50 messages by default (limit 1–100), bounded to 512 KiB. Pass result.page.nextCursor as --cursor for older pages. Each page is chronological; prepend older pages. Cursors freeze the message-count snapshot; start without a cursor to see new arrivals. Grants are rechecked; no history is deleted.");
   if (command === "verify-approval") notes.push("Verifies the exact receipt against current expiry, revocation and authenticated target source; records an audit receipt. Native owner delegation and client permissions remain authoritative.");
   return { command, usage: `participant-cli.mjs --config PATH --source UUID ${command}${COMMAND_OPTIONS[command].map(key => ` [--${key} VALUE]`).join("")}`, options: COMMAND_OPTIONS[command], ...(STDIN_SCHEMAS[command] ? { stdinSchema: STDIN_SCHEMAS[command] } : {}), notes };
 }
@@ -68,7 +70,7 @@ function argumentsOf(args) {
     const value = args[i];
     if (value === "--help" || value === "-h") { help = true; continue; }
     if (COMMANDS.includes(value) && !command) { command = value; continue; }
-    if (!/^--(config|source|query|discussion|source-id|turn|delivery|reply-to)$/.test(value) || i + 1 >= args.length || args[i + 1].startsWith("--")) throw fail("invalid_arguments");
+    if (!/^--(config|source|query|discussion|source-id|turn|delivery|reply-to|limit|cursor)$/.test(value) || i + 1 >= args.length || args[i + 1].startsWith("--")) throw fail("invalid_arguments");
     const key = value.slice(2);
     if (key in options) throw fail("duplicate_argument");
     options[key] = args[++i];
@@ -112,21 +114,34 @@ async function inputText(input) {
   if (!data || typeof data.text !== "string" || !data.text.trim() || data.text.length > 8000 || Object.keys(data).some((key) => key !== "text")) throw fail("bounded_stdin_text_required");
   return data.text;
 }
-function request({ address, authority, token, path, body }) {
+function transportError(error) {
+  return fail(["response_limit_exceeded", "scoped_transport_timeout"].includes(error?.code) ? error.code : "scoped_transport_failed");
+}
+function request({ address, authority, token, path, body, requestTimeoutMs }) {
   return new Promise((resolveResult, reject) => {
     const bytes = JSON.stringify(body);
     const req = http.request(new URL(path, address), { method: "POST", headers: { Host: authority, Authorization: "Bearer " + token, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bytes) } }, (res) => {
-      let text = "", size = 0;
-      res.on("data", (chunk) => { size += chunk.length; if (size > 1048576) req.destroy(fail("response_limit_exceeded")); else text += chunk.toString(); });
-      res.on("end", () => resolveResult({ statusCode: res.statusCode, body: text }));
+      const chunks = []; let size = 0;
+      res.on("data", (chunk) => {
+        size += chunk.length;
+        if (size > 1048576) {
+          reject(fail("response_limit_exceeded"));
+          req.destroy();
+        } else chunks.push(chunk);
+      });
+      res.on("end", () => resolveResult({ statusCode: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
       res.on("error", () => reject(fail("scoped_transport_failed")));
     });
-    req.setTimeout(12000, () => req.destroy(fail("scoped_transport_timeout")));
+    const timeout = Number.isInteger(requestTimeoutMs) ? Math.max(500, Math.min(requestTimeoutMs, 12000)) : 12000;
+    const timedOut = () => { reject(fail("scoped_transport_timeout")); req.destroy(); };
+    const timer = setTimeout(timedOut, timeout);
+    req.once("close", () => clearTimeout(timer));
+    req.setTimeout(timeout, timedOut);
     req.on("error", () => reject(fail("scoped_transport_failed")));
     req.end(bytes);
   });
 }
-export async function runParticipantCli(args, { input, requestImpl = request } = {}) {
+export async function runParticipantCli(args, { input, requestImpl = request, requestTimeoutMs } = {}) {
   const { command, options, help } = argumentsOf(args);
   if (help) return helpFor(command);
   const config = await configuration(options.config, options.source);
@@ -186,6 +201,16 @@ export async function runParticipantCli(args, { input, requestImpl = request } =
   } else {
     if (!UUID.test(options.discussion ?? "")) throw fail("discussion_uuid_required");
     path = command === "read" ? "/api/discussions/context" : command === "join" ? "/api/discussions/join" : command === 'invite' ? '/api/discussions/invite' : "/api/discussions/contribute"; body = { id: options.discussion };
+    if (command === 'read') {
+      if (options.limit !== undefined) {
+        if (!/^[0-9]+$/.test(options.limit) || Number(options.limit) < 1 || Number(options.limit) > 100) throw fail('discussion_page_invalid');
+        body.limit = Number(options.limit);
+      }
+      if (options.cursor !== undefined) {
+        if (!options.cursor.length || options.cursor.length > 512) throw fail('discussion_page_invalid');
+        body.cursor = options.cursor;
+      }
+    }
     if (command === 'invite') {
       if (!options['source-id'] || options['source-id'].length > 300) throw fail('source_actor_id_required');
       body.sessionId = options['source-id'];
@@ -195,8 +220,15 @@ export async function runParticipantCli(args, { input, requestImpl = request } =
       body = { ...body, text: await inputText(input), nativeTurnId: options.turn, deliveryId: options.delivery, ...(options["reply-to"] ? { replyTo: options["reply-to"] } : {}) };
     }
   }
-  let response; try { response = await requestImpl({ address: config.address, authority: config.authority, token: config.token, path, body }); } catch { throw fail("scoped_transport_failed"); }
-  if (response.statusCode !== 200) throw fail(response.statusCode === 401 || response.statusCode === 403 ? "scoped_access_denied" : "scoped_request_refused");
+  let response; try { response = await requestImpl({ address: config.address, authority: config.authority, token: config.token, path, body, ...(requestTimeoutMs === undefined ? {} : {requestTimeoutMs}) }); } catch (error) { throw transportError(error); }
+  if (response.statusCode !== 200) {
+    let code;
+    try {
+      const raw = typeof response.body === "string" ? response.body : JSON.stringify(response.body);
+      if (Buffer.byteLength(raw) <= 1048576) code = JSON.parse(raw).code;
+    } catch {}
+    throw fail(publicPageErrors.has(code) ? code : response.statusCode === 401 || response.statusCode === 403 ? "scoped_access_denied" : "scoped_request_refused");
+  }
   let result;
   try { const raw = typeof response.body === "string" ? response.body : JSON.stringify(response.body); if (Buffer.byteLength(raw) > 1048576) throw new Error(); result = JSON.parse(raw.replaceAll(config.token, "[redacted]")); } catch { throw fail("invalid_scoped_response"); }
   return { nativeThreadId: config.nativeThreadId, attribution, result };

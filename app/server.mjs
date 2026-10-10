@@ -596,7 +596,7 @@ export async function startServer({
           break;
         }
         case "/api/discussions/context":
-          result = engine.discussions.contextOrJoin(data.id, connector);
+          result = engine.discussions.readPage(data, connector);
           break;
         case "/api/discussions/discover":
           result = engine.discussions.discover(data, connector);
