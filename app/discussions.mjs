@@ -76,6 +76,7 @@ export class Discussions {
     const members = g.members.map((m) => ({
       ...m,
       available: this.allowed(m),
+      wakeReadiness:this.engine.nativeWakeReadiness?.(m.sessionId)??null,
       replyMode: m.fixture
         ? "synthetic"
         : m.provider === "codex" && m.host === REMOTE_HOST

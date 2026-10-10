@@ -9,7 +9,7 @@ import { NativeAutoInstaller, remoteInstallScript } from "../app/native-auto-ins
 
 test("Managed SDK versions derive directly from the root package manifest", () => {
   const root = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")), actual = dependencyVersions();
-  assert.deepEqual(actual, { mcp: root.dependencies["@modelcontextprotocol/sdk"], zod: root.dependencies.zod, claude: root.dependencies["@anthropic-ai/claude-agent-sdk"] });
+  assert.deepEqual(actual, { mcp: root.dependencies["@modelcontextprotocol/sdk"], zod: root.dependencies.zod, claude: root.dependencies["@anthropic-ai/claude-agent-sdk"], ws: root.dependencies.ws });
   assert.equal(CLAUDE_SDK_PIN, actual.claude);
 });
 test("Exact semantic versions accept prereleases and refuse ranges, URLs and malformed numeric identifiers", () => {
@@ -18,7 +18,7 @@ test("Exact semantic versions accept prereleases and refuse ranges, URLs and mal
   assert.throws(() => dependencyVersions({ manifest: { dependencies: { "@modelcontextprotocol/sdk": "^1.2.3", zod: "4.6.5", "@anthropic-ai/claude-agent-sdk": "0.3.293" } } }), /exact semantic/);
 });
 test("Fixture manifest SDK updates change the serialized remote reader pin without inference or source edits", async () => {
-  const manifest = { dependencies: { "@modelcontextprotocol/sdk": "1.33.0", zod: "4.6.6", "@anthropic-ai/claude-agent-sdk": "0.4.0-beta.1" } }, versions = dependencyVersions({ manifest });
+  const manifest = { dependencies: { "@modelcontextprotocol/sdk": "1.33.0", zod: "4.6.6", "@anthropic-ai/claude-agent-sdk": "0.4.0-beta.1", ws: "8.22.1" } }, versions = dependencyVersions({ manifest });
   let source = "";
   const adapter = new ClaudeReadAdapter({ host: "remote", sdkPin: versions.claude, spawnProcess: () => {
     const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.stdin = new PassThrough(); child.kill = () => {};

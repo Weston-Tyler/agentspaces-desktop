@@ -50,8 +50,8 @@ export function mergeClaudeHooks(settings, command, { previousCommand } = {}) {
   return result;
 }
 export async function installOnCurrentHost({ config, sources, versions, home = homedir(), nodeBinary = process.env.AGENTSPACES_NODE_BINARY ?? (process.versions.electron ? executable('node') : process.execPath), runCLI = cli, resolveExecutable = executable, installDependencies = true } = {}) {
-  if (config?.schemaVersion !== 1 || !['codex', 'claude'].includes(config.provider) || !/^[a-f0-9]{64}$/.test(config.token ?? '') || !sources?.bootstrap || !sources?.hook) throw new Error('Invalid automatic installation payload');
-  if (!versions || ['mcp', 'zod', 'claude'].some(key => {
+  if (config?.schemaVersion !== 1 || !['codex', 'claude'].includes(config.provider) || !/^[a-f0-9]{64}$/.test(config.token ?? '') || !sources?.bootstrap || !sources?.hook || !sources?.channel) throw new Error('Invalid automatic installation payload');
+  if (!versions || ['mcp', 'zod', 'claude','ws'].some(key => {
     const value = versions[key];
     return typeof value !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(value) || value.includes('-') && value.slice(value.indexOf('-') + 1).split('.').some(part => /^\d+$/.test(part) && part.length > 1 && part.startsWith('0'));
   })) throw new Error('Exact managed dependency versions payload required');
@@ -69,9 +69,9 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
     if (!/^S-\d+(?:-\d+)+$/.test(sid)) throw new Error('Private native runtime owner unavailable');
     execFileSync('icacls.exe', [base, '/inheritance:r', '/grant:r', '*' + sid + ':(OI)(CI)F'], { windowsHide: true, stdio: 'pipe' });
   } else chmodSync(base, 0o700);
-  const runtime = join(base, 'runtime-' + digest(sources.bootstrap + sources.hook)); noLinks(runtime); mkdirSync(runtime, { recursive: true, mode: 0o700 });
-  savePrivate(join(runtime, 'native-bootstrap-mcp.mjs'), sources.bootstrap); savePrivate(join(runtime, 'native-session-hook.mjs'), sources.hook);
-  const manifest = { private: true, type: 'module', dependencies: { '@modelcontextprotocol/sdk': versions.mcp, zod: versions.zod, '@anthropic-ai/claude-agent-sdk': versions.claude } };
+  const runtime = join(base, 'runtime-' + digest(sources.bootstrap + sources.hook + sources.channel)); noLinks(runtime); mkdirSync(runtime, { recursive: true, mode: 0o700 });
+  savePrivate(join(runtime, 'native-bootstrap-mcp.mjs'), sources.bootstrap); savePrivate(join(runtime, 'native-session-hook.mjs'), sources.hook);savePrivate(join(runtime,'native-bootstrap-channel.mjs'),sources.channel);
+  const manifest = { private: true, type: 'module', dependencies: { '@modelcontextprotocol/sdk': versions.mcp, zod: versions.zod, '@anthropic-ai/claude-agent-sdk': versions.claude,ws:versions.ws } };
   savePrivate(join(base, 'package.json'), JSON.stringify(manifest));
   const dependenciesPresent = () => Object.entries(manifest.dependencies).every(([name, version]) => {
     const path = join(base, 'node_modules', name, 'package.json'); noLinks(path);
@@ -86,7 +86,7 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
   }
   if (installDependencies) {
     if (!dependenciesPresent()) throw new Error('Automatic native runtime dependencies are not ready');
-    await runCLI(nodeBinary, ['--input-type=module', '-e', "await import('@modelcontextprotocol/sdk/server/index.js');await import('@modelcontextprotocol/sdk/server/stdio.js');await import('zod');await import('@anthropic-ai/claude-agent-sdk');"], { cwd: base, timeout: 10000 });
+    await runCLI(nodeBinary, ['--input-type=module', '-e', "await import('@modelcontextprotocol/sdk/server/index.js');await import('@modelcontextprotocol/sdk/server/stdio.js');await import('zod');await import('@anthropic-ai/claude-agent-sdk');await import('ws');"], { cwd: base, timeout: 10000 });
   }
   const binary = resolveExecutable(config.provider), folder = join(base, config.provider), configPath = join(folder, 'device.json');
   const device = { ...config, ...(config.provider === 'claude' ? { nativeExecutable: binary } : {}) };
@@ -105,7 +105,8 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
   const oldBootstrap = transport?.args?.find(arg => typeof arg === 'string' && arg.endsWith('native-bootstrap-mcp.mjs'));
   if (oldBootstrap) noLinks(oldBootstrap);
   const oldRuntime = oldBootstrap && dirname(oldBootstrap);
-  const ownedOldRuntime = oldRuntime && dirname(oldRuntime) === base && /runtime-[a-f0-9]{64}$/.test(oldRuntime) && existsSync(oldBootstrap) && existsSync(join(oldRuntime, 'native-session-hook.mjs')) && oldRuntime.endsWith(digest(readFileSync(oldBootstrap, 'utf8') + readFileSync(join(oldRuntime, 'native-session-hook.mjs'), 'utf8')));
+  const oldChannel=oldRuntime&&join(oldRuntime,'native-bootstrap-channel.mjs');if(oldChannel)noLinks(oldChannel);
+  const ownedOldRuntime = oldRuntime && dirname(oldRuntime) === base && /runtime-[a-f0-9]{64}$/.test(oldRuntime) && existsSync(oldBootstrap) && existsSync(join(oldRuntime, 'native-session-hook.mjs')) && oldRuntime.endsWith(digest(readFileSync(oldBootstrap, 'utf8') + readFileSync(join(oldRuntime, 'native-session-hook.mjs'), 'utf8') + (existsSync(oldChannel)?readFileSync(oldChannel,'utf8'):'')));
   if (existing && ((!transport?.args?.includes(bootstrap) && !ownedOldRuntime) || !transport?.args?.includes(configPath) || transport?.command !== nodeBinary)) throw new Error('Existing MCP name is not this managed installation');
   if (!existing || oldBootstrap !== bootstrap) {
     privateBackup(nativePath);
@@ -177,7 +178,7 @@ export class NativeAutoInstaller {
     else { const issued = this.sourceBindings.issueDevice({ host, provider }); device = { schemaVersion: 1, ...issued, address: this.address, authority: new URL(this.address).host }; }
     device = { ...device, address: this.address, authority: new URL(this.address).host };
     if (host === REMOTE_HOST) { tunnel = await this.participantConnections.tunnel(); device = { ...device, address: 'http://127.0.0.1:' + tunnel.remotePort }; }
-    const sources = { bootstrap: readFileSync(new URL('./native-bootstrap-mcp.mjs', import.meta.url), 'utf8'), hook: readFileSync(new URL('./native-session-hook.mjs', import.meta.url), 'utf8') };
+    const sources = { bootstrap: readFileSync(new URL('./native-bootstrap-mcp.mjs', import.meta.url), 'utf8'), hook: readFileSync(new URL('./native-session-hook.mjs', import.meta.url), 'utf8'),channel:readFileSync(new URL('./native-bootstrap-channel.mjs',import.meta.url),'utf8') };
     try {
       const result = await (host === REMOTE_HOST ? this.installRemote : this.installLocal)({ config: device, sources, versions });
       this.sourceBindings.device(device.token); // Recheck after installation; never undo a revocation.

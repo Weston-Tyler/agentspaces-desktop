@@ -124,7 +124,7 @@ test("MCP protocol advertises source and group tools and preserves native reques
   } });
   const client = new Client({ name: "fixture-native-bootstrap-client", version: "1" }), [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   await bootstrap.server.connect(serverTransport); await client.connect(clientTransport);
-  assert.equal((await client.listTools()).tools.length, 34);
+  assert.equal((await client.listTools()).tools.length, 35);
   const reply = await client.callTool({ name: "discover_group_discussions", arguments: {}, _meta: { threadId: UUID } });
   assert.equal(reply.isError, undefined); assert.deepEqual(nativeIds, [UUID]);
   const denied = await client.callTool({ name: "discover_group_discussions", arguments: {} });
@@ -211,4 +211,28 @@ test('Native topic tools resolve this source and reject peer substitution before
     await assert.rejects(invoke('change_room_subscription',{id:OTHER,mode:'wake',topics:['recipe'],sessionId:'a-peer'}),/bounded_native_tool/);
     assert.equal(calls.length,count);
   }finally{await bootstrap.server.close();}
+});
+test('Claude source-neutral bootstrap negotiates channel events and replies only through its own scoped source',async(t)=>{
+ const {EventEmitter}=await import('node:events');const {z}=await import('zod');
+ const {configPath,participantConfig}=await setup('claude');const calls=[];let socket;
+ class FakeSocket extends EventEmitter{constructor(){super();socket=this;}terminate(){this.terminated=true;}}
+ const bootstrap=await createNativeBootstrap({configPath,resolveClaude:async()=>({nativeThreadId:UUID,process:processRecord,channelOptIn:true}),channelOptions:{WebSocketClass:FakeSocket},requestImpl:async(config,path,body)=>{calls.push({config,path,body});return path==='/api/native/register'?{participantConfig}:{sourceId:participantConfig.sessionId};}});
+ const client=new Client({name:'fictional-channel-client',version:'1'}),[serverTransport,clientTransport]=InMemoryTransport.createLinkedPair(),received=[];
+ client.setNotificationHandler(z.object({method:z.literal('notifications/claude/channel'),params:z.object({content:z.string(),meta:z.record(z.string(),z.string())})}),message=>received.push(message));
+ await bootstrap.server.connect(serverTransport);await client.connect(clientTransport);t.after(async()=>{await client.close();await bootstrap.server.close();});
+ assert.deepEqual(client.getServerCapabilities().experimental,{'claude/channel':{}});
+ await new Promise(r=>setImmediate(r));assert.ok(socket);assert.equal(bootstrap.channel.health().transportConnected,false);socket.emit('open');
+ socket.emit('message',JSON.stringify({content:'Fictional report',meta:{request_id:'request-one',discussion_id:OTHER}}));await new Promise(r=>setImmediate(r));assert.equal(received.length,1);
+ const ready=await client.callTool({name:'ensure_native_connection',arguments:{}});assert.equal(JSON.parse(ready.content[0].text).inbound.transportConnected,true);
+ await client.callTool({name:'reply_native_channel',arguments:{requestId:'request-one',discussionId:OTHER,text:'Fictional reply',deliveryId:'delivery-one'}});
+ const reply=calls.find(call=>call.path==='/api/native/channel/reply');assert.equal(reply.config.token,scopedToken);assert.equal(reply.config.nativeThreadId,UUID);assert.equal(reply.body.requestId,'request-one');
+ assert.ok(!JSON.stringify(ready).includes(deviceToken));assert.ok(!JSON.stringify(ready).includes(scopedToken));
+});
+test('scoped room errors expose only allowlisted actionable codes and hide provider details',async(t)=>{
+ const {scopedRequest}=await import('../app/native-session-hook.mjs');let code='discussion_source_unavailable';
+ const server=http.createServer((req,res)=>{req.resume();res.writeHead(403,{'Content-Type':'application/json'});res.end(JSON.stringify({code,error:'private provider details /fictional/private/path'}));});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
+ const address='http://127.0.0.1:'+server.address().port,config={address,authority:new URL(address).host,token:scopedToken};
+ for(code of ['discussion_source_unavailable','discussion_participant_required','discussion_retrieval_denied','discussion_sharing_denied','discussion_self_registration_disabled','discussion_member_limit'])await assert.rejects(scopedRequest(config,'/api/discussions/context',{}),error=>error.message===code&&!error.message.includes('private'));
+ code='arbitrary_private_diagnostic';await assert.rejects(scopedRequest(config,'/api/discussions/context',{}),error=>error.code==='scoped_registration_or_tool_denied');
 });

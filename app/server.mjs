@@ -1,4 +1,5 @@
 import { UpdateGate } from './update-gate.mjs';
+import {nativeWakeReadiness,ensureNativeConnection} from './native-readiness.mjs';
 import {ContinuationWaker} from './work-continuation.mjs';
 import { RoomSubscriptions } from "./room-subscriptions.mjs";
 import { HeadlessJobs } from './headless-jobs.mjs';
@@ -114,6 +115,7 @@ export async function startServer({
   } });
   engine.dispatchAllowed = () => backgroundNative && !closing && !updateGate.draining;
   const channels = new ChannelHub(engine);
+  engine.nativeWakeReadiness=id=>nativeWakeReadiness(engine,channels,id);
   const codexAgents = new CodexDiscussionHub(engine, { adapterFactory: codexAdapterFactory, onContribution: (group, message) => routeConversation(engine, { codexAgents, channels }, group, message) });
   const nativeThreads = new NativeThreadCreation(engine, { adapterFactory: nativeThreadAdapterFactory, registerSource: async input => {
     const saved = store.data.nativeAutomaticInstallations?.[input.host + ':codex']?.device;
@@ -321,6 +323,7 @@ export async function startServer({
           "/api/discussions/invite",
           "/api/native/thread/create",
           "/api/agent/capabilities",
+          "/api/native/connection/ensure",
           "/api/agent/message",
           "/api/agent/broadcast",
           "/api/workspace/compare",
@@ -431,11 +434,13 @@ export async function startServer({
           result = await nativeThreads.create(data, connector);
           break;
         }
+        case '/api/native/connection/ensure':
+          result=ensureNativeConnection(engine,channels,connector,data);break;
         case '/api/agent/capabilities': {
           const caller = engine.discussions.participant(connector), profile = engine.workspace.index?.profile;
           const workspaceGranted = !!profile?.active && connector.scopeId === profile.id;
           const creationGranted = workspaceGranted && profile.policy === 'local-retrieval' && caller.account === profile.account && !!engine.permissions(caller).content && profile.providers.includes('codex');
-          result = { sourceId: caller.id, host: caller.host, provider: caller.provider,
+          result = { sourceId: caller.id, host: caller.host, provider: caller.provider,wakeReadiness:engine.nativeWakeReadiness(caller.id),
             groups: { discover: true, create: true, join: true, invite: true, read: true, contribute: true, firstAccessJoinsOpenRoom: true },
             nativeThreads: { provider: 'codex', creationStartsTurn: false, hosts: (profile?.hosts ?? []).map(host => ({ host, available: creationGranted && engine.tools.some(t => t.host === host && t.provider === 'codex' && t.installed && nativeAdapterCompatible(t)), policy: 'inherit-native-configuration' })) },
             workspace: { search: workspaceGranted, inspect: workspaceGranted && !!profile.indexFiles, compare: workspaceGranted && !!profile.indexFiles },
@@ -443,7 +448,7 @@ export async function startServer({
             ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
             unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
             headlessJobs: headlessJobs.capabilities(),
-            availableTools: ['request_headless_job','list_headless_jobs','read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            availableTools: ['ensure_native_connection','request_headless_job','list_headless_jobs','read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
           break;
         }

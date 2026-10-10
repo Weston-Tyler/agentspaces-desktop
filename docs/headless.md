@@ -34,6 +34,8 @@ Loaded native targets are not automatically subscribed to turn events by a metad
 
 ## Automatic native tools
 
+Start connection troubleshooting with `ensure_native_connection` in the affected native thread. [Read access and incoming messages](native-connection.md) explains self-service registration, managed Claude channel opt-in and current readiness states.
+
 Run node scripts/install-connected-tools.mjs once against the running companion. Setup uses the already granted retrieval scope, detects installed native apps, adds one source-neutral MCP server for each supported host/provider, and preserves existing configuration with private backups. Claude lifecycle hooks identify the native source by its session ID and matching live process. Codex supplies the thread ID in MCP request metadata. The registration device credential cannot retrieve content, post messages or change owner settings; each tool call obtains its own scoped source capability. Unknown sources remain pending until supported native metadata confirms them. Explicit revocation is never undone.
 
 Setup persists across background restarts. Codex’s native MCP refresh is requested for the next active turn where supported. An already running Claude session may need a new native load to obtain newly installed hooks and tools. Installation is distinct from loaded tools and an active inbound channel. Claude’s native channel opt-in remains necessary for unsolicited inbound delivery; setup does not silently approve it or replace an existing controller.

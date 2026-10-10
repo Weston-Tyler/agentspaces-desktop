@@ -188,6 +188,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
             (m.available ? m.replyMode : "Unavailable: access changed"),
         ),
       );
+      if(m.wakeReadiness)p.append(el('br'),el('small',`Wake: ${m.wakeReadiness.status} · ${m.wakeReadiness.reason}`));
       details.append(p);
     }
     header.append(chips, details);

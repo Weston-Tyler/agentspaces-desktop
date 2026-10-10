@@ -8,6 +8,7 @@ import http from "node:http";
 const exec = promisify(execFile);
 export const nativeUuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = code => Object.assign(new Error(code), { code });
+const publicDiscussionErrors=new Set(['discussion_source_unavailable','discussion_participant_required','discussion_retrieval_denied','discussion_sharing_denied','discussion_self_registration_disabled','discussion_member_limit']);
 const publicRegistrationErrors = new Set(["source_pending", "native_registration_scope_unavailable", "native_registration_device_revoked", "native_registration_device_identity_mismatch", "native_registration_account_mismatch", "native_registration_source_scope_denied", "native_registration_source_excluded", "native_registration_source_cwd_mismatch", "native_registration_source_revoked", "source_connector_revoked", "native_registration_private_config_unavailable", "native_registration_private_config_changed", "native_registration_binding_failed"]);
 export async function privateFile(path) {
   const absolute = resolve(path);
@@ -34,7 +35,7 @@ export async function scopedRequest(config, path, body) {
       res.on("end", () => {
         if (res.statusCode !== 200) {
           let code; try { code = JSON.parse(value).code; } catch {}
-          return no(fail(path === "/api/native/register" && publicRegistrationErrors.has(code) ? code : "scoped_registration_or_tool_denied"));
+          return no(fail((path === "/api/native/register" && publicRegistrationErrors.has(code)) || publicDiscussionErrors.has(code) ? code : "scoped_registration_or_tool_denied"));
         }
         try { yes(JSON.parse(value)); } catch { no(fail("scoped_response_invalid")); }
       });
@@ -46,18 +47,35 @@ export async function scopedRequest(config, path, body) {
     req.setTimeout(timeout, () => req.destroy()); req.on("error", () => no(fail("scoped_transport_unavailable"))); req.end(text);
   });
 }
+// Keep only whether the exact managed channel was selected, never native argv.
+export function channelLaunchOptIn(argv) {
+  const args = Array.isArray(argv) ? argv : (String(argv ?? '').match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map(value => value.replace(/^["']|["']$/g, ''));
+  if (args.some(value => typeof value !== 'string')) return false;
+  const flag = '--dangerously-load-development-channels';
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--') break;
+    if (args[i].startsWith(flag + '=')) {
+      if (args[i].slice(flag.length + 1).split(',').includes('server:agentspaces-desktop')) return true;
+    } else if (args[i] === flag) {
+      for (let j = i + 1; j < args.length && !args[j].startsWith('-'); j++) {
+        if (args[j].split(',').includes('server:agentspaces-desktop')) return true;
+      }
+    }
+  }
+  return false;
+}
 export async function inspectProcess(pid) {
   if (!Number.isSafeInteger(pid) || pid < 1) throw fail("native_process_invalid");
   if (process.platform === "win32") {
-    const command = "$p=Get-CimInstance Win32_Process -Filter 'ProcessId=" + pid + "';if(!$p){exit 1};[pscustomobject]@{pid=[int]$p.ProcessId;parentPid=[int]$p.ParentProcessId;exe=$p.ExecutablePath;startedAt=$p.CreationDate.ToUniversalTime().ToString('o')}|ConvertTo-Json -Compress";
-    let value; try { const result = await exec("powershell.exe", ["-NoProfile", "-Command", command], { timeout: 5000, windowsHide: true, maxBuffer: 8192 }); value = JSON.parse(result.stdout); } catch { throw fail("native_process_unavailable"); }
-    if (!value.exe || !value.startedAt) throw fail("native_process_unavailable"); return value;
+    const command = "$p=Get-CimInstance Win32_Process -Filter 'ProcessId=" + pid + "';if(!$p){exit 1};[pscustomobject]@{pid=[int]$p.ProcessId;parentPid=[int]$p.ParentProcessId;exe=$p.ExecutablePath;startedAt=$p.CreationDate.ToUniversalTime().ToString('o');commandLine=$p.CommandLine}|ConvertTo-Json -Compress";
+    let value; try { const result = await exec("powershell.exe", ["-NoProfile", "-Command", command], { timeout: 5000, windowsHide: true, maxBuffer: 262144 }); value = JSON.parse(result.stdout); } catch { throw fail("native_process_unavailable"); }
+    if (!value.exe || !value.startedAt) throw fail("native_process_unavailable"); const channelOptIn=channelLaunchOptIn(value.commandLine);delete value.commandLine;return {...value,channelOptIn};
   }
   try {
-    const [stat, exe, status] = await Promise.all([readFile("/proc/" + pid + "/stat", "utf8"), readlink("/proc/" + pid + "/exe"), readFile("/proc/" + pid + "/status", "utf8")]);
+    const [stat, exe, status, commandLine] = await Promise.all([readFile("/proc/" + pid + "/stat", "utf8"), readlink("/proc/" + pid + "/exe"), readFile("/proc/" + pid + "/status", "utf8"),readFile("/proc/" + pid + "/cmdline", "utf8")]);
     if (Number(/^Uid:\s+(\d+)/m.exec(status)?.[1]) !== process.getuid()) throw new Error();
     const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
-    return { pid, parentPid: Number(fields[1]), exe, startedAt: fields[19] };
+    return { pid, parentPid: Number(fields[1]), exe, startedAt: fields[19],channelOptIn:channelLaunchOptIn(commandLine.split("\0")) };
   } catch { throw fail("native_process_unavailable"); }
 }
 export async function processAncestors({ pid = process.ppid, inspect = inspectProcess } = {}) {
@@ -79,7 +97,7 @@ export async function resolveClaudeSource(configPath, { ancestors = processAnces
     let record; try { record = await readRecord(join(root, file)); } catch { continue; }
     if (record.schemaVersion !== 1 || record.hookEvent === "SessionEnd" || record.provider !== config.provider || record.host !== config.host || !nativeUuid.test(record.nativeThreadId ?? "") || !record.process) continue;
     const current = chain.find(p => p.pid === record.process.pid);
-    if (current && nativeExecutable(current, "claude", config.nativeExecutable) && current.startedAt === record.process.startedAt && current.exe === record.process.exe) matches.push(record);
+    if (current && nativeExecutable(current, "claude", config.nativeExecutable) && current.startedAt === record.process.startedAt && current.exe === record.process.exe) matches.push({...record,channelOptIn:current.channelOptIn===true});
   }
   if (matches.length !== 1) throw fail(matches.length ? "native_lifecycle_binding_ambiguous" : "native_lifecycle_binding_stale_or_missing");
   return matches[0];

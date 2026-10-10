@@ -7,7 +7,7 @@ export function exactDependencyVersion(value) {
 }
 export function dependencyVersions({ manifest, manifestPath = new URL("../package.json", import.meta.url) } = {}) {
   const packageData = manifest ?? JSON.parse(readFileSync(manifestPath, "utf8"));
-  const names = { mcp: "@modelcontextprotocol/sdk", zod: "zod", claude: "@anthropic-ai/claude-agent-sdk" };
+  const names = { mcp: "@modelcontextprotocol/sdk", zod: "zod", claude: "@anthropic-ai/claude-agent-sdk", ws:"ws" };
   const versions = Object.fromEntries(Object.entries(names).map(([key, name]) => [key, packageData.dependencies?.[name]]));
   if (Object.values(versions).some(value => !exactDependencyVersion(value))) throw new Error("Managed runtime dependencies require exact semantic versions in the root manifest");
   return versions;
