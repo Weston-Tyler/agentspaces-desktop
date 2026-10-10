@@ -1,3 +1,5 @@
+import { machineFields, machineChange, machineView } from './machine-queue.mjs';
+import { decisionFields, decisionChange, decisionView } from './coordination-records.mjs';
 import { Identity, Peer, cbor, spaceIdLocal } from '@agentspaces/client';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, renameSync, openSync, closeSync, unlinkSync } from 'node:fs';
@@ -82,6 +84,8 @@ export class WorkBoard {
       coverage: { ...result.coverage, synchronized: true, source: 'durable companion-owned AgentSpaces replica' },
       capabilities: { create: true, claim: true, update: true, complete: true, modelExecution: false } };
   }
+  machines(binding, options = {}) { return machineView(this, binding, options); }
+  decisions(binding, options = {}) { return decisionView(this, binding, options); }
   mutate(input, binding) {
     const operation = this.tail.then(async () => {
       this.access(binding);
@@ -101,10 +105,10 @@ export class WorkBoard {
   }
   async apply(input, binding) {
     const { action, deliveryId } = input;
-    if (!['create', 'claim', 'renew', 'update', 'complete'].includes(action)) throw new Error('Unknown work-board action');
+    if (!['create', 'claim', 'renew', 'update', 'complete', ...Object.keys(decisionFields), ...Object.keys(machineFields)].includes(action)) throw new Error('Unknown work-board action');
     bounded(deliveryId, 100, 'deliveryId');
     if (!/^[A-Za-z0-9-]{8,100}$/.test(deliveryId)) throw new Error('Stable deliveryId required');
-    const allowed = ['action','deliveryId', ...(action === 'create' ? ['title','brief','repository','base','allowedFiles'] : ['claim','renew'].includes(action) ? ['entryId','leaseMinutes'] : ['entryId','status','summary','branch','head','evidence'])];
+    const allowed = ['action','deliveryId', ...(decisionFields[action] ?? machineFields[action] ?? (action === 'create' ? ['title','brief','repository','base','allowedFiles'] : ['claim','renew'].includes(action) ? ['entryId','leaseMinutes'] : ['entryId','status','summary','branch','head','evidence']))];
     if (Object.keys(input).some(k => !allowed.includes(k))) throw new Error('Unknown work-board field');
     this.access(binding); this.open();
     const actor = this.access(binding), key = createHash('sha256').update(`${actor}:${deliveryId}`).digest('hex');
@@ -120,7 +124,11 @@ export class WorkBoard {
       this.access(binding, { create: true });
       const agent = this.agent(actor);
       let entryId = input.entryId, result;
-      if (action === 'create') {
+      if (machineFields[action]) {
+        result = await machineChange(this,input,binding,actor,agent);
+      } else if (decisionFields[action]) {
+        result = await decisionChange(this,input,binding,actor,agent);
+      } else if (action === 'create') {
         const value = { title: bounded(input.title, 200, 'title'), brief: bounded(input.brief, 12000, 'brief'),
           repository: bounded(input.repository, 2000, 'repository').trim().replace(/\/+$/, ''), base: bounded(input.base, 200, 'base'),
           allowedFiles: ownedPaths(input.allowedFiles), createdBy: actor,
@@ -167,6 +175,7 @@ export class WorkBoard {
         }
       }
       this.access(binding);
+      if (this.peer.states.size > 10000) throw new Error('Work-board record capacity reached');
       this.receipts[key] = { digest, result };
       const bytes = cbor.dumps({ version: 1, scope: this.scope, receipts: this.receipts, replica: this.peer.exportSnapshot() });
       if (bytes.length > 32 * 1024 * 1024) throw new Error('Work board exceeds storage limit');

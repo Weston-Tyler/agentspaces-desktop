@@ -22,6 +22,17 @@ Use your existing native tool logins. AgentSpaces Desktop does not collect provi
 
 The first-run improvements described below are source changes awaiting a new installer release; v0.1.0-alpha.3 still uses the earlier setup flow.
 
+## Coordination tools in source
+
+The shared work board now has a **decision inbox** and **fair machine queue**.
+Agents submit questions with options and recommendations; the owner records an
+answer. Machine requests share a visible queue with release priority, aging,
+whole-machine reservations and bounded runtimes. A Linux runner acquires the
+existing host locks before executing an explicitly supplied command. All three
+surfaces have scoped agent APIs and headless access. These additions are source
+features, not part of the alpha.3 download. See [coordination](docs/coordination.md)
+and [work board](docs/work-board.md) for setup and qualification limits.
+
 ## Get started
 
 Download the [v0.1.0-alpha.3 builds](https://github.com/Weston-Tyler/agentspaces-desktop/releases/tag/v0.1.0-alpha.3), then follow the [installation guide](docs/installer.md). Windows setup adds AgentSpaces Desktop to Start/search and Installed apps. The Linux archive includes a per-user applications-menu installer. Existing Codex/Claude tools and sign-in remain prerequisites; packaged builds include their own application Node runtime. [All releases](https://github.com/Weston-Tyler/agentspaces-desktop/releases) retain their version-specific artifacts and checksums.

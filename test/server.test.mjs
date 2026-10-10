@@ -148,7 +148,7 @@ test("real MCP SDK transport retrieves a fixture finding without invoking a mode
     }),
   );
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 18);
+  assert.equal(tools.tools.length, 22);
   const discovered = await client.callTool({
     name: "discover_permitted_work",
     arguments: { query: "retry", provider: "codex", status: "archived" },
@@ -250,4 +250,16 @@ test("workspace MCP lookup and artifact read enforce the bound broad scope", asy
     arguments: { query: "Architecture" },
   });
   assert.equal(denied.isError, true);
+});
+
+test('browser module dependencies are served as JavaScript',async t=>{
+ const app=await setup(t),seen=new Set(),pending=['/app.js'];
+ while(pending.length) {
+  const path=pending.pop();if(seen.has(path))continue;seen.add(path);
+  const response=await fetch(app.address+path);assert.equal(response.status,200,path);
+  assert.match(response.headers.get('content-type'),/javascript/,path);
+  const source=await response.text();
+  for(const match of source.matchAll(/(?:from\s*|import\s*)["'](\.\/[\w-]+\.js)["']/g))pending.push('/'+match[1].slice(2));
+ }
+ assert(seen.has('/answer-connection.js'));assert(seen.has('/coordination.js'));
 });

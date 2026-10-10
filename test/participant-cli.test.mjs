@@ -131,3 +131,21 @@ test("Real HTTP response over byte bound is rejected", async (t) => {
   const { args } = await setup(t, () => ({ status: 200, body: JSON.stringify({ text: "x".repeat(1048577) }) }));
   await assert.rejects(runParticipantCli(args("discover")), /scoped_transport_failed/);
 });
+
+test('decision and machine CLI commands keep source binding and route bounded JSON',async t=>{
+ const f=await setup(t);
+ for(const command of ['decisions','machines'])await runParticipantCli(f.args(command));
+ for(const command of ['decision-change','machine-change'])await runParticipantCli(f.args(command),{input:JSON.stringify({action:command==='decision-change'?'decision_withdraw':'machine_cancel',entryId:'synthetic',deliveryId:'synthetic-operation-001',rationale:'Reason',summary:'Reason'})});
+ assert.deepEqual(f.requests.map(r=>r.path),['/api/decisions/list','/api/machines/list','/api/decisions/change','/api/machines/change']);
+ assert(f.requests.every(r=>r.auth==='Bearer '+TOKEN&&r.host==='127.0.0.1:43127'));
+});
+
+test('Linux machine runner uses exact participant identity and SSH bridge authority end to end',{skip:process.platform!=='linux'},async t=>{
+ let lock;
+ const f=await setup(t,r=>({status:200,body:r.body.action==='machine_request'?{entryId:'synthetic-request'}:r.body.action==='machine_acquire'?{entryId:'synthetic-request',status:'reserved',host:'remote',lockPaths:[lock],gateCommand:[],minutes:1,deadline:Date.now()+5000}:{status:'released'}}));
+ lock=join(f.root,'machine.lock');
+ await promisify(execFile)('python3',[resolveRunner(),'--config',f.path,'--source',SOURCE,'--machine','synthetic-machine','--title','Synthetic smoke','--minutes','1','--','python3','-c','pass'],{timeout:12000});
+ assert.deepEqual(f.requests.map(r=>r.body.action),['machine_request','machine_acquire','machine_release']);
+ assert(f.requests.every(r=>r.host==='127.0.0.1:43127'&&r.auth==='Bearer '+TOKEN));
+});
+function resolveRunner(){return new URL('../scripts/machine-run.py',import.meta.url).pathname;}

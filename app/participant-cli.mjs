@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = (code) => Object.assign(new Error(code), { code });
 function argumentsOf(args) {
-  const options = {}, commands = ["board", "board-change", "info", "capabilities", "discover", "joinable", "join", "invite", "create", "new-thread", "message", "broadcast", "read", "work", "finding", "contribute"];
+  const options = {}, commands = ["decisions", "decision-change", "machines", "machine-change", "board", "board-change", "info", "capabilities", "discover", "joinable", "join", "invite", "create", "new-thread", "message", "broadcast", "read", "work", "finding", "contribute"];
   let command = null;
   for (let i = 0; i < args.length; i++) {
     const value = args[i];
@@ -17,7 +17,7 @@ function argumentsOf(args) {
     options[key] = args[++i];
   }
   if (!command || !options.config || !UUID.test(options.source ?? "")) throw fail("config_and_exact_source_required");
-  const allowed = { board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], 'new-thread': [], message: [], broadcast: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
+  const allowed = { decisions: [], "decision-change": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], 'new-thread': [], message: [], broadcast: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
   if (Object.keys(options).some((key) => !["config", "source", ...allowed[command]].includes(key))) throw fail("invalid_command_argument");
   return { command, options };
 }
@@ -93,6 +93,10 @@ export async function runParticipantCli(args, { input, requestImpl = request } =
       || data.discussionId !== undefined && !UUID.test(data.discussionId ?? '')) throw fail('bounded_agent_message_required');
     body = data;
     path = command === 'message' ? '/api/agent/message' : '/api/agent/broadcast';
+  }
+  else if (['decisions','decision-change','machines','machine-change'].includes(command)) {
+    path = ({decisions:'/api/decisions/list','decision-change':'/api/decisions/change',machines:'/api/machines/list','machine-change':'/api/machines/change'})[command];
+    body = command.endsWith('-change') ? await inputJson(input) : {};
   }
   else if (command === 'board' || command === 'board-change') {
     path = command === 'board' ? '/api/work-board/list' : '/api/work-board/change';

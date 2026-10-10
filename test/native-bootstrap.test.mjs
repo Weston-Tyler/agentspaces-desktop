@@ -124,7 +124,7 @@ test("MCP protocol advertises source and group tools and preserves native reques
   } });
   const client = new Client({ name: "fixture-native-bootstrap-client", version: "1" }), [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   await bootstrap.server.connect(serverTransport); await client.connect(clientTransport);
-  assert.equal((await client.listTools()).tools.length, 19);
+  assert.equal((await client.listTools()).tools.length, 23);
   const reply = await client.callTool({ name: "discover_group_discussions", arguments: {}, _meta: { threadId: UUID } });
   assert.equal(reply.isError, undefined); assert.deepEqual(nativeIds, [UUID]);
   const denied = await client.callTool({ name: "discover_group_discussions", arguments: {} });

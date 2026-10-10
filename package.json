@@ -57,6 +57,7 @@
       "NOTICE",
       "docs/installer.md",
       "scripts/install-linux.mjs",
+      "scripts/machine-run.py",
       "!node_modules/@anthropic-ai/claude-agent-sdk-*/**"
     ],
     "extraResources": [

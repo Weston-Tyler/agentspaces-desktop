@@ -1,3 +1,4 @@
+import { mountCoordination } from "./coordination.js";
 import { mountWorkBoard } from "./work-board.js";
 import { nativeControls } from "./native-controls.js";
 import { mountDiscussions } from "./discussions.js";
@@ -104,6 +105,8 @@ function scheduleDiscoveryPoll() {
   }, 1500);
 }
 const titles = {
+  decisions: ["Decisions", "Questions awaiting your answer.", "Agents propose; you decide."],
+  machines: ["Machines", "Shared test time, in order.", "Inspect the queue and runtime deadlines."],
   board: ["Work board", "Shared work, with an owner and evidence.", "Create a brief, claim a work item, and record progress and results."],
   home: ["Ask", "Ask about your work.", "Your threads, files and decisions—in one place."],
   help: ["How to use", "Your connected workspace.", "A guide to questions, thread agents and background connections."],
@@ -186,6 +189,8 @@ function render() {
     native: () => "",
     advanced: () => "",
     discussions: () => "",
+    decisions: () => "",
+    machines: () => "",
     board: () => "",
     workspace: () => "",
     discover: discovery,
@@ -200,6 +205,7 @@ function render() {
       filters.project = "all";
     showResults();
   }
+  if (["decisions","machines"].includes(page)) mountCoordination($("#view"), { api, notice, page });
   if (page === "board") mountWorkBoard($("#view"), { api, notice });
   if (page === "settings") nativeControls(state, { api, notice });
   if (page === "home") mountHomeChat($("#view"), { api, notice, state });
