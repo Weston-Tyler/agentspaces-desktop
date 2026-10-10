@@ -29,7 +29,7 @@ async function fixture(t,{wakeEnabled=true}={}){
  const issued=await board.mutate(answer,null,await auth.verify(password,answer));
  const continuation={state:'pending',stepId:'step-1',summary:'Run regression checks',kind:'tests',decisionId:row.entryId,requestHash:row.hash,receiptId:issued.resultEntryId};
  const update=(value=continuation)=>board.mutate(op('update',{entryId:item.entryId,status:'in_progress',summary:'Ready for next check',branch:scope.branch,head:'head',evidence:'Synthetic test',continuation:value}),a);
- return {engine,board,a,auth,password,item,scope,request,row,continuation,update,advance:ms=>now+=ms};
+ return {root,engine,board,a,auth,password,item,scope,request,row,continuation,update,advance:ms=>now+=ms};
 }
 test('standing approval binds exact brief and source; pending step retains always-ask limits',async t=>{
  const f=await fixture(t);await f.update();
@@ -103,4 +103,33 @@ test('dispatch fence checks current step but completed native replies may still 
  await f.update({...f.continuation,state:'gate_ready'});
  assert.throws(()=>hub.validateContinuation('a',sent.group.id,sent.message.id),/no longer authorized/);
  assert.doesNotThrow(()=>hub.validate('a',sent.group.id,sent.message.id));
+});
+
+
+import {startServer} from '../app/server.mjs';
+import {preflightUpdate} from '../app/update-preflight.mjs';
+
+test('safe update waits for in-flight continuation inspection and never wakes after drain begins',async t=>{
+ const f=await fixture(t);await f.update();
+ const app=await startServer({root:f.root,port:0,engine:f.engine,desktopDiscovery:false,codexAdapterFactory:()=>{throw Error('Live native forbidden');}});
+ let release,entered;const inspecting=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);let routes=0;
+ app.continuationWaker.inspect=async()=>{entered();await gate;return {state:'idle'};};app.continuationWaker.route=async()=>{routes++;};
+ const tick=app.continuationWaker.tick();
+ try {
+  await inspecting;const lease=app.updateGate.prepare({candidate:'d'.repeat(64)});
+  assert.equal(lease.ready,false);assert.ok(lease.blockers.includes('native-observation-in-progress'));
+  assert.throws(()=>app.updateGate.commit(lease.token),/update_busy/);
+  release();await tick;assert.equal(routes,0);assert.equal(app.updateGate.status().ready,true);
+  assert.equal(f.engine.store.data.discussions.length,0);
+  app.updateGate.abort(lease.token);
+ } finally {release();await tick;await app.close();}
+});
+
+test('preflight never starts background continuation scheduling with an existing ready owner grant',async t=>{
+ const f=await fixture(t);await f.update();assert.equal(f.board.continuations(f.a).items[0].state,'ready');
+ const before=f.engine.store.data.discussions.length;let starts=0;
+ const original=ContinuationWaker.prototype.start;
+ ContinuationWaker.prototype.start=function(){starts++;return this;};
+ try {const proof=await preflightUpdate({stateRoot:f.root});assert.equal(proof.passed,true);assert.equal(proof.modelCalls,0);assert.equal(starts,0);assert.equal(f.engine.store.data.discussions.length,before);}
+ finally {ContinuationWaker.prototype.start=original;}
 });
