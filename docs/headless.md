@@ -93,3 +93,5 @@ identity. The installed SessionStart/UserPromptSubmit hook records it before net
 admission, so the next native prompt can restore a missing record. If it remains
 missing, verify that the managed lifecycle hooks are loaded in that native session.
 Never borrow another thread's connection file to work around this error.
+
+Owner-authorized brief jobs have a separate [headless job guide](headless-jobs.md), including native budget limits, logs, artifact links and explicit provider handoffs.

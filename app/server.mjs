@@ -1,6 +1,7 @@
 import { UpdateGate } from './update-gate.mjs';
 import {ContinuationWaker} from './work-continuation.mjs';
 import { RoomSubscriptions } from "./room-subscriptions.mjs";
+import { HeadlessJobs } from './headless-jobs.mjs';
 import { OwnerApprovalAuth } from './owner-approval-auth.mjs';
 import { notifyApproval } from './approval-notification.mjs';
 import http from "node:http";
@@ -74,6 +75,7 @@ export async function startServer({
   automaticInstallLocal,
   automaticInstallRemote,
   nativeThreadAdapterFactory,
+  headlessJobOptions,
 } = {}) {
   const store = provided?.store ?? new Store(root),
     fabric = provided?.fabric ?? new FabricAdapter({ stateRoot: root }),
@@ -93,12 +95,13 @@ export async function startServer({
   const admin = randomBytes(32).toString("hex"),
     instance = randomBytes(16).toString("hex");
   let closing = false;
+  const headlessJobs = new HeadlessJobs(engine,{...headlessJobOptions,admitLaunch:()=>engine.dispatchAllowed()});
   const activeAnswers = new Map();
   let activeMutations = 0;
   const updateGate = new UpdateGate({ blockers: () => {
     const blockers = [];
     if (activeMutations) blockers.push('request-in-progress');
-    if (activeAnswers.size || activeNativeProcessCount()) blockers.push('embedded-native-process');
+    if (activeAnswers.size || activeNativeProcessCount() || headlessJobs.activeCount()) blockers.push('embedded-native-process');
     if (terminals.list().some(item => ['starting','running'].includes(item.status))) blockers.push('embedded-native-terminal');
     for (const requestId of codexAgents.aborters.keys()) {
       if (!store.data.codexDiscussionNativeReceipts?.[requestId]?.queuedSubmissionId) blockers.push('native-submission-unacknowledged');
@@ -239,6 +242,7 @@ export async function startServer({
           status: closing ? "stopping" : "running",
           instance,
           pid: process.pid,
+          activeHeadlessJobs: headlessJobs.activeCount(),
         });
         return;
       }
@@ -298,6 +302,8 @@ export async function startServer({
           "/api/work-board/list",
           "/api/work-board/continuations",
           "/api/lanes/list",
+          "/api/headless/list",
+          "/api/headless/request",
           "/api/artifacts/list",
           "/api/artifacts/create",
           "/api/work-board/change",
@@ -367,6 +373,14 @@ export async function startServer({
           result = await engine.workBoard.mutate(data, connector); break;
         case "/api/work-board/continuations":
           result = continuationWaker.view(connector,data); break;
+        case "/api/headless/request":
+          result = await headlessJobs.request(data,connector); break;
+        case "/api/headless/launch":
+          result = await headlessJobs.launch(data,connector); break;
+        case "/api/headless/list":
+          result = headlessJobs.list(connector,data); break;
+        case "/api/headless/log":
+          result = headlessJobs.log(connector,data); break;
         case "/api/lanes/list":
           result = engine.workBoard.lanes(connector, data); break;
         case "/api/artifacts/list":
@@ -426,7 +440,8 @@ export async function startServer({
             findings: { discover: true, retrieveShared: true },
             ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
             unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
-            availableTools: ['read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            headlessJobs: headlessJobs.capabilities(),
+            availableTools: ['request_headless_job','list_headless_jobs','read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
           break;
         }
@@ -761,5 +776,5 @@ export async function startServer({
       if (current.instance === instance) unlinkSync(runtimePath);
     }
   }
-  return { server, engine, store, address, instance, admin, close, updateGate, terminals, channels, connections, participantConnections, sourceBindings, automaticConnections, codexAgents, continuationWaker, desktopDiscovery: desktopStartup };
+  return { server, engine, store, address, instance, admin, close, updateGate, terminals, channels, connections, participantConnections, sourceBindings, automaticConnections, codexAgents, continuationWaker, headlessJobs, desktopDiscovery: desktopStartup };
 }

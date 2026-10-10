@@ -37,6 +37,8 @@ export function participantGuide(input) {
     "## Complete command reference", "", "Append the following command and flags to this bound command:", "", "```" + shell, command, "```", "",
     "| Command | Purpose / input |", "| --- | --- |",
     "| info | Confirm the exact bound source and supported CLI commands |",
+    "| job-request | File exact local launch JSON in the owner decision inbox; does not launch or spend |",
+    "| jobs | Inspect scoped owner-launched jobs and final artifact IDs; launch/logs require owner |",
     "| lanes | Read derived lane status with exact evidence; no model calls |",
     "| artifacts | Stdin JSON {} or workEntryId/discussionId filters; list report metadata |",
     "| artifact-read | Stdin JSON with exact entryId; read a permitted hashed report |",

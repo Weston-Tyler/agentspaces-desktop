@@ -26,11 +26,11 @@ async function cleanupScratch(scratch) {
 function hostCheck(host) {
   if (!ANSWER_VERSION_PINS[host]) throw failure("unsupported_host");
 }
-function collect(
+export function collectNativeProcess(
   spawnProcess,
   command,
   args,
-  { input = "", timeoutMs = 5000, limit = 65536, signal, onLine, cwd, preserveProcess = false, onProcessStart, onProcessClose } = {},
+  { input = "", timeoutMs = 5000, limit = 65536, signal, onLine, cwd, preserveProcess = false, onProcessStart, onProcessClose, onProcessOutput } = {},
 ) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(failure("cancelled"));
@@ -59,12 +59,13 @@ function collect(
         ...(cwd ? { cwd } : {}),
       });
       if (preserveProcess) activeNativeProcesses.add(child);
-      onProcessStart?.();
+      onProcessStart?.(child);
       child.on("error", () =>
         finish(failure("native_process_unavailable", dispatched)),
       );
       child.stderr?.on("data", () => {}); // Never retain native diagnostics or credentials.
       child.stdout.on("data", (chunk) => {
+        try { onProcessOutput?.(chunk); } catch { return finish(failure("native_observer_failed", dispatched)); }
         if (settled) return;
         const value = chunk.toString("utf8");
         output += value;
@@ -81,9 +82,9 @@ function collect(
           }
         }
       });
-      child.on("close", async (code) => {
+      child.on("close", async (code, signal) => {
         activeNativeProcesses.delete(child);
-        try { await onProcessClose?.(); }
+        try { await onProcessClose?.({code,signal}); }
         catch { return finish(failure("native_cleanup_failed", dispatched)); }
         if (settled) return;
         try {
@@ -121,7 +122,7 @@ export async function detectAnswerProviders({
   let records;
   if (host === REMOTE_HOST) {
     try {
-      const r = await collect(
+      const r = await collectNativeProcess(
         spawnProcess,
         "ssh",
         [SSH_ALIAS, "node --input-type=module"],
@@ -135,10 +136,10 @@ export async function detectAnswerProviders({
     records = await Promise.all(
       ["codex", "claude"].map(async (provider) => {
         try {
-          const version = await collect(spawnProcess, provider, ["--version"]);
+          const version = await collectNativeProcess(spawnProcess, provider, ["--version"]);
           let authenticated = false;
           if (provider === "codex") {
-            const status = await collect(spawnProcess, provider, [
+            const status = await collectNativeProcess(spawnProcess, provider, [
               "login",
               "status",
             ]);
@@ -388,7 +389,7 @@ export class NativeAnswerProvider {
         }
       }
       if (signal?.aborted) throw failure("cancelled", false);
-      const result = await collect(
+      const result = await collectNativeProcess(
         this.spawnProcess,
         remote ? "ssh" : this.provider,
         remote

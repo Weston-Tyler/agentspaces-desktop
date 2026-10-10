@@ -207,3 +207,29 @@ test('artifact room links require exact existing message and current membership 
  f.engine.discussions.group(group.id).members=[];
  assert.equal((await f.call('/api/artifacts/list',{entryId:created.body.entryId})).status,400);
 });
+
+
+test('headless jobs deny agent launch and private logs while scoped status honors room membership',async t=>{
+ const f=await fixture(t),group=f.engine.discussions.create({title:'Jobs',sessionIds:[f.source.id]});
+ const posted=f.engine.discussions.post({id:group.id,text:'Job report here',deliveryId:'job-room-parent',targets:[]});
+ const id='synthetic-headless-job';
+ f.engine.store.data.headlessJobReceipts[id]={id,scopeId:'synthetic-permitted-scope',account:'synthetic-owner',provider:'codex',status:'finished',discussionId:group.id,messageId:posted.messages[0].id,cwd:'/private/owner/work',log:'PRIVATE SYNTHETIC LOG'};
+ const listed=await f.call('/api/headless/list');assert.equal(listed.status,200);assert.equal(listed.body.items.length,1);assert.ok(!JSON.stringify(listed.body).includes('PRIVATE'));assert.ok(!JSON.stringify(listed.body).includes('/private/owner'));
+ assert.equal((await f.call('/api/headless/launch',{})).status,400);
+ assert.equal((await f.call('/api/headless/log',{id})).status,400);
+ const ownerLog=await f.call('/api/headless/log',{id},f.app.admin);assert.equal(ownerLog.status,200);assert.equal(ownerLog.body.text,'PRIVATE SYNTHETIC LOG');
+ f.engine.discussions.group(group.id).members=[];assert.equal((await f.call('/api/headless/list')).body.items.length,0);
+ f.engine.store.data.grants[f.source.id].share=false;assert.equal((await f.call('/api/headless/list')).status,400);
+ assert.equal(f.effects.nativeFactories,0);
+});
+
+
+test('agents request exact headless payload through existing decisions without launching on answer',async t=>{
+ const f=await fixture(t);
+ const made=await f.call('/api/work-board/change',{action:'create',deliveryId:'headless-http-work',title:'Headless request',brief:'Synthetic',repository:'https://example.invalid/synthetic',base:'a'.repeat(40),allowedFiles:'src/test.js'});
+ const payload={deliveryId:'headless-http-request',provider:'codex',cwd:f.source.cwd,workEntryId:made.body.entryId,briefText:'Synthetic exact brief',budget:{observationMs:1000,maxTurns:2,maxCostUsd:1}};
+ const request=await f.call('/api/headless/request',payload);assert.equal(request.status,200);assert.equal(request.body.state,'blocked_requires_owner_launch');assert.deepEqual(request.body.launch,payload);
+ const rows=await f.call('/api/decisions/list');assert.match(rows.body.items[0].value.question,/Synthetic exact brief/);
+ const answered=await f.call('/api/decisions/change',{action:'decision_answer',deliveryId:'headless-http-answer',entryId:request.body.entryId,optionId:'approve_owner_launch',rationale:'Synthetic owner decision'},f.app.admin);assert.equal(answered.status,200);
+ assert.equal((await f.call('/api/headless/list')).body.items.length,0);assert.equal(f.effects.nativeFactories,0);
+});

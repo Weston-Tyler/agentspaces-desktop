@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = (code, details) => Object.assign(new Error(code), { code, ...(details ? { details } : {}) });
-const COMMAND_OPTIONS = { subscriptions: ["discussion"], subscribe: [], digest: [], continuations: [], lanes: [], artifacts: [], "artifact-read": [], "artifact-drop": [], decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
+const COMMAND_OPTIONS = { "job-request": [], jobs: [], subscriptions: ["discussion"], subscribe: [], digest: [], continuations: [], lanes: [], artifacts: [], "artifact-read": [], "artifact-drop": [], decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
 const COMMANDS = Object.keys(COMMAND_OPTIONS);
 const string = (maxLength, extra = {}) => ({ type: "string", minLength: 1, maxLength, ...extra });
 const uuid = { type: "string", pattern: UUID.source.replaceAll("a-f", "a-fA-F") };
@@ -13,6 +13,7 @@ const delivery = string(100, { minLength: 8, pattern: "^[a-zA-Z0-9-]{8,100}$" })
 const objectSchema = (properties, required, extra = {}) => ({ type: "object", properties, required, additionalProperties: false, ...extra });
 const MESSAGE_PROPERTIES = { text: string(8000, { pattern: "\\S" }), nativeTurnId: string(200), deliveryId: delivery };
 const STDIN_SCHEMAS = {
+  "job-request": objectSchema({deliveryId:delivery,provider:{enum:['codex','claude']},host:{enum:['local']},cwd:string(4096),workEntryId:string(100),discussionId:uuid,messageId:uuid,briefText:string(8000),budget:objectSchema({observationMs:{type:'integer',minimum:1000,maximum:900000},maxTurns:{type:'integer',minimum:1,maximum:100},maxCostUsd:{type:'number',exclusiveMinimum:0,maximum:50}},['observationMs','maxTurns','maxCostUsd'])},['deliveryId','provider','cwd','workEntryId','briefText','budget']),
   "artifact-read": objectSchema({entryId:string(100)},['entryId']),
   "artifact-drop": objectSchema({deliveryId:delivery,name:string(120),text:string(16384),mediaType:{enum:['text/plain','text/markdown','application/json']},workEntryId:string(100),discussionId:uuid,messageId:uuid,previousEntryId:string(100)},['deliveryId','name','text']),
   artifacts: objectSchema({workEntryId:string(100),discussionId:uuid,limit:{type:'integer',minimum:1,maximum:200}},[]),
@@ -124,7 +125,9 @@ export async function runParticipantCli(args, { input, requestImpl = request } =
   const attribution = "locally connector-bound; native caller not verified";
   if (command === "info") return { nativeThreadId: config.nativeThreadId, sessionId: config.sessionId, provider: config.provider, host: config.host, attribution, commands: COMMANDS };
   let path, body;
-  if (command === 'lanes') { path = '/api/lanes/list'; body = {limit:200}; }
+  if (command === 'job-request') { path = '/api/headless/request'; body = validateStdin(command, await inputJson(input), 'bounded_headless_request_required'); }
+  else if (command === 'jobs') { path = '/api/headless/list'; body = {}; }
+  else if (command === 'lanes') { path = '/api/lanes/list'; body = {limit:200}; }
   else if (['artifacts','artifact-read','artifact-drop'].includes(command)) { path = command === 'artifact-drop' ? '/api/artifacts/create' : '/api/artifacts/list'; body = validateStdin(command, await inputJson(input), 'bounded_artifact_request_required'); }
   else if (command === 'capabilities') { path = '/api/agent/capabilities'; body = {}; }
   else if (command === 'subscriptions') {

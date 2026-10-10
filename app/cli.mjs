@@ -33,7 +33,7 @@ try {
         2,
       ),
     );
-  } else if (["status", "stop", "owner-password", "update-status", "update-prepare", "update-abort", "update-commit"].includes(command)) {
+  } else if (["status", "stop", "owner-password", "job-launch", "jobs", "job-log", "update-status", "update-prepare", "update-abort", "update-commit"].includes(command)) {
     const r = JSON.parse(readFileSync(join(root, "runtime.json"), "utf8"));
     if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(r.address))
       throw new Error("Invalid local runtime address");
@@ -49,6 +49,11 @@ try {
       const response=await fetch(r.address+'/api/updates/'+action,{method:isStatus?'GET':'POST',headers:{...headers,'Content-Type':'application/json'},
         ...(!isStatus?{body:JSON.stringify(action==='prepare'?{candidate:process.argv[3]}:{token:process.env.AGENTSPACES_UPDATE_TOKEN})}:{}),signal:AbortSignal.timeout(5000)});
       const value=await response.json();if(!response.ok)throw Error(value.error??'Update control failed');console.log(JSON.stringify(value));
+    } else if (['job-launch','jobs','job-log'].includes(command)) {
+      let input='';for await(const chunk of process.stdin){input+=chunk;if(Buffer.byteLength(input)>65536)throw Error('Job input exceeds 64 KiB');}
+      const body=input.trim()?JSON.parse(input):{};
+      const response=await fetch(r.address+({'job-launch':'/api/headless/launch',jobs:'/api/headless/list','job-log':'/api/headless/log'})[command],{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(30000)});
+      const value=await response.json();if(!response.ok)throw Error(value.error??'Headless job operation failed');console.log(JSON.stringify(value));
     } else if(command==='owner-password') {
       const {hiddenPassword}=await import('./owner-password-prompt.mjs');
       const post=async(path,data)=>{const response=await fetch(r.address+path,{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(10000)});const value=await response.json();if(!response.ok)throw Error(value.error??'Owner setup failed');return value;};
@@ -67,7 +72,7 @@ try {
             signal: AbortSignal.timeout(2000),
           }).then((v) => v.text()),
     );
-  } else throw new Error("Commands: serve, status, stop, diagnostics, owner-password, update-status, update-prepare <candidate-sha256>, update-abort, update-commit (lease via AGENTSPACES_UPDATE_TOKEN)");
+  } else throw new Error("Commands: serve, status, stop, diagnostics, owner-password, job-launch, jobs, job-log, update-status, update-prepare <candidate-sha256>, update-abort, update-commit (lease via AGENTSPACES_UPDATE_TOKEN)");
 } catch (e) {
   console.error(e.message);
   process.exitCode = 1;
