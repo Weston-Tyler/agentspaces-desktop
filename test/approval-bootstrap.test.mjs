@@ -1,0 +1,23 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,writeFile,rm,realpath} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {Client} from '@modelcontextprotocol/sdk/client/index.js';
+import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
+import {createNativeBootstrap} from '../app/native-bootstrap-mcp.mjs';
+test('missing Claude lifecycle binding gives a native-hook recovery path without fabricating identity',async t=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'as-approval-bootstrap-')),configPath=join(root,'device.json');
+ await writeFile(configPath,JSON.stringify({schemaVersion:1,address:'http://127.0.0.1:45111',authority:'127.0.0.1:43127',token:'a'.repeat(64),provider:'claude',host:'remote'}),{mode:0o600});
+ let calls=0;
+ const bootstrap=await createNativeBootstrap({configPath,resolveClaude:async()=>{throw Object.assign(Error('missing'),{code:'native_lifecycle_binding_missing'});},requestImpl:async()=>{calls++;}});
+ const client=new Client({name:'fixture',version:'1'}),[serverTransport,clientTransport]=InMemoryTransport.createLinkedPair();
+ t.after(async()=>{await client.close();await bootstrap.server.close();await rm(root,{recursive:true,force:true});});
+ await bootstrap.server.connect(serverTransport);await client.connect(clientTransport);
+ const listed=await client.listTools();const verify=listed.tools.find(t=>t.name==='verify_owner_approval');
+ assert.ok(verify);assert.equal(verify.annotations.readOnlyHint,false);
+ const result=await client.callTool({name:'verify_owner_approval',arguments:{entryId:'request',requestHash:'a'.repeat(64),receiptId:'receipt'}});
+ assert.equal(result.isError,true);assert.match(result.content[0].text,/native_lifecycle_binding_missing/);
+ assert.match(result.content[0].text,/UserPromptSubmit/);assert.match(result.content[0].text,/Do not invent/);
+ assert.equal(calls,0);
+});

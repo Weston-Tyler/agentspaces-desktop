@@ -149,3 +149,66 @@ test('Linux machine runner uses exact participant identity and SSH bridge author
  assert(f.requests.every(r=>r.host==='127.0.0.1:43127'&&r.auth==='Bearer '+TOKEN));
 });
 function resolveRunner(){return new URL('../scripts/machine-run.py',import.meta.url).pathname;}
+
+test('CLI help is available offline without configuration, source, stdin or network', async () => {
+  const noNetwork = async () => { throw new Error('Help must never access network'); };
+  const index = await runParticipantCli(['--help'], { requestImpl: noNetwork });
+  assert(index.commands.includes('message')); assert(index.commands.includes('board'));
+  for (const args of [['message', '--help'], ['--help', 'message'], ['--config', '/not/read', '--source', 'invalid', 'message', '--help']]) {
+    const help = await runParticipantCli(args, { requestImpl: noNetwork });
+    assert.equal(help.command, 'message');
+    assert.deepEqual(help.stdinSchema.required, ['text', 'nativeTurnId', 'deliveryId']);
+    assert.equal(help.stdinSchema.properties.deliveryId.pattern, '^[a-zA-Z0-9-]{8,100}$');
+    assert.equal(help.stdinSchema.additionalProperties, false);
+    assert.equal(help.stdinSchema.oneOf.length, 2);
+    assert.match(help.notes.join(' '), /self-reported/);
+  }
+  const broadcast = await runParticipantCli(['broadcast', '--help']);
+  assert.equal(broadcast.stdinSchema.properties.activeWithinDays.maximum, 3650);
+  await assert.rejects(runParticipantCli(['message', '--unknown', '--help']), /invalid_arguments/);
+});
+
+test('Message validation identifies missing and invalid fields without echoing input or sending requests', async t => {
+  const f = await setup(t);
+  await assert.rejects(runParticipantCli(f.args('message'), { input: JSON.stringify({ text: 'Private content', nativeThreadId: GROUP }) }), error => {
+    assert.equal(error.code, 'bounded_agent_message_required');
+    assert.deepEqual(error.details.missingFields, ['nativeTurnId', 'deliveryId']);
+    assert.equal(error.details.help, 'message --help');
+    assert(!JSON.stringify(error).includes('Private content')); return true;
+  });
+  await assert.rejects(runParticipantCli(f.args('broadcast'), { input: JSON.stringify({ text: 'Private content', nativeTurnId: 'turn', deliveryId: 'x', activeWithinDays: 0, 'Private-key-name': true }) }), error => {
+    assert.deepEqual(error.details.invalidFields, ['deliveryId', 'activeWithinDays', 'additionalProperties']);
+    assert(!JSON.stringify(error).includes('Private')); return true;
+  });
+  await assert.rejects(runParticipantCli(f.args('message'), { input: JSON.stringify({ text: 'Hi', nativeTurnId: 'turn', deliveryId: 'valid-message-001' }) }), error => {
+    assert.deepEqual(error.details.invalidFields, ['sessionId|nativeThreadId']); return true;
+  });
+  assert.equal(f.requests.length, 0);
+});
+
+test('Executable copied CLI prints command schema and safe structured errors', async t => {
+  const f = await setup(t), script = join(f.root, 'copied-participant-cli.mjs');
+  await copyFile(new URL('../app/participant-cli.mjs', import.meta.url), script);
+  const help = await promisify(execFile)(process.execPath, [script, 'message', '--help']);
+  assert.equal(JSON.parse(help.stdout).stdinSchema.properties.text.maxLength, 8000);
+  const result = await new Promise(resolve => {
+    const child = execFile(process.execPath, [script, ...f.args('message')], (error, stdout, stderr) => resolve({ error, stdout, stderr }));
+    child.stdin.end(JSON.stringify({ text: 'Private message', nativeThreadId: GROUP }));
+  });
+  assert.equal(result.error.code, 1);
+  const diagnostic = JSON.parse(result.stderr);
+  assert.deepEqual(diagnostic.details.missingFields, ['nativeTurnId', 'deliveryId']);
+  assert(!result.stderr.includes('Private message')); assert.equal(result.stdout, '');
+});
+
+test('CLI verifies exact owner approval receipts without widening participant authority', async t => {
+  const f = await setup(t), body = { entryId: 'decision-1', requestHash: 'b'.repeat(64), receiptId: 'receipt-1' };
+  await runParticipantCli(f.args('verify-approval'), { input: JSON.stringify(body) });
+  assert.equal(f.requests[0].path, '/api/approvals/verify'); assert.deepEqual(f.requests[0].body, body);
+  for (const invalid of [{ ...body, receiptId: '' }, { ...body, requestHash: 'wrong' }, { ...body, owner: true }]) {
+    await assert.rejects(runParticipantCli(f.args('verify-approval'), { input: JSON.stringify(invalid) }), /exact_approval_receipt_required/);
+  }
+  assert.equal(f.requests.length, 1);
+  const help = await runParticipantCli(['verify-approval', '--help']);
+  assert.deepEqual(help.stdinSchema.required, ['entryId', 'requestHash', 'receiptId']);
+});

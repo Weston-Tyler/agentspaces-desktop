@@ -4,21 +4,62 @@ import http from "node:http";
 import { pathToFileURL } from "node:url";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-const fail = (code) => Object.assign(new Error(code), { code });
+const fail = (code, details) => Object.assign(new Error(code), { code, ...(details ? { details } : {}) });
+const COMMAND_OPTIONS = { decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
+const COMMANDS = Object.keys(COMMAND_OPTIONS);
+const string = (maxLength, extra = {}) => ({ type: "string", minLength: 1, maxLength, ...extra });
+const uuid = { type: "string", pattern: UUID.source.replaceAll("a-f", "a-fA-F") };
+const delivery = string(100, { minLength: 8, pattern: "^[a-zA-Z0-9-]{8,100}$" });
+const objectSchema = (properties, required, extra = {}) => ({ type: "object", properties, required, additionalProperties: false, ...extra });
+const MESSAGE_PROPERTIES = { text: string(8000, { pattern: "\\S" }), nativeTurnId: string(200), deliveryId: delivery };
+const STDIN_SCHEMAS = {
+  message: objectSchema({ ...MESSAGE_PROPERTIES, sessionId: string(300), nativeThreadId: uuid, host: { enum: ["local", "remote"] }, provider: { enum: ["codex", "claude"] }, title: string(80, { pattern: "\\S" }) }, Object.keys(MESSAGE_PROPERTIES), { oneOf: [{ required: ["sessionId"] }, { required: ["nativeThreadId"] }] }),
+  broadcast: objectSchema({ ...MESSAGE_PROPERTIES, query: string(500, { minLength: 0 }), activeWithinDays: { type: "integer", minimum: 1, maximum: 3650 }, sessionIds: { type: "array", minItems: 1, maxItems: 200, items: string(300) }, nativeThreadIds: { type: "array", minItems: 1, maxItems: 200, items: uuid }, discussionId: uuid }, Object.keys(MESSAGE_PROPERTIES)),
+  "verify-approval": objectSchema({ entryId: string(100), requestHash: string(64, { minLength: 64, pattern: "^[a-f0-9]{64}$" }), receiptId: string(100) }, ["entryId", "requestHash", "receiptId"]),
+};
+function helpFor(command) {
+  const notes = ["Help is offline and never reads private configuration or stdin.", "All actual commands require --config PATH and --source UUID for this exact native thread."];
+  if (!command) return { usage: "participant-cli.mjs [--config PATH --source UUID] COMMAND [OPTIONS]", commands: COMMANDS, help: "COMMAND --help", notes };
+  if (["message", "broadcast", "contribute"].includes(command)) notes.push("nativeTurnId/--turn is a self-reported native turn reference, not verified sender authority.", "Reuse the same deliveryId/--delivery for a retry of the same request; use a new ID for a new request.");
+  if (command === "verify-approval") notes.push("Verifies the exact receipt against current expiry, revocation and authenticated target source; records an audit receipt. Native owner delegation and client permissions remain authoritative.");
+  return { command, usage: `participant-cli.mjs --config PATH --source UUID ${command}${COMMAND_OPTIONS[command].map(key => ` [--${key} VALUE]`).join("")}`, options: COMMAND_OPTIONS[command], ...(STDIN_SCHEMAS[command] ? { stdinSchema: STDIN_SCHEMAS[command] } : {}), notes };
+}
+function validField(value, schema) {
+  if (schema.enum) return schema.enum.includes(value);
+  if (schema.type === "string") return typeof value === "string" && (schema.minLength === undefined || value.length >= schema.minLength) && (schema.maxLength === undefined || value.length <= schema.maxLength) && (!schema.pattern || new RegExp(schema.pattern).test(value));
+  if (schema.type === "integer") return Number.isInteger(value) && value >= schema.minimum && value <= schema.maximum;
+  if (schema.type === "array") return Array.isArray(value) && value.length >= schema.minItems && value.length <= schema.maxItems && value.every(item => validField(item, schema.items));
+  return false;
+}
+function validateStdin(command, data, code) {
+  const schema = STDIN_SCHEMAS[command], missingFields = [], invalidFields = [];
+  if (!data || typeof data !== "object" || Array.isArray(data)) invalidFields.push("stdin");
+  else {
+    for (const field of schema.required) if (!Object.hasOwn(data, field)) missingFields.push(field);
+    for (const [field, constraint] of Object.entries(schema.properties)) if (Object.hasOwn(data, field) && !validField(data[field], constraint)) invalidFields.push(field);
+    if (command === "message" && Object.hasOwn(data, "sessionId") === Object.hasOwn(data, "nativeThreadId")) invalidFields.push("sessionId|nativeThreadId");
+    // Do not echo unknown field names or values: they may contain private input.
+    if (Object.keys(data).some(field => !Object.hasOwn(schema.properties, field))) invalidFields.push("additionalProperties");
+  }
+  if (missingFields.length || invalidFields.length) throw fail(code, { missingFields, invalidFields, help: `${command} --help` });
+  return data;
+}
 function argumentsOf(args) {
-  const options = {}, commands = ["decisions", "decision-change", "machines", "machine-change", "board", "board-change", "info", "capabilities", "discover", "joinable", "join", "invite", "create", "new-thread", "message", "broadcast", "read", "work", "finding", "contribute"];
+  const options = {};
+  let help = false;
   let command = null;
   for (let i = 0; i < args.length; i++) {
     const value = args[i];
-    if (commands.includes(value) && !command) { command = value; continue; }
+    if (value === "--help" || value === "-h") { help = true; continue; }
+    if (COMMANDS.includes(value) && !command) { command = value; continue; }
     if (!/^--(config|source|query|discussion|source-id|turn|delivery|reply-to)$/.test(value) || i + 1 >= args.length || args[i + 1].startsWith("--")) throw fail("invalid_arguments");
     const key = value.slice(2);
     if (key in options) throw fail("duplicate_argument");
     options[key] = args[++i];
   }
+  if (help) return { command, options, help };
   if (!command || !options.config || !UUID.test(options.source ?? "")) throw fail("config_and_exact_source_required");
-  const allowed = { decisions: [], "decision-change": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], 'new-thread': [], message: [], broadcast: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
-  if (Object.keys(options).some((key) => !["config", "source", ...allowed[command]].includes(key))) throw fail("invalid_command_argument");
+  if (Object.keys(options).some((key) => !["config", "source", ...COMMAND_OPTIONS[command]].includes(key))) throw fail("invalid_command_argument");
   return { command, options };
 }
 async function configuration(path, source) {
@@ -70,29 +111,19 @@ function request({ address, authority, token, path, body }) {
   });
 }
 export async function runParticipantCli(args, { input, requestImpl = request } = {}) {
-  const { command, options } = argumentsOf(args), config = await configuration(options.config, options.source);
+  const { command, options, help } = argumentsOf(args);
+  if (help) return helpFor(command);
+  const config = await configuration(options.config, options.source);
   const attribution = "locally connector-bound; native caller not verified";
-  if (command === "info") return { nativeThreadId: config.nativeThreadId, sessionId: config.sessionId, provider: config.provider, host: config.host, attribution, commands: ["capabilities", "discover", "joinable", "join", "invite", "create", "new-thread", "message", "broadcast", "read", "work", "finding", "contribute"] };
+  if (command === "info") return { nativeThreadId: config.nativeThreadId, sessionId: config.sessionId, provider: config.provider, host: config.host, attribution, commands: COMMANDS };
   let path, body;
   if (command === 'capabilities') { path = '/api/agent/capabilities'; body = {}; }
   else if (command === 'message' || command === 'broadcast') {
-    const data = await inputJson(input), keys = ['text','nativeTurnId','deliveryId', ...(command === 'message' ? ['sessionId','nativeThreadId','host','provider','title'] : ['query','activeWithinDays','sessionIds','nativeThreadIds','discussionId'])];
-    if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !keys.includes(key))
-      || typeof data.text !== 'string' || !data.text.trim() || data.text.length > 8000
-      || typeof data.nativeTurnId !== 'string' || !data.nativeTurnId || data.nativeTurnId.length > 200
-      || !/^[a-zA-Z0-9-]{8,100}$/.test(data.deliveryId ?? '')) throw fail('bounded_agent_message_required');
-    if (command === 'message') {
-      if (!!data.sessionId === !!data.nativeThreadId || data.sessionId !== undefined && (typeof data.sessionId !== 'string' || !data.sessionId || data.sessionId.length > 300)
-        || data.nativeThreadId !== undefined && !UUID.test(data.nativeThreadId)
-        || data.host !== undefined && !['local','remote'].includes(data.host) || data.provider !== undefined && !['codex','claude'].includes(data.provider)
-        || data.title !== undefined && (typeof data.title !== 'string' || !data.title.trim() || data.title.length > 80)) throw fail('bounded_agent_message_required');
-    } else if (data.query !== undefined && (typeof data.query !== 'string' || data.query.length > 500)
-      || data.activeWithinDays !== undefined && (!Number.isInteger(data.activeWithinDays) || data.activeWithinDays < 1 || data.activeWithinDays > 3650)
-      || data.sessionIds !== undefined && (!Array.isArray(data.sessionIds) || !data.sessionIds.length || data.sessionIds.length > 200 || data.sessionIds.some(id => typeof id !== 'string' || !id || id.length > 300))
-      || data.nativeThreadIds !== undefined && (!Array.isArray(data.nativeThreadIds) || !data.nativeThreadIds.length || data.nativeThreadIds.length > 200 || data.nativeThreadIds.some(id => !UUID.test(id ?? '')))
-      || data.discussionId !== undefined && !UUID.test(data.discussionId ?? '')) throw fail('bounded_agent_message_required');
-    body = data;
+    body = validateStdin(command, await inputJson(input), "bounded_agent_message_required");
     path = command === 'message' ? '/api/agent/message' : '/api/agent/broadcast';
+  }
+  else if (command === "verify-approval") {
+    path = "/api/approvals/verify"; body = validateStdin(command, await inputJson(input), "exact_approval_receipt_required");
   }
   else if (['decisions','decision-change','machines','machine-change'].includes(command)) {
     path = ({decisions:'/api/decisions/list','decision-change':'/api/decisions/change',machines:'/api/machines/list','machine-change':'/api/machines/change'})[command];
@@ -136,5 +167,5 @@ export async function runParticipantCli(args, { input, requestImpl = request } =
   return { nativeThreadId: config.nativeThreadId, attribution, result };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  runParticipantCli(process.argv.slice(2), { input: process.stdin }).then((value) => { process.stdout.write(JSON.stringify(value) + "\n"); }, (error) => { process.stderr.write(JSON.stringify({ error: error.code ?? "scoped_request_failed" }) + "\n"); process.exitCode = 1; });
+  runParticipantCli(process.argv.slice(2), { input: process.stdin }).then((value) => { process.stdout.write(JSON.stringify(value) + "\n"); }, (error) => { process.stderr.write(JSON.stringify({ error: error.code ?? "scoped_request_failed", ...(error.details ? { details: error.details } : {}) }) + "\n"); process.exitCode = 1; });
 }

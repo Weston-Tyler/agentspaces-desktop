@@ -8,6 +8,7 @@ import { readDeviceConfig, resolveClaudeSource, scopedRequest, nativeUuid, boots
 const fail = code => Object.assign(new Error(code), { code });
 const query = z.string().max(200).default("");
 const coordinationTools = {
+  verify_owner_approval: {path:'/api/approvals/verify',write:true,description:'Verify the exact owner decision for your source using entryId, requestHash and receiptId from its notification. Returns current scope, combined limits, expiry and revocation plus an audit receipt. Recheck immediately before acting. Native owner delegation and native tool permissions remain required.',schema:z.object({entryId:z.string().min(1).max(100),requestHash:z.string().regex(/^[a-f0-9]{64}$/),receiptId:z.string().min(1).max(100)}).strict()},
   list_decisions: {path:'/api/decisions/list',description:'Read shared questions, options, recommendations, blocked work and owner answers. Answers do not override native approvals.',schema:z.object({entryId:z.string().min(1).max(100).optional(),limit:z.number().int().min(1).max(200).default(100)}).strict()},
   change_decision: {path:'/api/decisions/change',description:'Submit or withdraw your decision request. Optional approval scope captures a request for your own source; owner answers require separate authentication. Retrieve exact entryId and verify authorization before acting; native policy must permit AgentSpaces approvals. Only the owner can answer in the owner interface. Reuse deliveryId on retry.',write:true,schema:z.object({action:z.enum(['decision_create','decision_withdraw']),deliveryId:z.string().regex(/^[A-Za-z0-9-]{8,100}$/),entryId:z.string().max(100).optional(),title:z.string().max(200).optional(),question:z.string().max(12000).optional(),options:z.array(z.object({id:z.string().min(1).max(80),label:z.string().min(1).max(2000)}).strict()).min(2).max(8).optional(),recommendation:z.string().max(80).optional(),blockedWork:z.array(z.string().max(100)).max(20).optional(),approval:z.object({repo:z.string().min(1).max(2000),branch:z.string().min(1).max(300),folder:z.string().min(1).max(2000),action:z.string().min(1).max(8000),limits:z.array(z.string().min(1).max(2000)).min(1).max(20)}).strict().optional(),rationale:z.string().max(8000).optional()}).strict()},
   list_machine_queue: {path:'/api/machines/list',description:'Inspect configured machine slots, fair queue positions, runtime deadlines and reconciliation blockers. No machine job is started.',schema:z.object({}).strict()},
@@ -75,7 +76,14 @@ export async function createNativeBootstrap({ configPath = process.env.AGENTSPAC
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: Object.entries(tools).map(([name, t]) => ({ name, description: t.description, inputSchema: { ...z.toJSONSchema(t.schema), type: 'object' }, annotations: { readOnlyHint: !t.write, destructiveHint: false, openWorldHint: false } })) }));
   server.setRequestHandler(CallToolRequestSchema, async request => {
     try { return await callTool(request); }
-    catch (error) { return { isError: true, content: [{ type: "text", text: error.code ?? "native_source_request_denied" }] }; }
+    catch (error) {
+      const code=error.code ?? "native_source_request_denied";
+      const hint=['native_lifecycle_binding_missing','native_lifecycle_binding_stale_or_missing'].includes(code)
+        ? 'The local Claude lifecycle record is missing or stale. Let this actual native Claude session run its installed SessionStart or UserPromptSubmit hook, then retry. Reconnecting the network alone cannot establish source identity. Do not invent a binding or copy another thread configuration.'
+        : code==='native_lifecycle_binding_ambiguous'
+          ? 'More than one local lifecycle record matches. Resolve the conflicting session records through their actual native lifecycle hooks before retrying. Do not choose or invent a thread identity.' : null;
+      return { isError: true, content: [{ type: "text", text: hint ? `${code}: ${hint}` : code }] };
+    }
   });
   return { server, callTool, activeSessionReloaded: false };
 }

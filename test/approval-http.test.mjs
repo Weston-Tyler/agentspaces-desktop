@@ -12,7 +12,7 @@ test('HTTP owner approval requires separate password; public cookie and particip
  const engine=new Engine(store,{diagnostics:()=>({}),close(){}},{nativeFactory:()=>{throw Error('No native calls');}});
  engine.workspace.index={profile:{id:'scope',account:'synthetic',active:true,policy:'local-retrieval'}};
  engine.discussions.participant=b=>({id:b.sessionId,scopeId:'scope',account:'synthetic',fixture:true});
- engine.connector=token=>{if(token!=='participant')throw Error('denied');return {sessionId:'a'};};
+ engine.connector=token=>{if(!['participant','peer'].includes(token))throw Error('denied');return {sessionId:token==='peer'?'b':'a'};};
  const app=await startServer({root,port:0,engine});t.after(async()=>{await app.close();rmSync(root,{recursive:true,force:true});});
  const cookie=(await fetch(app.address)).headers.get('set-cookie').split(';')[0];
  const headers={Cookie:cookie,'x-agentspaces':'local-companion','Content-Type':'application/json'};
@@ -31,6 +31,16 @@ test('HTTP owner approval requires separate password; public cookie and particip
  const accepted=await post('approvals/answer',{password,decision});assert.equal(accepted.status,200);assert.equal(accepted.value.notification.status,'not_delivered');
  assert.equal((await post('decisions/list',{entryId:row.entryId},agent)).value.items[0].authorization.valid,true);
  assert.equal((await post('approvals/answer',{password,decision})).value.duplicate,true);
+ const check={entryId:row.entryId,requestHash:row.hash,receiptId:accepted.value.resultEntryId};
+ assert.notEqual((await post('approvals/verify',check)).status,200);
+ assert.notEqual((await post('approvals/verify',check,{...agent,Authorization:'Bearer peer'})).status,200);
+ const verified=await post('approvals/verify',check,agent);assert.equal(verified.status,200);assert.equal(verified.value.authorization.valid,true);
+ assert.equal(verified.value.nativeAuthority,'owner-delegation-required');
+ assert.ok((await post('decisions/list',{entryId:row.entryId})).value.items[0].targetVerification);
+ const revoke={action:'decision_revoke',deliveryId:'http-revoke-001',entryId:row.entryId,rationale:'Stop future work'};
+ assert.equal((await post('approvals/answer',{password,decision:revoke})).status,200);
+ assert.equal((await post('approvals/verify',check,agent)).value.authorization.valid,false);
+
  assert.ok(!readFileSync(store.path,'utf8').includes(password));
 });
 test('approval notification selects only its bound source and retries reuse the same message',async()=>{
@@ -44,6 +54,6 @@ test('approval notification selects only its bound source and retries reuse the 
  let wakes=0;const route=async(g,m)=>{if(!m.routed){m.routed=true;wakes++;}};
  for(let i=0;i<2;i++)await notifyApproval(engine,{entryId:'request',resultEntryId:'receipt'},route);
  assert.equal(groups.length,1);assert.equal(groups[0].messages.length,1);assert.equal(wakes,1);
- assert.deepEqual(groups[0].messages[0].targets,[{sessionId:'source'}]);assert.match(groups[0].messages[0].text,/not authority/);
+ assert.deepEqual(groups[0].messages[0].targets,[{sessionId:'source'}]);assert.match(groups[0].messages[0].text,/not authority/);assert.match(groups[0].messages[0].text,/verify_owner_approval/);assert.match(groups[0].messages[0].text,/"receiptId":"receipt"/);
  groups[0].members.push({sessionId:'other'});await assert.rejects(notifyApproval(engine,{entryId:'request',resultEntryId:'receipt'},route),/membership/);
 });

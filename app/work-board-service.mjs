@@ -1,5 +1,5 @@
 import { machineFields, machineChange, machineView } from './machine-queue.mjs';
-import { decisionFields, decisionChange, decisionView } from './coordination-records.mjs';
+import { decisionFields, decisionChange, decisionView, approvalCheck } from './coordination-records.mjs';
 import { Identity, Peer, cbor, spaceIdLocal } from '@agentspaces/client';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, renameSync, openSync, closeSync, unlinkSync } from 'node:fs';
@@ -86,6 +86,13 @@ export class WorkBoard {
   }
   machines(binding, options = {}) { return machineView(this, binding, options); }
   decisions(binding, options = {}) { return decisionView(this, binding, options); }
+  async verifyApproval(binding,input) {
+    approvalCheck(this,binding,input);
+    const deliveryId='verify-'+createHash('sha256').update(JSON.stringify([input.entryId,input.requestHash,input.receiptId])).digest('hex');
+    const receipt=await this.mutate({action:'decision_verify',deliveryId,...input},binding);
+    // Re-read after persistence even on duplicate/restart. Revocation and expiry never cache.
+    return {...approvalCheck(this,binding,input),verificationEntryId:receipt.verificationEntryId};
+  }
   mutate(input, binding, ownerProof = null) {
     const operation = this.tail.then(async () => {
       this.access(binding);
