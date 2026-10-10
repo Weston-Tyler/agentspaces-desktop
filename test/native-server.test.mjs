@@ -10,7 +10,7 @@ import { FabricAdapter } from "../app/fabric.mjs";
 import { startServer } from "../app/server.mjs";
 
 class FixtureTerminals {
-  constructor() { this.items = new Map(); this.writes = []; this.sizes = []; this.creates = []; this.closed = []; this.closeAllCalls = 0; }
+  constructor() { this.items = new Map(); this.writes = []; this.sizes = []; this.creates = []; this.detached = []; this.closeAllCalls = 0; }
   async create(options) {
     this.creates.push(options);
     const id = "11111111-2222-3333-4444-" + String(this.items.size + 1).padStart(12, "0");
@@ -35,7 +35,7 @@ class FixtureTerminals {
   }
   close(id) {
     const item = this.items.get(id); if (!item || item.status === "closed") return;
-    item.status = "closed"; this.closed.push(id);
+    item.callbacks = null; this.detached.push(id);
   }
   closeAll() { this.closeAllCalls++; for (const id of this.items.keys()) this.close(id); }
   output(id, data) { this.items.get(id).callbacks?.onData(data); }
@@ -90,7 +90,7 @@ test("native terminal HTTP controls require owner authentication, origin and CSR
   const list = await post("/api/native/terminal/list", {}); assert.equal(list.status, 200);
   assert.equal((await list.json())[0].id, terminal.id);
   assert.equal((await post("/api/native/terminal/close", { id: terminal.id })).status, 200);
-  assert.deepEqual(terminals.closed, [terminal.id]);
+  assert.deepEqual(terminals.detached, [terminal.id]);
 });
 
 test("participant capabilities cannot open, enumerate, close or attach owner terminals", async t => {
@@ -105,7 +105,7 @@ test("participant capabilities cannot open, enumerate, close or attach owner ter
     assert.equal(response.status, 400); assert.match((await response.json()).error, /capability denied/);
   }
   assert.equal(await refused(app, terminal.id, { Origin: app.address, Authorization: "Bearer " + connector.token }), 403);
-  assert.equal(terminals.creates.length, 1); assert.equal(terminals.closed.length, 0);
+  assert.equal(terminals.creates.length, 1); assert.equal(terminals.detached.length, 0);
 });
 
 test("terminal WebSocket rejects absent/stale owner cookies, wrong origin/host and cross-site access", async t => {
@@ -120,7 +120,7 @@ test("terminal WebSocket rejects absent/stale owner cookies, wrong origin/host a
   assert.equal(await refused(app, "99999999-2222-3333-4444-555555555555", { Cookie: cookie, Origin: app.address }), 403);
 });
 
-test("authenticated WebSocket routes native input/resize/output and closes its terminal on disconnect", async t => {
+test("authenticated WebSocket routes native input/resize/output and detaches its terminal on disconnect", async t => {
   const { app, terminals, cookie, engine, open } = await setup(t), terminal = await open();
   const ws = await connect(app, terminal.id, { Cookie: cookie, Origin: app.address }); t.after(() => ws.terminate());
   const secret = "SYNTHETIC_NATIVE_INPUT";
@@ -133,7 +133,7 @@ test("authenticated WebSocket routes native input/resize/output and closes its t
   assert.deepEqual(await output, { type: "output", data: "SYNTHETIC_NATIVE_OUTPUT" });
   assert(!JSON.stringify(engine.store.data).includes(secret));
   const closed = socketClosed(ws); ws.close(); await closed;
-  await until(() => terminals.closed.includes(terminal.id));
+  await until(() => terminals.detached.includes(terminal.id));
 });
 
 test("duplicate attachment and malformed or oversized terminal messages fail closed", async t => {
@@ -142,10 +142,10 @@ test("duplicate attachment and malformed or oversized terminal messages fail clo
   const first = await connect(app, terminal.id, headers); t.after(() => first.terminate());
   const second = new WebSocket(url(app, terminal.id), { headers }); second.on("error", () => {});
   assert.equal((await socketClosed(second)).code, 1008);
-  assert.equal(terminals.closed.length, 0, "Rejected duplicate attachment must not close the real owner connection");
+  assert.equal(terminals.detached.length, 0, "Rejected duplicate attachment must not close the real owner connection");
   const closed = socketClosed(first); first.send(JSON.stringify({ type: "input", data: "x".repeat(8193) }));
   assert.equal((await closed).code, 1008);
-  await until(() => terminals.closed.includes(terminal.id)); assert.equal(terminals.writes.length, 0);
+  await until(() => terminals.detached.includes(terminal.id)); assert.equal(terminals.writes.length, 0);
   const another = await open(), ws = await connect(app, another.id, headers);
   const malformed = socketClosed(ws); ws.send("not json"); assert.equal((await malformed).code, 1008);
 });
@@ -156,8 +156,8 @@ test("native exit and server shutdown release attachments and all terminal handl
   const ws = await connect(app, terminal.id, headers), message = nextMessage(ws), exited = socketClosed(ws);
   terminals.exit(terminal.id);
   assert.deepEqual(await message, { type: "exit", exitCode: 0 }); await exited;
-  await until(() => terminals.closed.includes(terminal.id));
+  await until(() => terminals.detached.includes(terminal.id));
   const another = await open(), active = await connect(app, another.id, headers), closed = socketClosed(active);
   await close(); await closed;
-  assert.equal(terminals.closeAllCalls, 1); assert(terminals.closed.includes(another.id));
+  assert.equal(terminals.closeAllCalls, 1); assert(terminals.detached.includes(another.id));
 });

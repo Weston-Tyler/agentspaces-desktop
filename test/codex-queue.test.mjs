@@ -201,26 +201,24 @@ test("lost queue acknowledgement retains uncertain receipt and prohibits repeat"
     code: "native_queue_ack_uncertain",
     uncertainOutcome: true,
   });
-  assert.equal(f.saved.get("client-1").status, "cancellation-requested");
-  assert.ok(f.calls.some((c) => c.method === "thread/queue/delete"));
+  assert.equal(f.saved.get("client-1").observationEnded, true);
+  assert.ok(!f.calls.some((c) => c.method === "thread/queue/delete"));
   await assert.rejects(f.answer(), {
     code: "receipt_exists_reconcile_without_retry",
   });
 });
-test("timeout cancels only the matching queued submission through native authority", async () => {
+test("timeout preserves the matching queued submission even for an owned proof thread", async () => {
   const f = fixture({ hang: true });
   await f.start();
   await assert.rejects(f.answer({ budget: { ...budget, timeoutMs: 10 } }), {
     code: "native_queue_timeout",
     uncertainOutcome: true,
   });
-  assert.deepEqual(
-    f.calls.find((c) => c.method === "thread/queue/delete").params,
-    { threadId, queuedSubmissionId: "queue-1" },
-  );
+  assert.ok(!f.calls.some((c) => c.method === "thread/queue/delete"));
+  assert.equal(f.saved.get("client-1").nativeCancellationRequested,false);
   assert.ok(!f.calls.some((c) => c.method === "turn/interrupt"));
 });
-test("running cancellation interrupts the exact correlated native turn", async () => {
+test("running cancellation detaches observation without interrupting the native turn", async () => {
   const f = fixture({ hang: true });
   await f.start();
   const controller = new AbortController();
@@ -237,10 +235,8 @@ test("running cancellation interrupts the exact correlated native turn", async (
     controller.abort();
   });
   await assert.rejects(result, { code: "cancelled", uncertainOutcome: true });
-  assert.deepEqual(f.calls.find((c) => c.method === "turn/interrupt").params, {
-    threadId,
-    turnId: "owned-turn",
-  });
+  assert.ok(!f.calls.some((c) => c.method === "turn/interrupt"));
+  assert.equal(f.saved.get("client-1").nativeCancellationRequested,false);
 });
 test("unrelated turn notifications cannot supply this request result", async () => {
   const f = fixture({ hang: true });
@@ -348,4 +344,10 @@ test("transport connects only to existing shared daemon and enables qualified ex
     await new Promise((resolve) => server.close(resolve));
     websocketServer.close();
   }
+});
+
+test('native transport refuses turn interruption before writing any RPC',async()=>{
+ const adapter=new CodexQueueAdapter();let sent=false;adapter.send=()=>{sent=true;};
+ await assert.rejects(adapter.request('turn/interrupt',{threadId,turnId:'some-turn'}),{code:'native_turn_cancellation_disabled'});
+ assert.equal(sent,false);
 });

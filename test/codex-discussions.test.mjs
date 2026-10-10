@@ -203,16 +203,8 @@ test("native identity mismatch, uncertain outcome and approval attention never p
   }
 });
 
-test("explicit cancellation on hub close aborts active native work and closes its adapter", async () => {
-  let observedAbort = false;
-  const { engine, hub, args, counters } = setup({ controls: { answer: input => new Promise((_yes, no) => {
-    input.signal.addEventListener("abort", () => { observedAbort = true; no(fail("cancelled", true)); }, { once: true });
-  }) } });
-  hub.dispatch(args); await until(() => counters.answer === 1); await hub.close({ cancelNative: true }); await settle(hub, args.requestId);
-  assert(observedAbort); assert(counters.close > 0); assert.equal(engine.discussions.group(args.discussionId).messages.length, 1);
-});
 
-test("ordinary shutdown detaches without aborting native input and preserves acknowledged queue identity", async () => {
+test("shutdown ignores legacy cancellation requests and preserves acknowledged native input", async () => {
   let observedAbort = false, rejectAnswer;
   const f = setup({ controls: { answer: async (input, options, adapter) => {
     await options.persistReceipt({ clientId: input.clientId, nativeThreadId: input.threadId,
@@ -228,7 +220,7 @@ test("ordinary shutdown detaches without aborting native input and preserves ack
     return adapter;
   };
   f.hub.dispatch(f.args); await until(() => f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].status === "queued");
-  const signal = f.adapters[0].answerArgs.signal, closed = await f.hub.close();
+  const signal = f.adapters[0].answerArgs.signal, closed = await f.hub.close({cancelNative:true});
   assert.equal(closed.nativeCancellationRequested, false); assert.equal(observedAbort, false); assert.equal(signal.aborted, false);
   assert(f.counters.close > 0); assert.equal(f.engine.discussions.group(f.args.discussionId).messages.length, 1);
   const persisted = new Store(f.root).data;

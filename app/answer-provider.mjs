@@ -26,7 +26,7 @@ function collect(
   spawnProcess,
   command,
   args,
-  { input = "", timeoutMs = 5000, limit = 65536, signal, onLine, cwd } = {},
+  { input = "", timeoutMs = 5000, limit = 65536, signal, onLine, cwd, preserveProcess = false, onProcessStart, onProcessClose } = {},
 ) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(failure("cancelled"));
@@ -42,7 +42,7 @@ function collect(
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
       if (error) {
-        child?.kill?.("SIGTERM");
+        if (!preserveProcess) child?.kill?.("SIGTERM");
         reject(error);
       } else resolve(result);
     };
@@ -54,6 +54,7 @@ function collect(
         stdio: ["pipe", "pipe", "pipe"],
         ...(cwd ? { cwd } : {}),
       });
+      onProcessStart?.();
       child.on("error", () =>
         finish(failure("native_process_unavailable", dispatched)),
       );
@@ -75,7 +76,9 @@ function collect(
           }
         }
       });
-      child.on("close", (code) => {
+      child.on("close", async (code) => {
+        try { await onProcessClose?.(); }
+        catch { return finish(failure("native_cleanup_failed", dispatched)); }
         if (settled) return;
         try {
           if (onLine && pending.trim()) onLine(pending);
@@ -256,10 +259,8 @@ const scratch=await mkdtemp(join(tmpdir(),'agentspaces-answer-'));
 const args=(${nativeArgs.toString()})(p.provider,scratch,p.budget);
 const child=spawn(p.provider,args,{cwd:scratch,stdio:['pipe','pipe','pipe']});
 child.stdout.pipe(process.stdout);child.stderr.resume();
-const timer=setTimeout(()=>child.kill('SIGTERM'),p.budget.timeoutMs);
-for(const s of ['SIGTERM','SIGINT'])process.on(s,()=>child.kill('SIGTERM'));
-child.on('error',async()=>{clearTimeout(timer);await rm(scratch,{recursive:true,force:true});process.exit(127)});
-child.on('close',async code=>{clearTimeout(timer);await rm(scratch,{recursive:true,force:true});process.exit(code??1)});
+child.on('error',async()=>{await rm(scratch,{recursive:true,force:true});process.exit(127)});
+child.on('close',async code=>{await rm(scratch,{recursive:true,force:true});process.exit(code??1)});
 child.stdin.end(p.prompt);`;
 }
 
@@ -306,7 +307,7 @@ export class NativeAnswerProvider {
     const availability = providers.find((p) => p.provider === this.provider);
     if (!availability.available)
       throw failure(availability.reason ?? "native_unavailable");
-    let scratch;
+    let scratch, processOwnsScratch = false;
     try {
       scratch =
         this.host === "local"
@@ -396,6 +397,9 @@ export class NativeAnswerProvider {
           signal,
           onLine,
           cwd: scratch,
+          preserveProcess: true,
+          onProcessStart: () => { processOwnsScratch = true; },
+          onProcessClose: () => scratch ? cleanupScratch(scratch) : undefined,
         },
       );
       if (result.code !== 0) throw failure("native_turn_failed", true);
@@ -446,7 +450,7 @@ export class NativeAnswerProvider {
         limitations: [
           "Fresh question; no existing native session is resumed",
           "Output token limit is checked after completion, not a provider hard cap",
-          "Cancellation after dispatch may consume inference; uncertain outcomes are not retried",
+          "Stopping observation never cancels native inference; uncertain outcomes are not retried",
           ...(this.provider === "codex"
             ? [
                 "Read-only sandbox and disabled optional tools do not establish complete tool isolation",
@@ -460,7 +464,7 @@ export class NativeAnswerProvider {
         ],
       };
     } finally {
-      if (scratch) await cleanupScratch(scratch);
+      if (scratch && !processOwnsScratch) await cleanupScratch(scratch);
     }
   }
 }

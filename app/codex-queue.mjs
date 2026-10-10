@@ -141,6 +141,7 @@ export class CodexQueueAdapter {
     this.websocket.send(JSON.stringify(message));
   }
   request(method, params, timeoutMs = 8000) {
+    if (method === "turn/interrupt") return Promise.reject(fail("native_turn_cancellation_disabled"));
     if (!this.child) return Promise.reject(fail("native_proxy_not_connected"));
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
@@ -537,74 +538,20 @@ export class CodexQueueAdapter {
             ],
           });
       };
-      const stop = async (code, allowContentLookup = true) => {
+      const stop = async (code) => {
         if (settled || stopping) return;
         stopping = true;
-        // Existing native threads own their execution. An observer timeout,
-        // transport uncertainty or lost read grant is not a cancellation request.
-        const clientOwned = ["existing-native-thread-resume-response", "loaded-native-input-target"].includes(eligible.permissionProof.source);
-        if (clientOwned && code !== "cancelled" && !(code === "native_delivery_grant_revoked" && !receipt.nativeTurnId)) {
-          receipt.observationEnded = true;
-          receipt.observationReason = code;
-          receipt.nativeCancellationRequested = false;
-          await save().catch(() => {});
-          await finish(fail(code, true, { ...receipt }));
-          return;
+        // Observation controls never cancel native execution. Revocation may
+        // withdraw only an exact pending input; a dispatch race stays native-owned.
+        if (code === "native_delivery_grant_revoked" && !receipt.nativeTurnId && receipt.queuedSubmissionId) {
+          try {
+            const result = await this.request("thread/queue/delete", { threadId, queuedSubmissionId: receipt.queuedSubmissionId });
+            if (result.deleted === true) receipt.status = "input-withdrawn";
+          } catch { /* Keep the durable receipt when withdrawal is uncertain. */ }
         }
-        let cancelled = false;
-        try {
-          if (receipt.nativeTurnId) {
-            await this.request("turn/interrupt", {
-              threadId,
-              turnId: receipt.nativeTurnId,
-            });
-            cancelled = true;
-          } else if (!allowContentLookup) {
-            if (receipt.queuedSubmissionId) {
-              const result = await this.request("thread/queue/delete", { threadId, queuedSubmissionId: receipt.queuedSubmissionId }); cancelled = result.deleted === true;
-            }
-          } else {
-            const list = await this.request("thread/queue/list", {
-              threadId,
-              limit: 100,
-            });
-            const items =
-              list.data?.filter(
-                (item) => item.clientUserMessageId === clientId,
-              ) ?? [];
-            for (const item of items) {
-              const result = await this.request("thread/queue/delete", {
-                threadId,
-                queuedSubmissionId: item.id,
-              });
-              cancelled ||= result.deleted === true;
-            }
-            if (!cancelled) {
-              const history = await this.request("thread/turns/list", {
-                threadId,
-                limit: 100,
-                itemsView: "summary",
-              });
-              const turn = (history.data ?? history.turns ?? []).find((t) =>
-                t.items?.some(
-                  (item) =>
-                    item.type === "userMessage" && item.clientId === clientId,
-                ),
-              );
-              if (turn?.status === "inProgress") {
-                receipt.nativeTurnId = turn.id;
-                await this.request("turn/interrupt", {
-                  threadId,
-                  turnId: turn.id,
-                });
-                cancelled = true;
-              }
-            }
-          }
-        } catch {
-          /* Preserve uncertainty if native cancellation cannot be acknowledged. */
-        }
-        receipt.status = cancelled ? "cancellation-requested" : "uncertain";
+        receipt.observationEnded = true;
+        receipt.observationReason = code;
+        receipt.nativeCancellationRequested = false;
         await save().catch(() => {});
         await finish(fail(code, true, { ...receipt }));
       };

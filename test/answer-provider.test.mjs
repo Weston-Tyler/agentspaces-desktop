@@ -177,7 +177,7 @@ test("native failure diagnostics are not exposed or retained", async () => {
       !e.message.includes("PRIVATE"),
   );
 });
-test("unexpected native tool execution fails and kills instead of accepting an answer", async () => {
+test("unexpected native tool execution rejects the answer without killing the native process", async () => {
   const f = fixture({
     answer: '{"type":"item.started","item":{"type":"mcp_tool_call"}}\n',
   });
@@ -185,7 +185,7 @@ test("unexpected native tool execution fails and kills instead of accepting an a
     code: "unexpected_native_tool_execution",
     uncertainOutcome: true,
   });
-  assert.ok(f.calls.at(-1).child.killed);
+  assert.ok(!f.calls.at(-1).child.killed);
 });
 test("incomplete and malformed JSON events are uncertain failures", async () => {
   const f = fixture({ answer: "not JSON\n" });
@@ -226,13 +226,13 @@ test("output token enforcement is explicitly after native completion", async () 
     { code: "answer_token_budget_exceeded", uncertainOutcome: true },
   );
 });
-test("timeout kills native process and marks the dispatched outcome uncertain", async () => {
+test("timeout detaches observation and marks the dispatched outcome uncertain", async () => {
   const f = fixture({ hang: true });
   await assert.rejects(
     provider(f).answer({ question: "Q", budget: { ...budget, timeoutMs: 15 } }),
     { code: "native_timeout", uncertainOutcome: true },
   );
-  assert.ok(f.calls.at(-1).child.killed);
+  assert.ok(!f.calls.at(-1).child.killed);
 });
 test("cancellation before dispatch is certain; cancellation during inference is uncertain", async () => {
   const f = fixture({ hang: true });
@@ -256,9 +256,9 @@ test("cancellation before dispatch is certain; cancellation during inference is 
     }
   }, 1);
   await assert.rejects(answer, { code: "cancelled", uncertainOutcome: true });
-  assert.ok(f.calls.at(-1).child.killed);
+  assert.ok(!f.calls.at(-1).child.killed);
 });
-test("SSH uses fixed command with native prompt only on stdin and remote timeout", async () => {
+test("SSH uses fixed command with native prompt only on stdin and no remote process cancellation", async () => {
   const f = fixture();
   const p = new NativeAnswerProvider({
     provider: "codex",
@@ -272,7 +272,8 @@ test("SSH uses fixed command with native prompt only on stdin and remote timeout
   assert.equal(result.host, "remote");
   const call = f.calls.at(-1);
   assert.deepEqual(call.args, ["remote", "node --input-type=module"]);
-  assert.ok(call.input.includes("setTimeout"));
+  assert.ok(!call.input.includes("child.kill"));
+  assert.ok(!call.input.includes("setTimeout"));
   assert.ok(call.input.includes("child.stdin.end(p.prompt)"));
   assert.ok(!call.args.join(" ").includes("Unique private question"));
 });
@@ -346,4 +347,12 @@ test("availability exposes no credentials and known exec output may omit turn id
   assert.ok(
     result.limitations.some((s) => s.includes("identifier may be unavailable")),
   );
+});
+
+test('timed-out native answer keeps its scratch until the native process exits',async()=>{
+ const f=fixture({hang:true});await assert.rejects(provider(f).answer({question:'Q',budget:{...budget,timeoutMs:15}}),{code:'native_timeout'});
+ const call=f.calls.at(-1);assert.equal(existsSync(call.options.cwd),true);
+ call.child.emit('close',0);
+ for(let n=0;n<30&&existsSync(call.options.cwd);n++)await new Promise(r=>setTimeout(r,10));
+ assert.equal(existsSync(call.options.cwd),false);assert.ok(!call.child.killed);
 });

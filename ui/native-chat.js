@@ -27,6 +27,7 @@ export function mountNativeChat(root, state, { api, notice }) {
     host = select([["local", "This device"], ["remote", "remote / Linux over SSH"]]),
     cwd = el("input"),
     source = select([["", "Choose a discovered source thread"]]),
+    runningTerminals = select([["", "Choose a running terminal"]]),
     status = el("p", "Choose a tool and folder to open its native chat.", "fineprint"),
     reference = el("div", null, "native-reference"),
     channelStatus = el("div", null, "fineprint"),
@@ -62,6 +63,7 @@ export function mountNativeChat(root, state, { api, notice }) {
     terminal?.dispose(); terminal = null; fit = null;
     terminalElement.replaceChildren();
     if (id) await api("native/terminal/close", { id });
+    if (!disposed) await refreshTerminals();
   }
   async function openTerminal(intent, prepared = false) {
     if (prepared && !ownerAvailable.checked) throw new Error("Close other native controllers and confirm before resuming the selected thread");
@@ -74,6 +76,11 @@ export function mountNativeChat(root, state, { api, notice }) {
       ...(prepared ? { connectionId, ownerConfirmedAvailable: true } : {}),
     });
     if (disposed) { await api("native/terminal/close", { id: value.id }); return; }
+    await attachTerminal(value);
+  }
+  async function attachTerminal(value) {
+    if (disposed) return;
+    if (!globalThis.Terminal || !globalThis.FitAddon?.FitAddon) throw new Error("Native terminal assets are unavailable; reload the companion");
     terminalId = value.id;
     terminal = new globalThis.Terminal({ convertEol: false, scrollback: 1000, fontSize: 14 });
     fit = new globalThis.FitAddon.FitAddon(); terminal.loadAddon(fit);
@@ -103,10 +110,21 @@ export function mountNativeChat(root, state, { api, notice }) {
       if (terminalId !== currentId) return;
       let message; try { message = JSON.parse(event.data); } catch { return; }
       if (message.type === "output" && typeof message.data === "string") currentTerminal.write(message.data);
-      if (message.type === "exit") status.textContent = "Native process exited (" + message.exitCode + ").";
+      if (message.type === "exit") status.textContent = "Native terminal view ended; refresh running terminals to reconnect if still active.";
     };
-    socket.onerror = () => { if (terminalId === currentId) status.textContent = "Native terminal connection failed. Close it before opening another."; };
-    socket.onclose = () => { if (terminalId === currentId) status.textContent = "Native terminal disconnected; close it before opening another."; };
+    socket.onerror = () => { if (terminalId === currentId) status.textContent = "Native terminal connection failed. Reconnect to the running terminal."; };
+    socket.onclose = () => { if (terminalId === currentId) status.textContent = "View disconnected; native work was not stopped. Reconnect to the running terminal."; };
+  }
+  async function refreshTerminals() {
+    const items = await api("native/terminal/list", {});
+    if (disposed) return;
+    const selected = runningTerminals.value;
+    runningTerminals.replaceChildren();
+    const placeholder = el("option", "Choose a running terminal"); placeholder.value = ""; runningTerminals.append(placeholder);
+    for (const item of items.filter(item => item.status === "running" && !item.attached)) {
+      const option = el("option", item.provider + " · " + item.host + " · " + item.id.slice(0, 8)); option.value = item.id; runningTerminals.append(option);
+    }
+    runningTerminals.value = selected;
   }
   source.onchange = () => {
     connectionId = null; ownerAvailable.checked = false; ownerLabel.hidden = true; channelStatus.replaceChildren(); reference.replaceChildren();
@@ -148,8 +166,15 @@ export function mountNativeChat(root, state, { api, notice }) {
     if (!connectionId) throw new Error("Prepare the selected thread’s channel first");
     await openTerminal("chat", true);
   });
-  actions.append(button("Open native chat", () => openTerminal("chat"), "primary"), button("Sign in with native tool", () => openTerminal("login")), button("Close native terminal", closeTerminal));
-  card.append(el("h2", "Chat with your native tools"), el("p", "Use your existing Codex or Claude Code login. The native tool handles account sign-in, model choices and permission prompts."), field("Native tool", provider), field("Host", host), field("Native project folder (optional)", cwd), actions, status, field("Existing source reference", source), reference, channelButton, ownerLabel, preparedButton, channelStatus, terminalElement);
+  actions.append(button("Open native chat", () => openTerminal("chat"), "primary"), button("Sign in with native tool", () => openTerminal("login")), button("Detach terminal view", closeTerminal));
+  actions.append(button("Refresh running terminals", refreshTerminals), button("Reconnect selected terminal", async () => {
+    const id = runningTerminals.value;
+    const item = (await api("native/terminal/list", {})).find(item => item.id === id && item.status === "running" && !item.attached);
+    if (!item) throw new Error("Choose an available running terminal");
+    await closeTerminal(); await attachTerminal(item);
+  }));
+  refreshTerminals().catch(error => { if (!disposed) notice(error.message, true); });
+  card.append(el("h2", "Chat with your native tools"), el("p", "Use your existing Codex or Claude Code login. The native tool handles account sign-in, model choices and permission prompts."), field("Native tool", provider), field("Host", host), field("Native project folder (optional)", cwd), actions, field("Running terminals", runningTerminals), status, field("Existing source reference", source), reference, channelButton, ownerLabel, preparedButton, channelStatus, terminalElement);
   root.replaceChildren(card);
   const resize = new ResizeObserver(() => { if (terminal && terminalElement.isConnected) fit?.fit(); });
   resize.observe(terminalElement);

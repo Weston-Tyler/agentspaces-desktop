@@ -15,7 +15,7 @@ export function mountHomeChat(root, { api, notice, preferredHost, state = {} } =
     question = el("textarea"),
     label = el("label", "Your question"),
     submit = el("button", "Send", "primary"),
-    cancel = el("button", "Cancel", "secondary"),
+    cancel = el("button", "Stop waiting", "secondary"),
     status = el("p", "Relevant work is included automatically.", "fineprint"),
     setup = el("button", "Settings", "subtle");
   welcome.append(el("h2", "Ask about anything you’re working on."), el("p", "Find prior work, understand decisions, or ask a general question."));
@@ -57,7 +57,7 @@ export function mountHomeChat(root, { api, notice, preferredHost, state = {} } =
     cancelled = true;
     if (deliveryId && dispatched) {
       const result = await api("ask/cancel", { deliveryId });
-      showStatus(result.status ?? "Cancellation requested. Native acceptance may be uncertain.");
+      showStatus(result.status ?? "Stopped waiting. Native work continues if already dispatched.");
     } else showStatus("Question cancelled before inference.");
   }
   cancel.onclick = async () => {
