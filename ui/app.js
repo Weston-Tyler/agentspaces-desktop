@@ -1,3 +1,5 @@
+import { mountProviderRouting } from "./provider-routing.js";
+import { mountDigest } from "./digest.js";
 import { mountCoordination } from "./coordination.js";
 import { mountWorkBoard } from "./work-board.js";
 import { nativeControls } from "./native-controls.js";
@@ -105,6 +107,7 @@ function scheduleDiscoveryPoll() {
   }, 1500);
 }
 const titles = {
+  digest: ["Digest", "Recent shared evidence.", "Read room, work, decision and artifact records without waking agents."],
   decisions: ["Decisions", "Questions awaiting your answer.", "Agents propose; you decide."],
   machines: ["Machines", "Shared test time, in order.", "Inspect the queue and runtime deadlines."],
   board: ["Work board", "Shared work, with an owner and evidence.", "Create a brief, claim a work item, and record progress and results."],
@@ -189,6 +192,7 @@ function render() {
     native: () => "",
     advanced: () => "",
     discussions: () => "",
+    digest: () => "",
     decisions: () => "",
     machines: () => "",
     board: () => "",
@@ -206,6 +210,8 @@ function render() {
     showResults();
   }
   if (["decisions","machines"].includes(page)) mountCoordination($("#view"), { api, notice, page });
+  if (page === "usage") mountProviderRouting($("#provider-routing"), { api, notice });
+  if (page === "digest") mountDigest($("#view"), { api, notice });
   if (page === "board") mountWorkBoard($("#view"), { api, notice });
   if (page === "settings") nativeControls(state, { api, notice });
   if (page === "home") mountHomeChat($("#view"), { api, notice, state });
@@ -295,7 +301,7 @@ function permissions() {
 }
 function usage() {
   const answers = state.answerUsage ?? {};
-  return `${stats()}<div class="card"><h2>Native Ask usage</h2><p>Question receipts retain reported metrics once per request. Missing metrics remain unknown, and these totals do not establish provider billing.</p><div class="usage-values">${[
+  return `<section id="provider-routing"></section>${stats()}<div class="card"><h2>Native Ask usage</h2><p>Question receipts retain reported metrics once per request. Missing metrics remain unknown, and these totals do not establish provider billing.</p><div class="usage-values">${[
     ["requests", "Native requests"],
     ["completed", "Completed"],
     ["uncertain", "Uncertain"],
@@ -309,7 +315,7 @@ function usage() {
     )
     .join(
       "",
-    )}</div><p class="fineprint">${esc(answers.scope)}</p></div><div class="card"><h2>Recorded native-session usage</h2><p>Historical session usage records retain their original provider and turn attribution.</p><div class="usage-values">${[
+    )}</div><p class="fineprint">${esc(answers.scope)}</p></div><div class="card"><h2>Recorded native-session usage</h2><p>Historical session usage records retain their original provider and turn attribution. Legacy totals below may include defaulted fields; use the provider observations above to distinguish missing metrics from known zero.</p><div class="usage-values">${[
     ["input", "Input tokens"],
     ["output", "Output tokens"],
     ["cachedInput", "Cached input"],

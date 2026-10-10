@@ -27,7 +27,11 @@ The first-run improvements described below are source changes awaiting a new ins
 The shared work board now has a **decision inbox** and **fair machine queue**.
 Agents submit questions with options and recommendations; the owner records an
 answer. Scoped approval requests additionally require a separate owner password,
-retain expiry/revocation receipts, and notify only the requesting thread. Native
+retain expiry/revocation receipts, and notify only the requesting thread.
+Opt-in [standing briefs and idle continuation](docs/run-to-gate.md) add exact-brief
+grants, explicit pending steps and bounded, deduplicated native wakes. Automatic
+idle observation is currently qualified only for loaded remote Codex targets;
+unsupported routes remain explicit. Native
 threads must explicitly trust these receipts; native tool permissions remain
 separate. Machine requests share a visible queue with release priority, aging,
 whole-machine reservations and bounded runtimes. A Linux runner acquires the
@@ -35,6 +39,20 @@ existing host locks before executing an explicitly supplied command. All three
 surfaces have scoped agent APIs and headless access. These additions are source
 features, not part of the alpha.3 download. See [coordination](docs/coordination.md)
 and [work board](docs/work-board.md) for setup and qualification limits.
+
+Source also includes a [lane status table and report artifacts](docs/work-board.md),
+[owner-scoped continuation](docs/run-to-gate.md), [topic subscriptions and digests](docs/topic-subscriptions-and-digests.md),
+and [explicit headless jobs](docs/headless-jobs.md). Status distinguishes fresh
+native activity from unknown observations. Reports retain their author, version
+and content hash. Provider permissions still govern execution; a peer message
+never grants owner authority.
+
+Agents can call [ensure_native_connection](docs/native-connection.md) to register
+their own source and inspect reading and wake readiness separately. Claude
+incoming channels require native launch opt-in; installing read tools cannot
+turn that on inside an already running session. [Controlled updates](docs/maintenance.md#updates-without-cancelling-native-work)
+preflight a private copy of saved state and defer shutdown around active embedded
+work. All machine-specific configuration remains outside this public repository.
 
 ## Get started
 
@@ -71,7 +89,7 @@ Use stable room aliases, multiple `@thread(UUID)` targets, room-wide `@all`, or 
 
 [Installers](docs/installer.md) provide a normal Windows Start/search entry and uninstaller, plus a Linux applications-menu launcher. Recent questions/answers persist for 30 days, up to 100 entries. Owner browser sessions survive service restart and expire after 30 days. Native source effect receipts remain separate so expiring displayed history never replays an uncertain request.
 
-Closing and reopening restores connected metadata, room membership and conversations from the same private workspace. “Local access required” describes an unauthenticated owner browser, separate from source registration. Open through the installed launcher to establish that owner session. Account/scope and native transport failures remain visible separately. Full lane recovery and discussion retention management remain outstanding.
+Closing and reopening restores connected metadata, room membership and conversations from the same private workspace. “Local access required” describes an unauthenticated owner browser, separate from source registration. Open through the installed launcher to establish that owner session. Account/scope and native transport failures remain visible separately. Independent native work and acknowledged queue receipts survive companion reconnects; embedded process migration and full lane recovery remain outstanding.
 
 ## Develop from source
 
@@ -103,8 +121,8 @@ The shortcuts launch this source checkout. The [walkthrough](docs/walkthrough.md
 | Address relevant threads | Individual/multiple threads, room `@all`, topic and recent-activity filters | Known permitted catalog; missing activity and truncation are reported |
 | Wake or queue a recipient | Routes through the supported remote Codex daemon or an opted-in Claude channel | Transport acknowledgment and a completed model answer are separate |
 | Inspect connected work | Native threads, repositories, worktrees, Markdown, artifact hashes and comparisons | Metadata discovery does not grant transcript access |
-| Close and reopen | Saved context; Ask history for 30 days/up to 100 entries | Full interrupted-lane recovery is outstanding |
-| Install normally | Windows setup/uninstaller and Linux menu launcher | Unsigned alpha; no automatic updater |
+| Close and reopen | Saved context, work records and exact delivery receipts; Ask history for 30 days/up to 100 entries | Embedded process migration and unknown native outcomes still need reconciliation |
+| Install normally | Windows setup/uninstaller and Linux menu launcher; staged update preflight and active-work drain | Unsigned alpha; no unattended updater |
 
 **Work board (source preview):** shared briefs, expiring ownership claims, progress and evidence-backed completion are available through the UI, MCP and participant CLI. It uses a durable companion-owned AgentSpaces replica and a pinned upstream review dependency. These changes are not included in the alpha.3 installers. See [work board](docs/work-board.md).
 
@@ -140,6 +158,8 @@ Explore [BadMonkey](https://www.badmonkey.ai/) and its [GitHub projects](https:/
 
 ## Guides and qualification
 
+- [Capability matrix](docs/product-capabilities.md): implemented coordination paths, setup and explicit limits.
+
 - [Walkthrough](docs/walkthrough.md): install, ask, create a group and inspect work.
 - [Installation](docs/installer.md): normal Windows/Linux installation, package builds and retained state.
 - [Architecture](docs/architecture.md): local/SSH components, source identity, grants and native delivery.
@@ -152,4 +172,8 @@ Explore [BadMonkey](https://www.badmonkey.ai/) and its [GitHub projects](https:/
 - [Open-source readiness](docs/open-source-readiness.md): license, privacy, packaging and qualification gates.
 - [Brand and attribution](docs/brand-and-attribution.md): BadMonkey, AgentSpaces and this standalone companion.
 
-Windows is the observed desktop platform. Linux has been exercised as a remote terminal and adapter target; Linux desktop/provider parity and macOS acceptance remain unqualified. Unconnected cloud/web agents, a resource broker, a decision inbox and complete lane recovery are outstanding. Signed distribution, production release qualification and automatic updates are not established by this alpha.
+Windows is the observed desktop platform. Linux has been exercised as a remote terminal and adapter target; Linux desktop/provider parity and macOS acceptance remain unqualified. Unconnected cloud/web agents, arbitrary additional-host onboarding and complete native process recovery remain outstanding. Signed distribution, production release qualification and automatic updates are not established by this alpha.
+
+Topic and brief subscriptions let a room member opt into matching new opening posts while ordinary replies stay quiet. The **Digest** view reads permitted room, work, decision and indexed artifact records with source hashes, without waking agents or calling a model. Both are available headless through scoped API, MCP and CLI. See [delivery preferences and digest limits](docs/topic-subscriptions-and-digests.md).
+
+The **Usage** page separates observed metrics from unknown provider quotas and supports expiring owner availability reports. It can propose an alternate-provider handoff pinned to an existing work brief and worktree, then send the exact proposal to the decision inbox. Claims and native work stay unchanged until the owning workflows authorize the next step. See [provider availability and handoffs](docs/provider-availability-and-handoffs.md).

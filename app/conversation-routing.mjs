@@ -1,3 +1,4 @@
+import { implicitRoomWake } from "./room-subscriptions.mjs";
 import { createHash } from "node:crypto";
 // Bounded direct room delivery only; no work claims, scheduler or idle models.
 export async function routeConversation(engine, { codexAgents, channels }, group, message) {
@@ -48,8 +49,8 @@ export async function routeConversation(engine, { codexAgents, channels }, group
       // Status posts remain in the room; waking every peer requires an explicit address.
       const broadcast = aliases.includes("all");
       candidates = group.members.filter(member => member.sessionId !== message.source.sessionId &&
-        (broadcast || aliases.includes(member.alias)) && permitted(member.sessionId))
-        .map(member => ({ sessionId: member.sessionId, alias: member.alias, status: "connecting-native-agent" }));
+        (broadcast || aliases.includes(member.alias) || !aliases.length && !message.replyTo && implicitRoomWake(group,member.sessionId,message.text,{peer:true,messageIndex:group.messages.indexOf(message)})) && permitted(member.sessionId))
+        .map(member => ({ sessionId: member.sessionId, alias: member.alias, status: "connecting-native-agent", ...(!aliases.length ? {implicitSubscription:true} : {}) }));
     }
     message.targets = candidates.slice(0, remaining);
     message.routing = { rootId: chain.root.id, depth: chain.depth, allocated: true,
@@ -77,6 +78,9 @@ export async function routeConversation(engine, { codexAgents, channels }, group
       if (!permitted(target.sessionId) || (message.source && !permitted(message.source.sessionId)))
         throw new Error("Room access changed");
       if (chain.root.source && !permitted(chain.root.source.sessionId)) throw new Error("Initiating participant access changed");
+      if (target.implicitSubscription && !implicitRoomWake(group,target.sessionId,message.text,{peer:!!message.source,messageIndex:group.messages.indexOf(message)})) {
+        target.status = "subscription changed; not dispatched"; engine.store.save(); continue;
+      }
       const source = engine.session(target.sessionId);
       if (!source.fixture && source.provider === "codex") target.status = codexAgents.dispatch({ sessionId: source.id,
         discussionId: group.id, messageId: message.id, text: message.text, requestId }).status;

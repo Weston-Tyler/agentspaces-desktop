@@ -134,9 +134,9 @@ test("Real HTTP response over byte bound is rejected", async (t) => {
 
 test('decision and machine CLI commands keep source binding and route bounded JSON',async t=>{
  const f=await setup(t);
- for(const command of ['decisions','machines'])await runParticipantCli(f.args(command));
+ for(const command of ['decisions','machines','continuations'])await runParticipantCli(f.args(command));
  for(const command of ['decision-change','machine-change'])await runParticipantCli(f.args(command),{input:JSON.stringify({action:command==='decision-change'?'decision_withdraw':'machine_cancel',entryId:'synthetic',deliveryId:'synthetic-operation-001',rationale:'Reason',summary:'Reason'})});
- assert.deepEqual(f.requests.map(r=>r.path),['/api/decisions/list','/api/machines/list','/api/decisions/change','/api/machines/change']);
+ assert.deepEqual(f.requests.map(r=>r.path),['/api/decisions/list','/api/machines/list','/api/work-board/continuations','/api/decisions/change','/api/machines/change']);
  assert(f.requests.every(r=>r.auth==='Bearer '+TOKEN&&r.host==='127.0.0.1:43127'));
 });
 
@@ -211,4 +211,51 @@ test('CLI verifies exact owner approval receipts without widening participant au
   assert.equal(f.requests.length, 1);
   const help = await runParticipantCli(['verify-approval', '--help']);
   assert.deepEqual(help.stdinSchema.required, ['entryId', 'requestHash', 'receiptId']);
+});
+
+test('artifact CLI schemas and scoped routes carry report text without filesystem paths',async t=>{
+ const f=await setup(t);
+ const help=await runParticipantCli(['artifact-drop','--help']);assert.ok(help.stdinSchema.properties.previousEntryId);assert.equal(f.requests.length,0);
+ const input={deliveryId:'artifact-cli-upload',workEntryId:'work-entry',name:'report.md',text:'Synthetic report'};
+ await runParticipantCli(f.args('artifact-drop'),{input:JSON.stringify(input)});
+ await runParticipantCli(f.args('artifact-read'),{input:JSON.stringify({entryId:'artifact-entry'})});
+ await runParticipantCli(f.args('artifacts'),{input:'{}'});await runParticipantCli(f.args('lanes'));
+ assert.deepEqual(f.requests.map(row=>row.path),['/api/artifacts/create','/api/artifacts/list','/api/artifacts/list','/api/lanes/list']);assert.deepEqual(f.requests[0].body,input);
+ await assert.rejects(runParticipantCli(f.args('artifact-drop'),{input:JSON.stringify({...input,path:'/tmp/not-allowed'})}),/bounded_artifact_request_required/);
+});
+test('Topic subscriptions and digest expose offline schemas and preserve scoped route arguments',async t=>{
+  const {args,requests}=await setup(t);
+  const subscription={id:GROUP,mode:'wake',topics:['chillit recipe']};
+  assert.equal((await runParticipantCli(['subscribe','--help'])).stdinSchema.properties.mode.enum[0],'wake');
+  await runParticipantCli(args('subscribe'),{input:JSON.stringify(subscription)});
+  await runParticipantCli(args('subscriptions','--discussion',GROUP));
+  await runParticipantCli(args('digest'),{input:JSON.stringify({query:'recipe',limit:20,since:'2026-10-10T00:00:00Z'})});
+  assert.deepEqual(requests.map(row=>row.path),['/api/discussions/subscription','/api/discussions/subscriptions','/api/digest']);
+  assert.deepEqual(requests[0].body,subscription);
+  await assert.rejects(runParticipantCli(args('subscribe'),{input:JSON.stringify({...subscription,sessionId:'a-peer'})}),/bounded_subscription/);
+  await assert.rejects(runParticipantCli(args('digest'),{input:JSON.stringify({limit:201})}),/bounded_subscription/);
+  assert.equal(requests.length,3);
+});
+
+test('Provider status and exact handoff CLI requests preserve scope and reject owner impersonation',async t=>{
+ const {args,requests}=await setup(t),input={workEntryId:'synthetic-work',workHash:'a'.repeat(64),worktreeId:'worktree:synthetic',targetSessionId:'claude@local:'+GROUP};
+ await runParticipantCli(args('provider-status'));
+ await runParticipantCli(args('availability-report'),{input:JSON.stringify({nativeRequestId:'synthetic-receipt',minutes:5})});
+ await runParticipantCli(args('handoff-preview'),{input:JSON.stringify(input)});
+ await runParticipantCli(args('handoff-request'),{input:JSON.stringify({...input,proposalHash:'b'.repeat(64),deliveryId:'handoff-cli-001'})});
+ assert.deepEqual(requests.map(row=>row.path),['/api/providers/status','/api/providers/availability','/api/providers/handoff/preview','/api/providers/handoff/request']);
+ await assert.rejects(runParticipantCli(args('availability-report'),{input:JSON.stringify({provider:'claude',state:'available'})}),/bounded_provider/);
+ assert.equal((await runParticipantCli(['handoff-request','--help'])).stdinSchema.required.includes('proposalHash'),true);
+ assert.equal(requests.length,4);
+});
+
+test('Headless CLI validates nested budget numbers and rejects nested extra fields before dispatch',async t=>{
+  const {args,requests}=await setup(t);
+  const body={deliveryId:'headless-cli-valid-001',provider:'codex',host:'local',cwd:'/fictional/project',workEntryId:'synthetic-work',briefText:'Run a fixture only',budget:{observationMs:1000,maxTurns:1,maxCostUsd:0.5}};
+  await runParticipantCli(args('job-request'),{input:JSON.stringify(body)});
+  assert.equal(requests[0].path,'/api/headless/request');assert.deepEqual(requests[0].body,body);
+  for(const budget of [{...body.budget,maxCostUsd:0},{...body.budget,maxCostUsd:51},{...body.budget,maxCostUsd:'1'},{...body.budget,maxCostUsd:null},{...body.budget,observationMs:999},{...body.budget,maxTurns:1.5},{...body.budget,permissionOverride:true},{maxTurns:1,maxCostUsd:1},null,[]]){
+    await assert.rejects(runParticipantCli(args('job-request'),{input:JSON.stringify({...body,budget})}),error=>error.code==='bounded_headless_request_required'&&error.details.invalidFields.includes('budget'));
+  }
+  assert.equal(requests.length,1);
 });

@@ -43,7 +43,7 @@ export function recordUsage(store, record) {
     for (const f of fields)
       if (metrics[f] < previous[f])
         throw new Error("Regressing usage requires explicit reconciliation");
-  store.data.usage[key] = { ...record, ...metrics };
+  store.data.usage[key] = { ...record, ...metrics, reportedFields: fields.filter(field => Object.hasOwn(record, field) && record[field] !== undefined && record[field] !== null) };
   store.save();
   return {
     duplicate: !!previous && fields.every((f) => previous[f] === metrics[f]),

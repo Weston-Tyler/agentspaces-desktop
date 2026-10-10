@@ -45,7 +45,7 @@ test('HTTP owner approval requires separate password; public cookie and particip
 });
 test('approval notification selects only its bound source and retries reuse the same message',async()=>{
  const row={entryId:'request',hash:'a'.repeat(64),value:{approval:{targetSessionId:'source'}},answer:{value:{verification:{method:'owner-password'}}}};
- const groups=[],engine={store:{data:{discussions:groups}},workBoard:{decisions:()=>({items:[row]})},discussions:{
+ const groups=[],engine={session:()=>({id:'source'}),store:{data:{discussions:groups}},workBoard:{access:()=>{},decisions:()=>({items:[row]})},discussions:{
   participant:()=>({id:'source',fixture:false}),
   create:(input,creation)=>{const g={id:'room',members:input.sessionIds.map(sessionId=>({sessionId})),messages:[],creation};groups.push(g);return g;},
   group:id=>groups.find(g=>g.id===id),

@@ -5,14 +5,24 @@ import { pathToFileURL } from "node:url";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = (code, details) => Object.assign(new Error(code), { code, ...(details ? { details } : {}) });
-const COMMAND_OPTIONS = { decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
+const COMMAND_OPTIONS = { "provider-status": [], "availability-report": [], "handoff-preview": [], "handoff-request": [], "ensure-connection": [], "job-request": [], jobs: [], subscriptions: ["discussion"], subscribe: [], digest: [], continuations: [], lanes: [], artifacts: [], "artifact-read": [], "artifact-drop": [], decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
 const COMMANDS = Object.keys(COMMAND_OPTIONS);
 const string = (maxLength, extra = {}) => ({ type: "string", minLength: 1, maxLength, ...extra });
 const uuid = { type: "string", pattern: UUID.source.replaceAll("a-f", "a-fA-F") };
 const delivery = string(100, { minLength: 8, pattern: "^[a-zA-Z0-9-]{8,100}$" });
 const objectSchema = (properties, required, extra = {}) => ({ type: "object", properties, required, additionalProperties: false, ...extra });
 const MESSAGE_PROPERTIES = { text: string(8000, { pattern: "\\S" }), nativeTurnId: string(200), deliveryId: delivery };
+const handoffFields = {workEntryId:string(100),workHash:string(64,{minLength:64,pattern:"^[a-f0-9]{64}$"}),worktreeId:string(100),targetSessionId:string(300)};
 const STDIN_SCHEMAS = {
+  "job-request": objectSchema({deliveryId:delivery,provider:{enum:['codex','claude']},host:{enum:['local']},cwd:string(4096),workEntryId:string(100),discussionId:uuid,messageId:uuid,briefText:string(8000),budget:objectSchema({observationMs:{type:'integer',minimum:1000,maximum:900000},maxTurns:{type:'integer',minimum:1,maximum:100},maxCostUsd:{type:'number',exclusiveMinimum:0,maximum:50}},['observationMs','maxTurns','maxCostUsd'])},['deliveryId','provider','cwd','workEntryId','briefText','budget']),
+  "artifact-read": objectSchema({entryId:string(100)},['entryId']),
+  "artifact-drop": objectSchema({deliveryId:delivery,name:string(120),text:string(16384),mediaType:{enum:['text/plain','text/markdown','application/json']},workEntryId:string(100),discussionId:uuid,messageId:uuid,previousEntryId:string(100)},['deliveryId','name','text']),
+  artifacts: objectSchema({workEntryId:string(100),discussionId:uuid,limit:{type:'integer',minimum:1,maximum:200}},[]),
+  "availability-report": objectSchema({nativeRequestId:string(100),minutes:{type:"integer",minimum:1,maximum:1440}},["nativeRequestId"]),
+  "handoff-preview": objectSchema(handoffFields,Object.keys(handoffFields)),
+  "handoff-request": objectSchema({...handoffFields,proposalHash:string(64,{minLength:64,pattern:"^[a-f0-9]{64}$"}),deliveryId:delivery},[...Object.keys(handoffFields),"proposalHash","deliveryId"]),
+  subscribe: objectSchema({id:uuid,mode:{enum:["wake","digest","off"]},topics:{type:"array",minItems:0,maxItems:12,items:string(80)},workEntryId:string(100)},["id","mode","topics"]),
+  digest: objectSchema({since:string(40),query:string(200,{minLength:0}),limit:{type:"integer",minimum:1,maximum:200},discussionId:uuid},[]),
   message: objectSchema({ ...MESSAGE_PROPERTIES, sessionId: string(300), nativeThreadId: uuid, host: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$" }, provider: { enum: ["codex", "claude"] }, title: string(80, { pattern: "\\S" }) }, Object.keys(MESSAGE_PROPERTIES), { oneOf: [{ required: ["sessionId"] }, { required: ["nativeThreadId"] }] }),
   broadcast: objectSchema({ ...MESSAGE_PROPERTIES, query: string(500, { minLength: 0 }), activeWithinDays: { type: "integer", minimum: 1, maximum: 3650 }, sessionIds: { type: "array", minItems: 1, maxItems: 200, items: string(300) }, nativeThreadIds: { type: "array", minItems: 1, maxItems: 200, items: uuid }, discussionId: uuid }, Object.keys(MESSAGE_PROPERTIES)),
   "verify-approval": objectSchema({ entryId: string(100), requestHash: string(64, { minLength: 64, pattern: "^[a-f0-9]{64}$" }), receiptId: string(100) }, ["entryId", "requestHash", "receiptId"]),
@@ -21,12 +31,18 @@ function helpFor(command) {
   const notes = ["Help is offline and never reads private configuration or stdin.", "All actual commands require --config PATH and --source UUID for this exact native thread."];
   if (!command) return { usage: "participant-cli.mjs [--config PATH --source UUID] COMMAND [OPTIONS]", commands: COMMANDS, help: "COMMAND --help", notes };
   if (["message", "broadcast", "contribute"].includes(command)) notes.push("nativeTurnId/--turn is a self-reported native turn reference, not verified sender authority.", "Reuse the same deliveryId/--delivery for a retry of the same request; use a new ID for a new request.");
+  if (command === "ensure-connection") notes.push("Inspect this exact source registration and read/wake readiness. Native bootstrap ensure_native_connection also provisions its own source-bound channel when native opt-in exists. No grants change or process resume.");
+  if (command === "continuations") notes.push("Read explicit pending steps, standing grant status and native idle observations. No force-resume, cancellation or model polling; only owner-enabled scoped wakes may execute.");
+  if (["provider-status","availability-report","handoff-preview","handoff-request"].includes(command)) notes.push("Observed metrics and reported availability are not provider quota/billing. Preview/request handoff preserves the existing claim and starts no native work; owner decision and native approvals remain required.");
+  if (["subscribe","subscriptions","digest"].includes(command)) notes.push("Delivery preferences do not authorize work. Explicit mentions remain honored; plain replies stay quiet. Digests are bounded persisted evidence; since is inclusive ISO time and discussionId filters only messages.");
   if (command === "verify-approval") notes.push("Verifies the exact receipt against current expiry, revocation and authenticated target source; records an audit receipt. Native owner delegation and client permissions remain authoritative.");
   return { command, usage: `participant-cli.mjs --config PATH --source UUID ${command}${COMMAND_OPTIONS[command].map(key => ` [--${key} VALUE]`).join("")}`, options: COMMAND_OPTIONS[command], ...(STDIN_SCHEMAS[command] ? { stdinSchema: STDIN_SCHEMAS[command] } : {}), notes };
 }
 function validField(value, schema) {
   if (schema.enum) return schema.enum.includes(value);
   if (schema.type === "string") return typeof value === "string" && (schema.minLength === undefined || value.length >= schema.minLength) && (schema.maxLength === undefined || value.length <= schema.maxLength) && (!schema.pattern || new RegExp(schema.pattern).test(value));
+  if (schema.type === "number") return typeof value === "number" && Number.isFinite(value) && (schema.minimum === undefined || value >= schema.minimum) && (schema.exclusiveMinimum === undefined || value > schema.exclusiveMinimum) && (schema.maximum === undefined || value <= schema.maximum);
+  if (schema.type === "object") return !!value && typeof value === "object" && !Array.isArray(value) && (schema.required ?? []).every(key => Object.hasOwn(value, key)) && Object.entries(value).every(([key, item]) => Object.hasOwn(schema.properties, key) && validField(item, schema.properties[key]));
   if (schema.type === "integer") return Number.isInteger(value) && value >= schema.minimum && value <= schema.maximum;
   if (schema.type === "array") return Array.isArray(value) && value.length >= schema.minItems && value.length <= schema.maxItems && value.every(item => validField(item, schema.items));
   return false;
@@ -117,11 +133,30 @@ export async function runParticipantCli(args, { input, requestImpl = request } =
   const attribution = "locally connector-bound; native caller not verified";
   if (command === "info") return { nativeThreadId: config.nativeThreadId, sessionId: config.sessionId, provider: config.provider, host: config.host, attribution, commands: COMMANDS };
   let path, body;
-  if (command === 'capabilities') { path = '/api/agent/capabilities'; body = {}; }
+  if (command === 'job-request') { path = '/api/headless/request'; body = validateStdin(command, await inputJson(input), 'bounded_headless_request_required'); }
+  else if (command === 'jobs') { path = '/api/headless/list'; body = {}; }
+  else if (command === 'lanes') { path = '/api/lanes/list'; body = {limit:200}; }
+  else if (['artifacts','artifact-read','artifact-drop'].includes(command)) { path = command === 'artifact-drop' ? '/api/artifacts/create' : '/api/artifacts/list'; body = validateStdin(command, await inputJson(input), 'bounded_artifact_request_required'); }
+  else if (command === 'capabilities') { path = '/api/agent/capabilities'; body = {}; }
+  else if (command === 'provider-status') { path='/api/providers/status'; body={}; }
+  else if (['availability-report','handoff-preview','handoff-request'].includes(command)) {
+    body=validateStdin(command,await inputJson(input),'bounded_provider_routing_required');
+    path=({'availability-report':'/api/providers/availability','handoff-preview':'/api/providers/handoff/preview','handoff-request':'/api/providers/handoff/request'})[command];
+  }
+  else if (command === 'subscriptions') {
+    if (!UUID.test(options.discussion ?? "")) throw fail("discussion_uuid_required");
+    path = '/api/discussions/subscriptions'; body = {id:options.discussion};
+  }
+  else if (command === 'subscribe' || command === 'digest') {
+    body = validateStdin(command, await inputJson(input), 'bounded_subscription_or_digest_required');
+    path = command === 'subscribe' ? '/api/discussions/subscription' : '/api/digest';
+  }
   else if (command === 'message' || command === 'broadcast') {
     body = validateStdin(command, await inputJson(input), "bounded_agent_message_required");
     path = command === 'message' ? '/api/agent/message' : '/api/agent/broadcast';
   }
+  else if (command === "ensure-connection") { path="/api/native/connection/ensure"; body={}; }
+  else if (command === "continuations") { path="/api/work-board/continuations"; body={}; }
   else if (command === "verify-approval") {
     path = "/api/approvals/verify"; body = validateStdin(command, await inputJson(input), "exact_approval_receipt_required");
   }

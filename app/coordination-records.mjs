@@ -1,3 +1,4 @@
+import {standingScope} from './work-continuation.mjs';
 import { consumeOwnerProof } from './owner-approval-auth.mjs';
 import { cbor, spaceIdLocal } from '@agentspaces/client';
 import { createHash } from 'node:crypto';
@@ -72,9 +73,9 @@ export function approvalCheck(b,binding,input,{refresh=true}={}) {
  const answer=row.answer?.value,now=b.engine.clock();
  const intact=answer?.requestHash===row.hash&&answer?.targetSessionId===binding.sessionId&&answer?.verification?.method==='owner-password'&&Number.isSafeInteger(answer?.verification?.verifiedAt)&&Number.isSafeInteger(answer?.expiresAt)&&['approve','approve_with_limits','decline'].includes(answer?.outcome);
  const status=row.revocation?'revoked':!intact?'invalid_receipt':answer.outcome==='decline'?'declined':answer.expiresAt<=now||row.expiresAt<=now?'expired':answer.verification.credentialId!==b.engine.store.data.ownerApprovalCredential?.id?'credential_changed':'verified';
- return {entryId:row.entryId,requestHash:row.hash,receiptId:receipt.entryId,status,observedAt:now,scope:row.value.approval,requiredLimits:[...row.value.approval.limits,...(answer?.limits??[])],outcome:answer?.outcome,expiresAt:answer?.expiresAt,ownerVerification:receipt.value.verification,revocation:row.revocation??null,authorization:{valid:status==='verified',targetSessionId:binding.sessionId},nativeAuthority:'owner-delegation-required',nativePolicy:'Native owner instructions must permit reliance on this source-bound receipt. Native tool permissions remain authoritative. Recheck immediately before acting; this result is not a standing grant.'};
+ return {entryId:row.entryId,requestHash:row.hash,receiptId:receipt.entryId,status,observedAt:now,scope:row.value.approval,requiredLimits:[...row.value.approval.limits,...(answer?.limits??[])],outcome:answer?.outcome,wakeEnabled:answer?.wakeEnabled===true,expiresAt:answer?.expiresAt,ownerVerification:receipt.value.verification,revocation:row.revocation??null,authorization:{valid:status==='verified',targetSessionId:binding.sessionId},nativeAuthority:'owner-delegation-required',nativePolicy:'Native owner instructions must permit reliance on this source-bound receipt. Native tool permissions remain authoritative. Recheck immediately before acting; only an explicit standing scope grants brief continuation; no additional permissions are implied.'};
 }
-export const decisionFields={decision_verify:['entryId','requestHash','receiptId'],decision_create:['title','question','options','recommendation','blockedWork','approval'],decision_answer:['entryId','optionId','rationale'],decision_approve:['entryId','requestHash','outcome','limits','rationale','expiresAt'],decision_revoke:['entryId','rationale'],decision_withdraw:['entryId','rationale']};
+export const decisionFields={decision_verify:['entryId','requestHash','receiptId'],decision_create:['title','question','options','recommendation','blockedWork','approval'],decision_answer:['entryId','optionId','rationale'],decision_approve:['entryId','requestHash','outcome','limits','rationale','expiresAt','wakeEnabled'],decision_revoke:['entryId','rationale'],decision_withdraw:['entryId','rationale']};
 export async function decisionChange(b,input,binding,actor,agent,ownerProof) {
  const now=b.engine.clock();
  if(input.action==='decision_create') {
@@ -82,10 +83,10 @@ export async function decisionChange(b,input,binding,actor,agent,ownerProof) {
   let approval;
   if(Object.hasOwn(input,'approval')) {
    const scope=input.approval;
-   if(!scope||typeof scope!=='object'||Array.isArray(scope)||Object.keys(scope).some(k=>!['repo','branch','folder','action','limits'].includes(k)))throw Error('Invalid approval scope');
+   if(!scope||typeof scope!=='object'||Array.isArray(scope)||Object.keys(scope).some(k=>!['repo','branch','folder','action','limits','standing'].includes(k)))throw Error('Invalid approval scope');
    if(!binding?.sessionId)throw Error('Approval requests require a source-bound participant');
    if(!Array.isArray(scope.limits)||scope.limits.length<1||scope.limits.length>20)throw Error('Approval limits required');
-   approval={repo:text(scope.repo,2000,'approval repository'),branch:text(scope.branch,300,'approval branch'),folder:text(scope.folder,2000,'approval folder'),action:text(scope.action,8000,'approval action'),limits:scope.limits.map(v=>text(v,2000,'approval limit')),targetSessionId:binding.sessionId};
+   approval={repo:text(scope.repo,2000,'approval repository'),branch:text(scope.branch,300,'approval branch'),folder:text(scope.folder,2000,'approval folder'),action:text(scope.action,8000,'approval action'),limits:scope.limits.map(v=>text(v,2000,'approval limit')),targetSessionId:binding.sessionId,...(scope.standing!==undefined?{standing:standingScope(b,scope,binding)}:{})};
   }
   if(!Array.isArray(options)||options.length<2||options.length>8)throw Error('Provide 2–8 options');
   const choices=options.map(o=>({id:text(o.id,80,'option id'),label:text(o.label,2000,'option label')}));
@@ -115,8 +116,9 @@ export async function decisionChange(b,input,binding,actor,agent,ownerProof) {
   if(!['approve','decline','approve_with_limits'].includes(input.outcome))throw Error('Invalid approval outcome');
   if(!Array.isArray(input.limits)||input.limits.length>20||input.outcome==='approve_with_limits'&&!input.limits.length)throw Error('Invalid additional approval limits');
   const limits=input.limits.map(v=>text(v,2000,'approval limit'));
+  if(input.wakeEnabled!==undefined&&(typeof input.wakeEnabled!=='boolean'||input.wakeEnabled&&!row.value.approval.standing))throw Error('Automatic wake requires a standing brief scope');
   if(!Number.isSafeInteger(input.expiresAt)||input.expiresAt<=now||input.expiresAt>now+86400000||input.expiresAt>row.expiresAt)throw Error('Approval expiry must be within 24 hours and request lifetime');
-  const value={decisionId:row.entryId,requestHash:row.hash,targetSessionId:row.value.approval.targetSessionId,status:'answered',outcome:input.outcome,limits,expiresAt:input.expiresAt,rationale:text(input.rationale,8000,'rationale'),verification,actor,at:now};
+  const value={decisionId:row.entryId,requestHash:row.hash,targetSessionId:row.value.approval.targetSessionId,status:'answered',outcome:input.outcome,wakeEnabled:input.wakeEnabled===true,limits,expiresAt:input.expiresAt,rationale:text(input.rationale,8000,'rationale'),verification,actor,at:now};
   await finish(b,row.entryId,agent);const resultEntryId=write(b,COORD.answer,value,agent);
   return {entryId:row.entryId,resultEntryId,status:'answered'};
  }

@@ -3,7 +3,11 @@ import { createHash } from 'node:crypto';
 export async function notifyApproval(engine,result,route) {
  const row=engine.workBoard.decisions(null,{entryId:result.entryId}).items[0];
  if(!row?.answer?.value.verification)throw Error('Verified approval receipt unavailable');
- const id=row.value.approval.targetSessionId,source=engine.discussions.participant({sessionId:id});
+ const id=row.value.approval.targetSessionId,current=engine.session(id);
+ // Internal delivery uses the current source boundary, not a minted connector.
+ // Recheck the owning board scope as well as the normal participant grants.
+ const binding={sessionId:id,account:current.account,project:current.project,scopeId:current.scopeId??null};
+ const source=engine.discussions.participant(binding);engine.workBoard.access(binding);
  if(source.fixture)throw Error('Native approval notification requires a connected native source');
  const roomKey='approval-room-'+createHash('sha256').update(id).digest('hex');
  let group=engine.store.data.discussions.find(g=>g.creation?.sessionId==='desktop-owner'&&g.creation?.deliveryId===roomKey);

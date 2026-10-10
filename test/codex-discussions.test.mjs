@@ -329,3 +329,29 @@ test('update drain records known-unsent Codex input without opening native clien
   await f.hub.wait(f.args.requestId);assert.deepEqual((await f.hub.recoverUndispatched()).recovered,[]);
   assert.equal(f.adapters.length,1);
 });
+
+
+test('update drain blocks reconciliation before adapter allocation and after each awaited native boundary', async t => {
+  for (const boundary of ['entry', 'open', 'bind', 'answer']) await t.test(boundary, async () => {
+    const f = setup(); f.engine.store.data.desktopPreferences = {allowNativeFullAccess:true};
+    let allowed = boundary !== 'entry'; f.engine.dispatchAllowed = () => allowed;
+    f.engine.store.data.codexDiscussionDeliveries[f.args.requestId] = {...f.args, status:'queued'};
+    f.engine.store.data.codexDiscussionNativeReceipts[f.args.requestId] = {clientId:f.args.requestId,nativeThreadId:THREAD,queuedSubmissionId:'synthetic-existing-submission',status:'queued'};
+    const calls=[]; const before=structuredClone(f.engine.store.data.connectors);
+    f.hub.adapterFactory = () => { calls.push('factory'); return {
+      open:async()=>{calls.push('open');if(boundary==='open')allowed=false;},
+      bindReadTarget:async()=>{calls.push('bind');if(boundary==='bind')allowed=false;},
+      reconcileAnswer:async()=>{calls.push('answer');if(boundary==='answer')allowed=false;return {status:'completed',clientId:f.args.requestId,nativeThreadId:THREAD,nativeTurnId:TURN,text:'Fixture completed reply'};},
+      close(){calls.push('close');}, answer(){assert.fail('Never enqueue native input during reconciliation');},
+    }; };
+    try {
+      const result=await f.hub.reconcileSubmitted();
+      assert.deepEqual(result.reconciled,[]);assert.notEqual(f.hub.reconciling,true);
+      const expected=boundary==='entry'?[]:boundary==='open'?['factory','open','close']:boundary==='bind'?['factory','open','bind','close']:['factory','open','bind','answer','close'];
+      assert.deepEqual(calls,expected);assert.deepEqual(f.engine.store.data.connectors,before);
+      assert.equal(f.engine.discussions.group(f.args.discussionId).messages.length,1);
+      assert.equal(f.engine.store.data.codexDiscussionNativeReceipts[f.args.requestId].status,'queued');
+      assert.equal(f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].status,'queued');
+    } finally { await f.hub.close(); }
+  });
+});

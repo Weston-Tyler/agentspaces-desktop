@@ -182,3 +182,59 @@ test('coordination HTTP surfaces deny agent owner powers and revoked reads',asyn
  assert.equal((await f.call('/api/decisions/change',create)).status,400);
  assert.equal(f.effects.nativeFactories,0);
 });
+
+test('scoped artifact drop/read and derived lanes expose no filesystem write and revoke with source sharing',async t=>{
+ const f=await fixture(t);
+ const made=await f.call('/api/work-board/change',{action:'create',deliveryId:'artifact-http-create',title:'Report task',brief:'Synthetic report',repository:'https://example.invalid/synthetic',base:'a'.repeat(40),allowedFiles:'src/report.js'});
+ assert.equal(made.status,200);
+ assert.equal((await f.call('/api/work-board/change',{action:'claim',deliveryId:'artifact-http-claim',entryId:made.body.entryId})).status,200);
+ const uploaded=await f.call('/api/artifacts/create',{deliveryId:'artifact-http-upload',workEntryId:made.body.entryId,name:'report.md',text:'Synthetic results',mediaType:'text/markdown'});
+ assert.equal(uploaded.status,200);const read=await f.call('/api/artifacts/list',{entryId:uploaded.body.entryId});assert.equal(read.status,200);assert.equal(read.body.items[0].value.source.participantId,f.source.id);
+ assert.equal((await f.call('/api/lanes/list')).body.items[0].status,'unknown');
+ assert.equal((await f.call('/api/artifacts/create',{deliveryId:'artifact-http-escape',workEntryId:made.body.entryId,name:'../escape',text:'Denied'})).status,400);
+ f.engine.store.data.grants[f.source.id].share=false;assert.equal((await f.call('/api/artifacts/list',{entryId:uploaded.body.entryId})).status,400);assert.equal((await f.call('/api/lanes/list')).status,400);
+ assert.equal(f.effects.nativeFactories,0);
+});
+
+test('artifact room links require exact existing message and current membership on every read',async t=>{
+ const f=await fixture(t),group=f.engine.discussions.create({title:'Reports',sessionIds:[f.source.id]});
+ const posted=f.engine.discussions.post({id:group.id,text:'Report here',deliveryId:'artifact-room-parent',targets:[]});
+ const input={deliveryId:'artifact-room-upload',discussionId:group.id,messageId:posted.messages[0].id,name:'report.txt',text:'Scoped report'};
+ assert.equal((await f.call('/api/artifacts/create',{...input,messageId:'unknown'})).status,400);
+ const created=await f.call('/api/artifacts/create',input);assert.equal(created.status,200);
+ assert.equal((await f.call('/api/artifacts/list',{entryId:created.body.entryId})).status,200);
+ assert.equal((await f.call('/api/artifacts/list',{entryId:created.body.entryId},f.app.admin)).status,200);
+ f.engine.discussions.group(group.id).members=[];
+ assert.equal((await f.call('/api/artifacts/list',{entryId:created.body.entryId})).status,400);
+});
+
+
+test('headless jobs deny agent launch and private logs while scoped status honors room membership',async t=>{
+ const f=await fixture(t),group=f.engine.discussions.create({title:'Jobs',sessionIds:[f.source.id]});
+ const posted=f.engine.discussions.post({id:group.id,text:'Job report here',deliveryId:'job-room-parent',targets:[]});
+ const id='synthetic-headless-job';
+ f.engine.store.data.headlessJobReceipts[id]={id,scopeId:'synthetic-permitted-scope',account:'synthetic-owner',provider:'codex',status:'finished',discussionId:group.id,messageId:posted.messages[0].id,cwd:'/private/owner/work',log:'PRIVATE SYNTHETIC LOG'};
+ const listed=await f.call('/api/headless/list');assert.equal(listed.status,200);assert.equal(listed.body.items.length,1);assert.ok(!JSON.stringify(listed.body).includes('PRIVATE'));assert.ok(!JSON.stringify(listed.body).includes('/private/owner'));
+ assert.equal((await f.call('/api/headless/launch',{})).status,400);
+ assert.equal((await f.call('/api/headless/log',{id})).status,400);
+ const ownerLog=await f.call('/api/headless/log',{id},f.app.admin);assert.equal(ownerLog.status,200);assert.equal(ownerLog.body.text,'PRIVATE SYNTHETIC LOG');
+ f.engine.discussions.group(group.id).members=[];assert.equal((await f.call('/api/headless/list')).body.items.length,0);
+ f.engine.store.data.grants[f.source.id].share=false;assert.equal((await f.call('/api/headless/list')).status,400);
+ assert.equal(f.effects.nativeFactories,0);
+});
+
+
+test('agents request exact headless payload through existing decisions without launching on answer',async t=>{
+ const f=await fixture(t);
+ const made=await f.call('/api/work-board/change',{action:'create',deliveryId:'headless-http-work',title:'Headless request',brief:'Synthetic',repository:'https://example.invalid/synthetic',base:'a'.repeat(40),allowedFiles:'src/test.js'});
+ const payload={deliveryId:'headless-http-request',provider:'codex',cwd:f.source.cwd,workEntryId:made.body.entryId,briefText:'Synthetic exact brief',budget:{observationMs:1000,maxTurns:2,maxCostUsd:1}};
+ const {Client}=await import('@modelcontextprotocol/sdk/client/index.js'),{StdioClientTransport}=await import('@modelcontextprotocol/sdk/client/stdio.js'),{fileURLToPath}=await import('node:url');
+ const client=new Client({name:'synthetic-headless-decision-client',version:'1'});t.after(()=>client.close());
+ await client.connect(new StdioClientTransport({command:process.execPath,args:[fileURLToPath(new URL('../app/mcp.mjs',import.meta.url))],env:{...process.env,AGENTSPACES_URL:f.app.address,AGENTSPACES_CONNECTOR_TOKEN:f.token}}));
+ const tool=(await client.listTools()).tools.find(tool=>tool.name==='request_headless_job');assert.equal(tool.annotations.readOnlyHint,false);
+ const dispatched=await client.callTool({name:'request_headless_job',arguments:payload});assert.notEqual(dispatched.isError,true);
+ const request={body:JSON.parse(dispatched.content[0].text)};assert.equal(request.body.state,'blocked_requires_owner_launch');assert.deepEqual(request.body.launch,payload);
+ const rows=await f.call('/api/decisions/list');assert.match(rows.body.items[0].value.question,/Synthetic exact brief/);
+ const answered=await f.call('/api/decisions/change',{action:'decision_answer',deliveryId:'headless-http-answer',entryId:request.body.entryId,optionId:'approve_owner_launch',rationale:'Synthetic owner decision'},f.app.admin);assert.equal(answered.status,200);
+ assert.equal((await f.call('/api/headless/list')).body.items.length,0);assert.equal(f.effects.nativeFactories,0);
+});

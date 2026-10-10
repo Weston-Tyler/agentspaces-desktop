@@ -72,3 +72,38 @@ The upstream exact-selection/snapshot extension is merged in
 [AgentSpaces TypeScript PR #2](https://github.com/badmonkeyai/agentspaces-typescript/pull/2).
 Desktop pins its merge revision `ab091a4fd9b325679ceca9dfa3d3042ff572696b`.
 This source integration does not imply an installed or released Desktop build.
+
+## Agent lanes and report artifacts
+
+The work board includes a derived lane table. It reads permitted source metadata,
+work results and pending decisions; it never parses room text to guess a branch or
+claim that a model is running. `working`/`idle` require an explicit native thread-list
+observation no older than 60 seconds. Pending owner decisions and source-reported
+blocked progress carry their exact record IDs. Missing or stale evidence displays
+`unknown`. Branch and head are labeled source-reported and link to the owning work
+result. Last activity preserves its origin (catalog update, work result or artifact).
+The UI refreshes the projection every 15 seconds without invoking models.
+
+Agents can use `list_agent_lanes`, `publish_shared_artifact`,
+`list_shared_artifacts` and `read_shared_artifact` through either scoped MCP surface.
+The participant CLI exposes `lanes`, `artifacts`, `artifact-read` and `artifact-drop`;
+artifact commands take bounded JSON on stdin and publish their schema with `--help`.
+These APIs accept text directly, so a connected agent does not need filesystem write
+access to drop a report. They do not add network connectivity for unconnected cloud
+sessions or grant access outside an existing connector's workspace.
+
+Reports use existing AgentSpaces Finding records in the durable work-board replica,
+not a separate file store. A report must identify claimed work and/or an exact room
+message. Work uploads require the live claim holder; room uploads require current
+membership and sharing access. Supply `deliveryId`, `name`, `text`, optional
+`mediaType` (`text/plain`, `text/markdown` or `application/json`) and the link IDs.
+Names are labels, never paths. Text is capped at 16 KiB of UTF-8. A corrected report
+uses the latest `previousEntryId`; every version remains immutable with its author,
+source version, content SHA-256 and originating work/room IDs. Upload before completing
+the work claim. Reports expire after 30 days under the existing replica lease contract.
+
+Listing returns metadata; reading an exact artifact ID returns text after checking
+current source/workspace/room access and its content hash. Revoked author sharing
+hides the report. A report remains untrusted source-authored evidence, not a reviewed
+result or owner instruction. Uploading never writes a native repository, wakes a
+thread, starts a model, or accepts the associated work.

@@ -1,4 +1,9 @@
 import { UpdateGate } from './update-gate.mjs';
+import {nativeWakeReadiness,ensureNativeConnection} from './native-readiness.mjs';
+import {ContinuationWaker} from './work-continuation.mjs';
+import { ProviderRouting } from "./provider-routing.mjs";
+import { RoomSubscriptions } from "./room-subscriptions.mjs";
+import { HeadlessJobs } from './headless-jobs.mjs';
 import { OwnerApprovalAuth } from './owner-approval-auth.mjs';
 import { notifyApproval } from './approval-notification.mjs';
 import http from "node:http";
@@ -43,6 +48,8 @@ const staticFiles = {
   "/app.js": "app.js",
   "/native-controls.js": "native-controls.js",
   "/work-board.js": "work-board.js",
+  "/digest.js": "digest.js",
+  "/provider-routing.js": "provider-routing.js",
   "/coordination.js": "coordination.js",
   "/workspace.js": "workspace.js",
   "/discussions.js": "discussions.js",
@@ -63,6 +70,7 @@ export async function startServer({
   terminals: providedTerminals,
   remoteInstall,
   desktopDiscovery = !provided,
+  backgroundNative = true,
   allowDemo = false,
   codexAdapterFactory,
   participantInstallRemote,
@@ -71,6 +79,7 @@ export async function startServer({
   automaticInstallLocal,
   automaticInstallRemote,
   nativeThreadAdapterFactory,
+  headlessJobOptions,
 } = {}) {
   const store = provided?.store ?? new Store(root),
     fabric = provided?.fabric ?? new FabricAdapter({ stateRoot: root }),
@@ -84,17 +93,21 @@ export async function startServer({
     if (engine.workspace.running) desktopStartup.promise.then(() => { connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts }); });
     else connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts });
   }
+  const providerRouting = new ProviderRouting(engine);
+  const roomSubscriptions = new RoomSubscriptions(engine);
   const ownerApprovals = new OwnerApprovalAuth(store, {clock:engine.clock});
   const ownerBrowser = new OwnerBrowserSession(store), recentHistory = new RecentHistory(store);
   const admin = randomBytes(32).toString("hex"),
     instance = randomBytes(16).toString("hex");
   let closing = false;
+  const headlessJobs = new HeadlessJobs(engine,{...headlessJobOptions,admitLaunch:()=>engine.dispatchAllowed()});
   const activeAnswers = new Map();
   let activeMutations = 0;
   const updateGate = new UpdateGate({ blockers: () => {
     const blockers = [];
     if (activeMutations) blockers.push('request-in-progress');
-    if (activeAnswers.size || activeNativeProcessCount()) blockers.push('embedded-native-process');
+    if (codexAgents.reconciling || continuationWaker.running) blockers.push('native-observation-in-progress');
+    if (activeAnswers.size || activeNativeProcessCount() || headlessJobs.activeCount()) blockers.push('embedded-native-process');
     if (terminals.list().some(item => ['starting','running'].includes(item.status))) blockers.push('embedded-native-terminal');
     for (const requestId of codexAgents.aborters.keys()) {
       if (!store.data.codexDiscussionNativeReceipts?.[requestId]?.queuedSubmissionId) blockers.push('native-submission-unacknowledged');
@@ -103,8 +116,9 @@ export async function startServer({
     if (automaticConnections?.pending?.size) blockers.push('native-setup-running');
     return blockers;
   } });
-  engine.dispatchAllowed = () => !closing && !updateGate.draining;
+  engine.dispatchAllowed = () => backgroundNative && !closing && !updateGate.draining;
   const channels = new ChannelHub(engine);
+  engine.nativeWakeReadiness=id=>nativeWakeReadiness(engine,channels,id);
   const codexAgents = new CodexDiscussionHub(engine, { adapterFactory: codexAdapterFactory, onContribution: (group, message) => routeConversation(engine, { codexAgents, channels }, group, message) });
   const nativeThreads = new NativeThreadCreation(engine, { adapterFactory: nativeThreadAdapterFactory, registerSource: async input => {
     const saved = store.data.nativeAutomaticInstallations?.[input.host + ':codex']?.device;
@@ -130,6 +144,7 @@ export async function startServer({
     }
     return result;
   };
+  const continuationWaker=new ContinuationWaker(engine,{inspect:id=>codexAgents.inspectContinuation(id),route:(group,message)=>routeConversation(engine,{codexAgents,channels},group,message),dispatchAllowed:()=>!closing&&(!engine.dispatchAllowed||engine.dispatchAllowed())});
   let connections, participantConnections, sourceBindings, automaticConnections;
   const terminals = providedTerminals ?? new NativeTerminals({ resolveLaunch: options => connections.resolveLaunch(options) });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 65536, perMessageDeflate: false });
@@ -234,6 +249,7 @@ export async function startServer({
           status: closing ? "stopping" : "running",
           instance,
           pid: process.pid,
+          activeHeadlessJobs: headlessJobs.activeCount(),
         });
         return;
       }
@@ -282,12 +298,25 @@ export async function startServer({
       if (
         connector &&
         ![
+          "/api/providers/status",
+          "/api/providers/availability",
+          "/api/providers/handoff/preview",
+          "/api/providers/handoff/request",
+          "/api/digest",
+          "/api/discussions/subscriptions",
+          "/api/discussions/subscription",
           "/api/decisions/list",
           "/api/approvals/verify",
           "/api/decisions/change",
           "/api/machines/list",
           "/api/machines/change",
           "/api/work-board/list",
+          "/api/work-board/continuations",
+          "/api/lanes/list",
+          "/api/headless/list",
+          "/api/headless/request",
+          "/api/artifacts/list",
+          "/api/artifacts/create",
           "/api/work-board/change",
           "/api/discover",
           "/api/retrieve",
@@ -301,6 +330,7 @@ export async function startServer({
           "/api/discussions/invite",
           "/api/native/thread/create",
           "/api/agent/capabilities",
+          "/api/native/connection/ensure",
           "/api/agent/message",
           "/api/agent/broadcast",
           "/api/workspace/compare",
@@ -337,6 +367,20 @@ export async function startServer({
         }
         case "/api/approvals/verify":
           result = await engine.workBoard.verifyApproval(connector, data); break;
+        case "/api/providers/status":
+          result = providerRouting.view(data, connector); break;
+        case "/api/providers/availability":
+          result = providerRouting.report(data, connector); break;
+        case "/api/providers/handoff/preview":
+          result = providerRouting.preview(data, connector); break;
+        case "/api/providers/handoff/request":
+          result = await providerRouting.request(data, connector); break;
+        case "/api/digest":
+          result = roomSubscriptions.digest(data, connector); break;
+        case "/api/discussions/subscriptions":
+          result = roomSubscriptions.list(data, connector); break;
+        case "/api/discussions/subscription":
+          result = roomSubscriptions.change(data, connector); break;
         case "/api/decisions/list":
           result = {...engine.workBoard.decisions(connector, data),ownerAuthentication:ownerApprovals.status()}; break;
         case "/api/machines/list":
@@ -347,6 +391,23 @@ export async function startServer({
         case "/api/machines/change":
           if (!String(data.action).startsWith('machine_')) throw new Error('Machine action required');
           result = await engine.workBoard.mutate(data, connector); break;
+        case "/api/work-board/continuations":
+          result = continuationWaker.view(connector,data); break;
+        case "/api/headless/request":
+          result = await headlessJobs.request(data,connector); break;
+        case "/api/headless/launch":
+          result = await headlessJobs.launch(data,connector); break;
+        case "/api/headless/list":
+          result = headlessJobs.list(connector,data); break;
+        case "/api/headless/log":
+          result = headlessJobs.log(connector,data); break;
+        case "/api/lanes/list":
+          result = engine.workBoard.lanes(connector, data); break;
+        case "/api/artifacts/list":
+          result = engine.workBoard.artifacts(connector, data); break;
+        case "/api/artifacts/create":
+          if (data.action !== undefined) throw new Error("Artifact action is fixed");
+          result = await engine.workBoard.mutate({...data, action:"artifact_create"}, connector); break;
         case "/api/work-board/list":
           result = engine.workBoard.view(connector, data); break;
         case "/api/work-board/change":
@@ -388,18 +449,21 @@ export async function startServer({
           result = await nativeThreads.create(data, connector);
           break;
         }
+        case '/api/native/connection/ensure':
+          result=ensureNativeConnection(engine,channels,connector,data);break;
         case '/api/agent/capabilities': {
           const caller = engine.discussions.participant(connector), profile = engine.workspace.index?.profile;
           const workspaceGranted = !!profile?.active && connector.scopeId === profile.id;
           const creationGranted = workspaceGranted && profile.policy === 'local-retrieval' && caller.account === profile.account && !!engine.permissions(caller).content && profile.providers.includes('codex');
-          result = { sourceId: caller.id, host: caller.host, provider: caller.provider,
+          result = { sourceId: caller.id, host: caller.host, provider: caller.provider,wakeReadiness:engine.nativeWakeReadiness(caller.id),
             groups: { discover: true, create: true, join: true, invite: true, read: true, contribute: true, firstAccessJoinsOpenRoom: true },
             nativeThreads: { provider: 'codex', creationStartsTurn: false, hosts: (profile?.hosts ?? []).map(host => ({ host, available: creationGranted && engine.tools.some(t => t.host === host && t.provider === 'codex' && t.installed && nativeAdapterCompatible(t)), policy: 'inherit-native-configuration' })) },
             workspace: { search: workspaceGranted, inspect: workspaceGranted && !!profile.indexFiles, compare: workspaceGranted && !!profile.indexFiles },
             findings: { discover: true, retrieveShared: true },
             ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
             unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
-            availableTools: ['verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            headlessJobs: headlessJobs.capabilities(),
+            availableTools: ['read_provider_status','report_native_availability','preview_provider_handoff','request_provider_handoff','ensure_native_connection','request_headless_job','list_headless_jobs','read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
           break;
         }
@@ -716,8 +780,10 @@ export async function startServer({
     for (const sessionId of channels.connections.keys()) void channels.flush(sessionId).catch(() => {});
   }, 5000);
   updateResumeTimer.unref?.();
+  if (backgroundNative) continuationWaker.start();
   async function close() {
     clearInterval(updateResumeTimer);
+    continuationWaker.close();
     await participantConnections.close();
     await codexAgents.close();
     if (engine.workspace.running) engine.workspace.cancel();
@@ -732,5 +798,5 @@ export async function startServer({
       if (current.instance === instance) unlinkSync(runtimePath);
     }
   }
-  return { server, engine, store, address, instance, admin, close, updateGate, terminals, channels, connections, participantConnections, sourceBindings, automaticConnections, codexAgents, desktopDiscovery: desktopStartup };
+  return { server, engine, store, address, instance, admin, close, updateGate, terminals, channels, connections, participantConnections, sourceBindings, automaticConnections, codexAgents, continuationWaker, headlessJobs, desktopDiscovery: desktopStartup };
 }

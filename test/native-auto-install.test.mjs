@@ -24,7 +24,7 @@ function fixture(provider = "claude") {
     }
     return "";
   };
-  return { home, nativePath, calls, settings, options: { home, versions: dependencyVersions(), config: { schemaVersion: 1, provider, host: "local", token: TOKEN, address: "http://127.0.0.1:43127", authority: "127.0.0.1:43127" }, sources: { bootstrap: "// Synthetic bootstrap source", hook: "// Synthetic lifecycle source" }, resolveExecutable: () => binary, runCLI, installDependencies: false }, binary };
+  return { home, nativePath, calls, settings, options: { home, versions: dependencyVersions(), config: { schemaVersion: 1, provider, host: "local", token: TOKEN, address: "http://127.0.0.1:43127", authority: "127.0.0.1:43127" }, sources: { bootstrap: "// Synthetic bootstrap source", hook: "// Synthetic lifecycle source", channel: "// Synthetic channel source" }, resolveExecutable: () => binary, runCLI, installDependencies: false }, binary };
 }
 test("Automatic Claude setup preserves settings and other MCP names, backs up privately and is idempotent", async () => {
   const f = fixture(), first = await installOnCurrentHost(f.options), second = await installOnCurrentHost(f.options);
@@ -91,12 +91,23 @@ test("Failed managed native registration update restores existing global configu
   assert.equal(readFileSync(join(f.home, ".claude/settings.json"), "utf8"), settingsBefore);
 });
 test("Root dependency payload determines all managed runtime versions and rejects ranges before native changes", async () => {
-  const f = fixture(), versions = { mcp: "1.33.0", zod: "4.6.6", claude: "0.4.0-beta.1" };
+  const f = fixture(), versions = { mcp: "1.33.0", zod: "4.6.6", claude: "0.4.0-beta.1", ws: "8.22.1" };
   await installOnCurrentHost({ ...f.options, versions });
   const manifest = JSON.parse(readFileSync(join(f.home, ".agentspaces-desktop-native/automatic/package.json"), "utf8"));
-  assert.deepEqual(manifest.dependencies, { "@modelcontextprotocol/sdk": versions.mcp, zod: versions.zod, "@anthropic-ai/claude-agent-sdk": versions.claude });
+  assert.deepEqual(manifest.dependencies, { "@modelcontextprotocol/sdk": versions.mcp, zod: versions.zod, "@anthropic-ai/claude-agent-sdk": versions.claude, ws: versions.ws });
   const original = readFileSync(f.nativePath, "utf8"), count = f.calls.length;
   await assert.rejects(installOnCurrentHost({ ...f.options, versions: { ...versions, claude: "^0.4.0" } }), /Exact managed/);
   await assert.rejects(installOnCurrentHost({ ...f.options, versions: undefined }), /Exact managed/);
   assert.equal(f.calls.length, count); assert.equal(readFileSync(f.nativePath, "utf8"), original);
+});
+test('an existing two-module managed runtime upgrades to the channel runtime without replacing unrelated configuration',async()=>{
+ const {createHash}=await import('node:crypto'),{dirname}=await import('node:path'),{renameSync,unlinkSync}=await import('node:fs');
+ const f=fixture();await installOnCurrentHost(f.options);
+ const config=JSON.parse(readFileSync(f.nativePath,'utf8')),registration=config.mcpServers['agentspaces-desktop'],oldBootstrap=registration.args.find(arg=>arg.endsWith('native-bootstrap-mcp.mjs')),current=dirname(oldBootstrap);
+ const digest=createHash('sha256').update(f.options.sources.bootstrap+f.options.sources.hook).digest('hex'),legacy=join(dirname(current),'runtime-'+digest);
+ unlinkSync(join(current,'native-bootstrap-channel.mjs'));renameSync(current,legacy);
+ registration.args=registration.args.map(arg=>arg.startsWith(current)?legacy+arg.slice(current.length):arg);writeFileSync(f.nativePath,JSON.stringify(config));
+ const result=await installOnCurrentHost(f.options);assert.ok(result);
+ const updated=JSON.parse(readFileSync(f.nativePath,'utf8'));assert.deepEqual(updated.mcpServers.another,config.mcpServers.another);
+ const installed=updated.mcpServers['agentspaces-desktop'].args.find(arg=>arg.endsWith('native-bootstrap-mcp.mjs'));assert.notEqual(installed,registration.args.find(arg=>arg.endsWith('native-bootstrap-mcp.mjs')));assert.equal(readFileSync(join(dirname(installed),'native-bootstrap-channel.mjs'),'utf8'),f.options.sources.channel);
 });
