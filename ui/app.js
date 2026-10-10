@@ -1,3 +1,4 @@
+import { mountDigest } from "./digest.js";
 import { mountCoordination } from "./coordination.js";
 import { mountWorkBoard } from "./work-board.js";
 import { nativeControls } from "./native-controls.js";
@@ -105,6 +106,7 @@ function scheduleDiscoveryPoll() {
   }, 1500);
 }
 const titles = {
+  digest: ["Digest", "Recent shared evidence.", "Read room, work, decision and artifact records without waking agents."],
   decisions: ["Decisions", "Questions awaiting your answer.", "Agents propose; you decide."],
   machines: ["Machines", "Shared test time, in order.", "Inspect the queue and runtime deadlines."],
   board: ["Work board", "Shared work, with an owner and evidence.", "Create a brief, claim a work item, and record progress and results."],
@@ -189,6 +191,7 @@ function render() {
     native: () => "",
     advanced: () => "",
     discussions: () => "",
+    digest: () => "",
     decisions: () => "",
     machines: () => "",
     board: () => "",
@@ -206,6 +209,7 @@ function render() {
     showResults();
   }
   if (["decisions","machines"].includes(page)) mountCoordination($("#view"), { api, notice, page });
+  if (page === "digest") mountDigest($("#view"), { api, notice });
   if (page === "board") mountWorkBoard($("#view"), { api, notice });
   if (page === "settings") nativeControls(state, { api, notice });
   if (page === "home") mountHomeChat($("#view"), { api, notice, state });

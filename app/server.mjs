@@ -1,5 +1,6 @@
 import { UpdateGate } from './update-gate.mjs';
 import {ContinuationWaker} from './work-continuation.mjs';
+import { RoomSubscriptions } from "./room-subscriptions.mjs";
 import { OwnerApprovalAuth } from './owner-approval-auth.mjs';
 import { notifyApproval } from './approval-notification.mjs';
 import http from "node:http";
@@ -44,6 +45,7 @@ const staticFiles = {
   "/app.js": "app.js",
   "/native-controls.js": "native-controls.js",
   "/work-board.js": "work-board.js",
+  "/digest.js": "digest.js",
   "/coordination.js": "coordination.js",
   "/workspace.js": "workspace.js",
   "/discussions.js": "discussions.js",
@@ -85,6 +87,7 @@ export async function startServer({
     if (engine.workspace.running) desktopStartup.promise.then(() => { connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts }); });
     else connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts });
   }
+  const roomSubscriptions = new RoomSubscriptions(engine);
   const ownerApprovals = new OwnerApprovalAuth(store, {clock:engine.clock});
   const ownerBrowser = new OwnerBrowserSession(store), recentHistory = new RecentHistory(store);
   const admin = randomBytes(32).toString("hex"),
@@ -284,6 +287,9 @@ export async function startServer({
       if (
         connector &&
         ![
+          "/api/digest",
+          "/api/discussions/subscriptions",
+          "/api/discussions/subscription",
           "/api/decisions/list",
           "/api/approvals/verify",
           "/api/decisions/change",
@@ -343,6 +349,12 @@ export async function startServer({
         }
         case "/api/approvals/verify":
           result = await engine.workBoard.verifyApproval(connector, data); break;
+        case "/api/digest":
+          result = roomSubscriptions.digest(data, connector); break;
+        case "/api/discussions/subscriptions":
+          result = roomSubscriptions.list(data, connector); break;
+        case "/api/discussions/subscription":
+          result = roomSubscriptions.change(data, connector); break;
         case "/api/decisions/list":
           result = {...engine.workBoard.decisions(connector, data),ownerAuthentication:ownerApprovals.status()}; break;
         case "/api/machines/list":
@@ -414,7 +426,7 @@ export async function startServer({
             findings: { discover: true, retrieveShared: true },
             ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
             unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
-            availableTools: ['list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            availableTools: ['read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
           break;
         }

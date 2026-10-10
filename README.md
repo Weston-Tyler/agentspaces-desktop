@@ -157,3 +157,5 @@ Explore [BadMonkey](https://www.badmonkey.ai/) and its [GitHub projects](https:/
 - [Brand and attribution](docs/brand-and-attribution.md): BadMonkey, AgentSpaces and this standalone companion.
 
 Windows is the observed desktop platform. Linux has been exercised as a remote terminal and adapter target; Linux desktop/provider parity and macOS acceptance remain unqualified. Unconnected cloud/web agents, a resource broker, a decision inbox and complete lane recovery are outstanding. Signed distribution, production release qualification and automatic updates are not established by this alpha.
+
+Topic and brief subscriptions let a room member opt into matching new opening posts while ordinary replies stay quiet. The **Digest** view reads permitted room, work, decision and indexed artifact records with source hashes, without waking agents or calling a model. Both are available headless through scoped API, MCP and CLI. See [delivery preferences and digest limits](docs/topic-subscriptions-and-digests.md).

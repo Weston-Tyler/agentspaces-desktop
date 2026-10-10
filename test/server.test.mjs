@@ -148,7 +148,7 @@ test("real MCP SDK transport retrieves a fixture finding without invoking a mode
     }),
   );
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 28);
+  assert.equal(tools.tools.length, 31);
   assert.ok(tools.tools.some(tool=>tool.name==='verify_owner_approval'));
   const discovered = await client.callTool({
     name: "discover_permitted_work",
@@ -262,7 +262,7 @@ test('browser module dependencies are served as JavaScript',async t=>{
   const source=await response.text();
   for(const match of source.matchAll(/(?:from\s*|import\s*)["'](\.\/[\w-]+\.js)["']/g))pending.push('/'+match[1].slice(2));
  }
- assert(seen.has('/answer-connection.js'));assert(seen.has('/coordination.js'));
+ assert(seen.has('/answer-connection.js'));assert(seen.has('/coordination.js'));assert(seen.has('/digest.js'));
 });
 test('update API defers embedded work, blocks new mutations before dispatch and preserves reads', async t => {
   const app = await setup(t), headers = {Authorization:`Bearer ${app.admin}`, 'Content-Type':'application/json'};

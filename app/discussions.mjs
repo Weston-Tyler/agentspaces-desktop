@@ -1,3 +1,4 @@
+import { implicitRoomWake } from "./room-subscriptions.mjs";
 import { REMOTE_HOST } from "./remote-host.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { AgentBroadcast } from "./agent-broadcast.mjs";
@@ -385,8 +386,15 @@ export class Discussions {
     for (const alias of exactTargets ? [] : aliases)
       if (!g.members.some((m) => m.alias === alias))
         throw new Error("Unknown mention @" + alias);
+    const implicit = !exactTargets && !targets.length && !aliases.length;
+    const requestHash = fingerprint({text:text.trim(),targets,fixtureDialogueTurns,exactTargets});
+    const prior = g.messages.find(m => m.deliveryId === deliveryId);
+    if (prior?.requestHash) {
+      if (prior.requestHash !== requestHash) throw new Error("Delivery identifier reused for different content");
+      return this.view(g);
+    }
     const selected = g.members.filter(
-      (m) => targets.includes(m.sessionId) || !exactTargets && (aliases.includes(m.alias) || (this.policy(g).agentInitiation && !targets.length && !aliases.length)),
+      (m) => targets.includes(m.sessionId) || !exactTargets && (aliases.includes(m.alias) || (this.policy(g).agentInitiation && implicit && implicitRoomWake(g,m.sessionId,text))),
     );
     if (
       fixtureDialogueTurns &&
@@ -409,6 +417,7 @@ export class Discussions {
     if (g.messages.length + 1 + selected.filter(member => member.fixture).length + fixtureDialogueTurns > MAX_DISCUSSION_MESSAGES)
       throw new Error("Discussion storage capacity reached (10000 messages); preserve/export history before starting a continuation room. This is not the per-exchange wake limit.");
     const targetStates = selected.map((m) => ({
+      ...(implicit ? {implicitSubscription:true} : {}),
       sessionId: m.sessionId,
       alias: m.alias,
       status: m.fixture
@@ -423,6 +432,7 @@ export class Discussions {
       targets: targetStates,
     });
     user.inputHash = inputHash;
+    user.requestHash = requestHash;
     // Explicit fixture responses have no native side effects and no model calls.
     for (const m of selected.filter((m) => m.fixture)) {
       this.append(g, {

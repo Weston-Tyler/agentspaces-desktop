@@ -124,7 +124,7 @@ test("MCP protocol advertises source and group tools and preserves native reques
   } });
   const client = new Client({ name: "fixture-native-bootstrap-client", version: "1" }), [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   await bootstrap.server.connect(serverTransport); await client.connect(clientTransport);
-  assert.equal((await client.listTools()).tools.length, 29);
+  assert.equal((await client.listTools()).tools.length, 32);
   const reply = await client.callTool({ name: "discover_group_discussions", arguments: {}, _meta: { threadId: UUID } });
   assert.equal(reply.isError, undefined); assert.deepEqual(nativeIds, [UUID]);
   const denied = await client.callTool({ name: "discover_group_discussions", arguments: {} });
@@ -196,4 +196,19 @@ test("Provisional source identity does not accept a mismatched registered UUID a
   assert.equal((await resolveClaudeSource(configPath, { ancestors: async () => [processRecord] })).nativeThreadId, UUID);
   await runNativeSessionHook(event({ hook_event_name: "SessionEnd" }), { configPath, ancestors: async () => [processRecord], requestImpl: async () => { throw new Error("Ended provisional identity must not contact the server"); } });
   await assert.rejects(resolveClaudeSource(configPath, { ancestors: async () => [processRecord] }), /stale_or_missing/);
+});
+
+test('Native topic tools resolve this source and reject peer substitution before network calls',async()=>{
+  const {configPath,participantConfig}=await setup('codex'),calls=[];
+  const bootstrap=await createNativeBootstrap({configPath,requestImpl:async(config,path,body)=>{calls.push({path,body});return path==='/api/native/register'?{participantConfig}:{items:[]};}});
+  try{
+    const invoke=(name,args)=>bootstrap.callTool({params:{name,arguments:args,_meta:{threadId:UUID}}});
+    await invoke('change_room_subscription',{id:OTHER,mode:'digest',topics:['recipe']});
+    await invoke('list_room_subscriptions',{id:OTHER});
+    await invoke('read_coordination_digest',{since:'2026-10-10T00:00:00Z',limit:20});
+    assert.deepEqual(calls.filter(x=>x.path!=='/api/native/register').map(x=>x.path),['/api/discussions/subscription','/api/discussions/subscriptions','/api/digest']);
+    const count=calls.length;
+    await assert.rejects(invoke('change_room_subscription',{id:OTHER,mode:'wake',topics:['recipe'],sessionId:'a-peer'}),/bounded_native_tool/);
+    assert.equal(calls.length,count);
+  }finally{await bootstrap.server.close();}
 });

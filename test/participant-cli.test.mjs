@@ -223,3 +223,16 @@ test('artifact CLI schemas and scoped routes carry report text without filesyste
  assert.deepEqual(f.requests.map(row=>row.path),['/api/artifacts/create','/api/artifacts/list','/api/artifacts/list','/api/lanes/list']);assert.deepEqual(f.requests[0].body,input);
  await assert.rejects(runParticipantCli(f.args('artifact-drop'),{input:JSON.stringify({...input,path:'/tmp/not-allowed'})}),/bounded_artifact_request_required/);
 });
+test('Topic subscriptions and digest expose offline schemas and preserve scoped route arguments',async t=>{
+  const {args,requests}=await setup(t);
+  const subscription={id:GROUP,mode:'wake',topics:['chillit recipe']};
+  assert.equal((await runParticipantCli(['subscribe','--help'])).stdinSchema.properties.mode.enum[0],'wake');
+  await runParticipantCli(args('subscribe'),{input:JSON.stringify(subscription)});
+  await runParticipantCli(args('subscriptions','--discussion',GROUP));
+  await runParticipantCli(args('digest'),{input:JSON.stringify({query:'recipe',limit:20,since:'2026-10-10T00:00:00Z'})});
+  assert.deepEqual(requests.map(row=>row.path),['/api/discussions/subscription','/api/discussions/subscriptions','/api/digest']);
+  assert.deepEqual(requests[0].body,subscription);
+  await assert.rejects(runParticipantCli(args('subscribe'),{input:JSON.stringify({...subscription,sessionId:'a-peer'})}),/bounded_subscription/);
+  await assert.rejects(runParticipantCli(args('digest'),{input:JSON.stringify({limit:201})}),/bounded_subscription/);
+  assert.equal(requests.length,3);
+});
