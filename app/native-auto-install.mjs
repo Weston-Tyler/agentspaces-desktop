@@ -168,11 +168,11 @@ export class NativeAutoInstaller {
     const { dependencyVersions } = await import('./dependency-versions.mjs');
     const versions = dependencyVersions();
     const key = host + ':' + provider, records = this.engine.store.data.nativeAutomaticInstallations, old = records[key];
-    let device;
+    let device, tunnel;
     if (old?.device) { this.sourceBindings.device(old.device.token); device = old.device; }
     else { const issued = this.sourceBindings.issueDevice({ host, provider }); device = { schemaVersion: 1, ...issued, address: this.address, authority: new URL(this.address).host }; }
     device = { ...device, address: this.address, authority: new URL(this.address).host };
-    if (host === 'remote') { const tunnel = await this.participantConnections.tunnel(); device = { ...device, address: 'http://127.0.0.1:' + tunnel.remotePort }; }
+    if (host === 'remote') { tunnel = await this.participantConnections.tunnel(); device = { ...device, address: 'http://127.0.0.1:' + tunnel.remotePort }; }
     const sources = { bootstrap: readFileSync(new URL('./native-bootstrap-mcp.mjs', import.meta.url), 'utf8'), hook: readFileSync(new URL('./native-session-hook.mjs', import.meta.url), 'utf8') };
     try {
       const result = await (host === 'remote' ? this.installRemote : this.installLocal)({ config: device, sources, versions });
@@ -180,7 +180,7 @@ export class NativeAutoInstaller {
       const refresh = provider === 'codex' ? await this.refreshNative(host) : { status: 'new-session-load-required' };
       result.nativeRefresh = refresh.status;
       records[key] = { device, status: result.status, nativeRefresh: result.nativeRefresh, activeSessionReloaded: false, inboundChannelConnected: false, at: new Date().toISOString(), configPath: result.configPath, bootstrapPath: result.bootstrapPath }; this.engine.store.save();
-      if (host === 'remote') { this.engine.store.data.participantBridge = { host, remotePort: Number(new URL(device.address).port), authority: device.authority }; this.engine.store.save(); }
+      if (host === 'remote') this.participantConnections.retain(tunnel);
       return result;
     } catch {
       if (!old?.device) delete this.engine.store.data.nativeRegistrationDevices[digest(device.token)]; this.engine.store.save();

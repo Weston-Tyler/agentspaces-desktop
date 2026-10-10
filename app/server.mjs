@@ -202,7 +202,7 @@ export async function startServer({
         return;
       }
       if (req.method === "GET" && url.pathname === "/api/state" && !connector) {
-        json(res, 200, { ...engine.snapshot(), automaticNativeConnections: automaticConnections.summary(), demoAvailable: allowDemo, connectedWork: connectedWork ? { status: connectedWork.status, stage: connectedWork.stage, partial: connectedWork.partial } : null, desktopPreferences: { connectAll: !!store.data.desktopPreferences?.connectAll }, desktopStartup: desktopStartup ? { ready: desktopStartup.ready, status: desktopStartup.status, retryRequired: desktopStartup.retryRequired } : null });
+        json(res, 200, { ...engine.snapshot(), transportHealth: { bridge: participantConnections.health?.() ?? null, channels: channels.health?.() ?? null }, automaticNativeConnections: automaticConnections.summary(), demoAvailable: allowDemo, connectedWork: connectedWork ? { status: connectedWork.status, stage: connectedWork.stage, partial: connectedWork.partial } : null, desktopPreferences: { connectAll: !!store.data.desktopPreferences?.connectAll }, desktopStartup: desktopStartup ? { ready: desktopStartup.ready, status: desktopStartup.status, retryRequired: desktopStartup.retryRequired } : null });
         return;
       }
       if (req.method !== "POST") {
