@@ -41,6 +41,8 @@ function helpFor(command) {
 function validField(value, schema) {
   if (schema.enum) return schema.enum.includes(value);
   if (schema.type === "string") return typeof value === "string" && (schema.minLength === undefined || value.length >= schema.minLength) && (schema.maxLength === undefined || value.length <= schema.maxLength) && (!schema.pattern || new RegExp(schema.pattern).test(value));
+  if (schema.type === "number") return typeof value === "number" && Number.isFinite(value) && (schema.minimum === undefined || value >= schema.minimum) && (schema.exclusiveMinimum === undefined || value > schema.exclusiveMinimum) && (schema.maximum === undefined || value <= schema.maximum);
+  if (schema.type === "object") return !!value && typeof value === "object" && !Array.isArray(value) && (schema.required ?? []).every(key => Object.hasOwn(value, key)) && Object.entries(value).every(([key, item]) => Object.hasOwn(schema.properties, key) && validField(item, schema.properties[key]));
   if (schema.type === "integer") return Number.isInteger(value) && value >= schema.minimum && value <= schema.maximum;
   if (schema.type === "array") return Array.isArray(value) && value.length >= schema.minItems && value.length <= schema.maxItems && value.every(item => validField(item, schema.items));
   return false;

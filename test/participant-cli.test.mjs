@@ -248,3 +248,14 @@ test('Provider status and exact handoff CLI requests preserve scope and reject o
  assert.equal((await runParticipantCli(['handoff-request','--help'])).stdinSchema.required.includes('proposalHash'),true);
  assert.equal(requests.length,4);
 });
+
+test('Headless CLI validates nested budget numbers and rejects nested extra fields before dispatch',async t=>{
+  const {args,requests}=await setup(t);
+  const body={deliveryId:'headless-cli-valid-001',provider:'codex',host:'local',cwd:'/fictional/project',workEntryId:'synthetic-work',briefText:'Run a fixture only',budget:{observationMs:1000,maxTurns:1,maxCostUsd:0.5}};
+  await runParticipantCli(args('job-request'),{input:JSON.stringify(body)});
+  assert.equal(requests[0].path,'/api/headless/request');assert.deepEqual(requests[0].body,body);
+  for(const budget of [{...body.budget,maxCostUsd:0},{...body.budget,maxCostUsd:51},{...body.budget,maxCostUsd:'1'},{...body.budget,maxCostUsd:null},{...body.budget,observationMs:999},{...body.budget,maxTurns:1.5},{...body.budget,permissionOverride:true},{maxTurns:1,maxCostUsd:1},null,[]]){
+    await assert.rejects(runParticipantCli(args('job-request'),{input:JSON.stringify({...body,budget})}),error=>error.code==='bounded_headless_request_required'&&error.details.invalidFields.includes('budget'));
+  }
+  assert.equal(requests.length,1);
+});
