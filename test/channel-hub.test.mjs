@@ -55,10 +55,11 @@ test("source grants, stale boundary, membership and connector revocation are rec
   await assert.rejects(h.hub.deliver({ ...h.args, discussionId: other.id }));
   assert.equal(h.sent.length, 0);
 });
-test("unknown parent and absent native channel never create pending work", async t => {
+test("unknown parent and never-connected native channel never create pending work", async t => {
   const f = setup(t);
   await assert.rejects(f.hub.deliver({ ...f.args, messageId: "unknown" }), { code: "channel_message_parent_unknown" });
   f.connection.close(); assert.equal(f.hub.isConnected(f.ids[1]), false);
+  delete f.engine.store.data.channelTransports[f.ids[1]];
   await assert.rejects(f.hub.deliver(f.args), { code: "native_channel_not_connected" });
   assert.equal(Object.keys(f.engine.store.data.channelReceipts).length, 0);
 });
@@ -120,4 +121,45 @@ test("MCP channel declares only channel capability, authenticates app transport 
   sockets[0].emit("message", JSON.stringify({ content: "Bad metadata", meta: { "bad-key": "ignored" } }));
   await new Promise(resolve => setImmediate(resolve)); assert.equal(received.length, 1);
   await assert.rejects(startClaudeChannel({ address: "http://localhost:12345", token: "synthetic" }));
+});
+
+test('disconnected known channel durably queues exact unsent message and sends once on reconnect', async t => {
+  const f = setup(t); f.connection.close();
+  const pending = await f.hub.deliver(f.args);
+  assert.equal(pending.status, 'waiting-for-native-transport'); assert.equal(f.sent.length, 0);
+  f.engine.store.data = new Store(f.engine.store.root).data;
+  const binding = Object.values(f.engine.store.data.connectors).find(value => value.sessionId === f.ids[1]);
+  const recovered = new ChannelHub(f.engine);
+  recovered.connect(binding, async data => f.sent.push(data));
+  await recovered.flush(f.ids[1]);
+  assert.equal(f.sent.length, 1); assert.equal(f.sent[0].content, f.args.text);
+  await recovered.flush(f.ids[1]); assert.equal(f.sent.length, 1);
+});
+test('queued messages recheck sender grants and refuse changed content at reconnect', async t => {
+  for (const mutate of [f => f.engine.grant(f.ids[0], { share: false }), f => { f.engine.discussions.group(f.args.discussionId).messages[0].text += ' changed'; }]) {
+    const f = setup(t); f.connection.close(); await f.hub.deliver(f.args); mutate(f);
+    f.hub.connect(f.binding, async data => f.sent.push(data)); await f.hub.flush(f.ids[1]);
+    assert.equal(f.sent.length, 0);
+  }
+});
+test('MCP survives websocket outage and reconnects without replaying native notifications', async t => {
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const sockets = [];
+  class FakeSocket extends EventEmitter { constructor() { super(); sockets.push(this); } terminate() { this.emit('close'); } }
+  const channel = await startClaudeChannel({ address: 'http://127.0.0.1:12345', token: 'synthetic', WebSocketClass: FakeSocket, transport: serverTransport, reconnectMinMs: 5, reconnectMaxMs: 20 });
+  const client = new Client({ name: 'reconnect-fixture', version: '1' });
+  t.after(async () => { await channel.close(); await client.close(); });
+  await client.connect(clientTransport); sockets[0].emit('open'); sockets[0].emit('close');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(sockets.length, 2); sockets[1].emit('open');
+  assert.ok((await client.listTools()).tools.length); assert.equal(channel.health().status, 'connected');
+  await channel.close(); await new Promise(resolve => setTimeout(resolve, 30)); assert.equal(sockets.length, 2);
+});
+
+test('pending channel input cannot cross a changed source boundary through a fresh connector', async t => {
+  const f = setup(t); f.connection.close(); await f.hub.deliver(f.args);
+  f.engine.session(f.ids[1]).account = 'another-owner';
+  const replacement = f.engine.connector(f.engine.issueConnector(f.ids[1]).token);
+  f.hub.connect(replacement, async data => f.sent.push(data)); await f.hub.flush(f.ids[1]);
+  assert.equal(f.sent.length, 0); assert.equal(f.engine.store.data.channelReceipts[f.args.requestId].status, 'channel-access-changed; not dispatched');
 });

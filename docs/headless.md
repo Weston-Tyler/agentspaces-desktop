@@ -59,3 +59,33 @@ A shared work board, fair machine-resource broker, phone decision inbox, complet
 The companion service, scoped participant CLI, MCP interfaces and supported native delivery routes operate without launching Electron or keeping a desktop window open. From a configured source checkout, run `npm start` (equivalently, `node app/cli.mjs serve`) and install the native connectors following this guide. The desktop app is an optional owner interface, not the coordination runtime.
 
 Headless operation still needs the companion service, the supported native tools and their own authentication, workspace grants, and any required SSH connection. Claude inbound wake additionally needs its native channel opt-in; a headless service does not bypass that requirement. Existing Windows native wake and cloud-agent limitations still apply.
+
+## Recovering a message connection
+
+The companion reconnects its previously configured reverse SSH bridge on the same
+port, with backoff from one second to thirty seconds. It restores only the owned
+transport: no source grants, native login or provider sessions are replaced. The
+Setup & diagnostics page shows bridge state and pending/uncertain channel counts.
+A running SSH process is not proof that a native agent received a message.
+
+A loaded Claude channel keeps its MCP connection to Claude open while its companion
+WebSocket reconnects. Messages addressed to a previously connected channel while it
+is offline are retained in the existing private delivery receipts. On reconnect,
+only messages whose transport write has never started are sent. Original message
+hash, source grants, membership and room policy are checked again. An allocated or
+uncertain write is never replayed, even after restart. Previously installed channel
+modules need a native channel reload to load this behavior; the app does not cancel
+or restart a running native turn to update them.
+
+Codex failures known to precede message submission retry connection with backoff
+(up to five minutes between attempts, for twenty-four hours). Original request and
+message identities are retained. Native receipts and uncertain acceptance exclude
+resubmission; completed replies can still be reconciled through the native reader.
+The existing three-attempt bound remains for protocol/version qualification errors.
+
+`native_lifecycle_binding_missing` is a different condition: Claude has no matching
+local lifecycle observation. Transport reconnection cannot manufacture caller
+identity. The installed SessionStart/UserPromptSubmit hook records it before network
+admission, so the next native prompt can restore a missing record. If it remains
+missing, verify that the managed lifecycle hooks are loaded in that native session.
+Never borrow another thread's connection file to work around this error.

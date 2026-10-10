@@ -19,7 +19,7 @@ function channelFetch(url, options) {
   });
 }
 
-export async function startClaudeChannel({ address = process.env.AGENTSPACES_URL, authority = process.env.AGENTSPACES_COMPANION_AUTHORITY, token = process.env.AGENTSPACES_CONNECTOR_TOKEN, fetchImpl = channelFetch, WebSocketClass = WebSocket, transport = new StdioServerTransport() } = {}) {
+export async function startClaudeChannel({ address = process.env.AGENTSPACES_URL, authority = process.env.AGENTSPACES_COMPANION_AUTHORITY, token = process.env.AGENTSPACES_CONNECTOR_TOKEN, fetchImpl = channelFetch, WebSocketClass = WebSocket, transport = new StdioServerTransport(), reconnectMinMs = 1000, reconnectMaxMs = 30000 } = {}) {
   if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(address ?? "") || typeof token !== "string" || !token) throw new Error("Literal-loopback companion URL and participant connector capability required");
   authority ??= new URL(address).host;
   if (!/^127\.0\.0\.1:\d+$/.test(authority)) throw new Error("Literal-loopback companion authority required");
@@ -42,20 +42,36 @@ export async function startClaudeChannel({ address = process.env.AGENTSPACES_URL
   server.registerTool("discover_permitted_work", { description: "Search metadata permitted to this participant.", inputSchema: { query: z.string().max(200).default(""), provider: z.enum(["all", "codex", "claude"]).default("all"), status: z.enum(["all", "current", "dormant", "archived"]).default("all") }, annotations: { readOnlyHint: true } }, args => call("/api/discover", args));
   server.registerTool("retrieve_permitted_finding", { description: "Retrieve a permitted shared finding with source provenance; never invokes another model.", inputSchema: { sourceId: z.string().max(200) }, annotations: { readOnlyHint: true } }, args => call("/api/retrieve", args));
   await server.connect(transport);
-  const socket = new WebSocketClass(address.replace("http:", "ws:") + "/api/native/channel", { headers: { Host: authority, Authorization: "Bearer " + token }, handshakeTimeout: 12000, maxPayload: 65536, perMessageDeflate: false });
-  socket.on("message", async data => {
-    try {
-      const notification = JSON.parse(data.toString());
-      const p = notification.params ?? notification;
-      if (typeof p.content !== "string" || p.content.length > 8000 || !p.meta || typeof p.meta !== "object" || Object.keys(p.meta).some(key => !/^[A-Za-z0-9_]+$/.test(key) || typeof p.meta[key] !== "string")) return;
-      await server.server.notification({ method: "notifications/claude/channel", params: { content: p.content, meta: p.meta } });
-    } catch { /* No retry, replay, credentials, source content or diagnostics logging. */ }
-  });
-  // A broken channel is visible as native MCP disconnect; never silently reconnect
-  // and replay a question whose native acceptance is unknown.
-  socket.on("error", () => { void server.close(); });
-  socket.on("close", () => { void server.close(); });
-  return { server, socket, close: async () => { socket.terminate(); await server.close(); } };
+  let socket, reconnectTimer, closed = false, attempts = 0, status = 'connecting';
+  const connect = () => {
+    if (closed) return;
+    const current = socket = new WebSocketClass(address.replace("http:", "ws:") + "/api/native/channel", { headers: { Host: authority, Authorization: "Bearer " + token }, handshakeTimeout: 12000, maxPayload: 65536, perMessageDeflate: false });
+    let lost = false;
+    const reconnect = () => {
+      if (lost || closed || socket !== current) return;
+      lost = true; status = 'reconnecting'; current.terminate();
+      const delay = Math.min(reconnectMaxMs, reconnectMinMs * 2 ** Math.min(attempts++, 10));
+      reconnectTimer = setTimeout(connect, delay); reconnectTimer.unref?.();
+    };
+    current.on('open', () => { if (socket === current && !closed) status = 'connected'; });
+    current.on("message", async data => {
+      if (closed || lost || socket !== current) return;
+      try {
+        const notification = JSON.parse(data.toString());
+        const p = notification.params ?? notification;
+        if (typeof p.content !== "string" || p.content.length > 8000 || !p.meta || typeof p.meta !== "object" || Object.keys(p.meta).some(key => !/^[A-Za-z0-9_]+$/.test(key) || typeof p.meta[key] !== "string")) return;
+        await server.server.notification({ method: "notifications/claude/channel", params: { content: p.content, meta: p.meta } });
+      } catch { /* Native acceptance is uncertain: never replay notifications. */ }
+    });
+    // Restore transport only. Existing delivery receipts decide which messages
+    // have never been written; a disconnected socket never retries native input.
+    current.on('error', reconnect); current.on('close', reconnect);
+  };
+  connect();
+  const stop = () => { closed = true; status = 'closed'; clearTimeout(reconnectTimer); socket?.terminate(); };
+  const previousClose = server.server.onclose;
+  server.server.onclose = () => { stop(); previousClose?.(); };
+  return { server, get socket() { return socket; }, health: () => ({ status, attempts }), close: async () => { stop(); await server.close(); } };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await startClaudeChannel();

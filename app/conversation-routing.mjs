@@ -80,7 +80,7 @@ export async function routeConversation(engine, { codexAgents, channels }, group
       const source = engine.session(target.sessionId);
       if (!source.fixture && source.provider === "codex") target.status = codexAgents.dispatch({ sessionId: source.id,
         discussionId: group.id, messageId: message.id, text: message.text, requestId }).status;
-      else if (channels.isConnected(target.sessionId)) target.status = (await channels.deliver({ sessionId: target.sessionId,
+      else if (channels.isConnected(target.sessionId) || channels.canQueue?.(target.sessionId)) target.status = (await channels.deliver({ sessionId: target.sessionId,
         discussionId: group.id, messageId: message.id, text: message.text, requestId })).status;
       else target.status = "participant transport unavailable; not dispatched";
     } catch { target.status = "native agent unavailable or access changed"; }

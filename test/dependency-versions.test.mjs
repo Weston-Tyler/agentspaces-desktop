@@ -38,13 +38,13 @@ test("Remote installer source retains only builtin static imports and carries in
   assert.ok(!source.includes("'@anthropic-ai/claude-agent-sdk': '0.3.293'"));
 });
 test("Production installer run supplies root versions to both local and remote payloads", async () => {
-  const payloads = [], engine = { store: { data: { nativeRegistrationDevices: {} }, save() {} } };
-  const options = { address: "http://127.0.0.1:43127", sourceBindings: { issueDevice: ({ host, provider }) => ({ host, provider, token: "a".repeat(64) }), device: () => ({}) }, participantConnections: { tunnel: async () => ({ remotePort: 45678 }) },
+  const payloads = [], retained = [], tunnel = { remotePort: 45678 }, engine = { store: { data: { nativeRegistrationDevices: {} }, save() {} } };
+  const options = { address: "http://127.0.0.1:43127", sourceBindings: { issueDevice: ({ host, provider }) => ({ host, provider, token: "a".repeat(64) }), device: () => ({}) }, participantConnections: { tunnel: async () => tunnel, retain: value => retained.push(value) },
     installLocal: async payload => { payloads.push({ kind: "local", payload }); return { status: "fixture-installed" }; },
     installRemote: async payload => { payloads.push({ kind: "remote", payload }); return { status: "fixture-installed" }; } };
   const installer = new NativeAutoInstaller(engine, options);
   await installer.run({ host: "local", provider: "claude" }); await installer.run({ host: "remote", provider: "claude" });
-  assert.deepEqual(payloads.map(item => item.kind), ["local", "remote"]);
+  assert.deepEqual(payloads.map(item => item.kind), ["local", "remote"]); assert.equal(retained[0], tunnel); assert.equal(retained.length, 1);
   for (const item of payloads) assert.deepEqual(item.payload.versions, dependencyVersions());
   assert.equal(payloads[1].payload.config.address, "http://127.0.0.1:45678"); assert.equal(payloads[1].payload.config.authority, "127.0.0.1:43127");
 });

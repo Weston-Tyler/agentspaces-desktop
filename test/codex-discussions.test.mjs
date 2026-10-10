@@ -305,3 +305,17 @@ test('observation timeout reports native reply pending and never retries accepte
  assert.match(engine.store.data.codexDiscussionDeliveries[args.requestId].reason,/not interrupted/);
  hub.dispatch(args);await settle(hub,args.requestId);assert.equal(counters.answer,1);
 });
+
+test('pre-dispatch transport failure remains recoverable beyond three attempts without replaying accepted work', async t => {
+  let offline = true;
+  const f = setup({ controls: { open: async () => { if (offline) throw fail('native_proxy_disconnected', true); } } });
+  t.after(() => f.hub.close()); f.hub.dispatch(f.args);
+  const result = await f.hub.wait(f.args.requestId); assert.equal(result.undispatched, true);
+  const effect = f.engine.store.data.codexDiscussionDeliveries[f.args.requestId];
+  assert.equal(effect.reasonCode, 'native_proxy_disconnected'); assert.ok(effect.nextRetryAt);
+  assert.deepEqual((await f.hub.recoverUndispatched()).recovered, []);
+  effect.retryCount = 5; effect.nextRetryAt = new Date(0).toISOString(); offline = false;
+  assert.deepEqual((await f.hub.recoverUndispatched()).recovered, [f.args.requestId]);
+  await f.hub.wait(f.args.requestId); assert.equal(f.counters.answer, 1);
+  await f.hub.recoverUndispatched(); assert.equal(f.counters.answer, 1);
+});

@@ -55,9 +55,10 @@ if(!verified)throw Error('Participant discovery unavailable');console.log(JSON.s
 }
 
 export class ParticipantConnections {
-  constructor(engine, { root, address, installRemote = installRemoteParticipant, tunnelFactory = createTunnel, verifyLocal = verifyLocalDiscovery } = {}) {
+  constructor(engine, { root, address, installRemote = installRemoteParticipant, tunnelFactory = createTunnel, verifyLocal = verifyLocalDiscovery, reconnectMinMs = 1000, reconnectMaxMs = 30000 } = {}) {
     if (typeof root !== "string" || !isAbsolute(root) || !/^http:\/\/127\.0\.0\.1:\d+$/.test(address ?? "") || !new URL(address).port) throw error("Owned absolute root and literal-loopback companion address required");
     Object.assign(this, { engine, root, address, installRemote, tunnelFactory, verifyLocal });
+    this.reconnectMinMs = reconnectMinMs; this.reconnectMaxMs = reconnectMaxMs; this.reconnectAttempts = 0; this.reconnectTimer = null;
     this.tunnels = new Map(); this.tunnelPending = new Map(); this.closed = false;
     const saved = engine.store.data.participantBridge;
     const valid = saved && typeof saved === "object" && !Array.isArray(saved) && Object.keys(saved).length === 3 && saved.host === "remote" && Number.isInteger(saved.remotePort) && saved.remotePort > 1023 && saved.remotePort <= 65535 && saved.authority === new URL(address).host;
@@ -65,7 +66,30 @@ export class ParticipantConnections {
     this.bridgeRestore = { status: valid ? "restoring" : saved ? "ignored-invalid-record" : "not-configured" };
     // Restore only the app-owned transport. This never creates a connector,
     // changes source grants, reads conversations or resumes a native session.
-    this.restorePromise = valid ? Promise.resolve().then(() => this.tunnel()).then(() => { this.bridgeRestore.status = "owned-tunnel-started"; return { status: this.bridgeRestore.status }; }).catch(() => { this.bridgeRestore.status = "unavailable"; return { status: "unavailable" }; }) : Promise.resolve({ status: this.bridgeRestore.status });
+    this.restorePromise = valid ? Promise.resolve().then(() => this.tunnel()).then(() => { this.bridgeRestore.status = "owned-tunnel-started"; return { status: this.bridgeRestore.status }; }).catch(() => { this.bridgeRestore.status = "unavailable"; this.scheduleReconnect(); return { status: "unavailable" }; }) : Promise.resolve({ status: this.bridgeRestore.status });
+  }
+  health() {
+    const connected = [...this.tunnels.values()].some(tunnel => !tunnel.exited);
+    return { status: this.closed ? 'closed' : connected ? 'connected' : this.savedBridge ? 'reconnecting' : 'not-configured',
+      attempts: this.reconnectAttempts, nextRetryAt: this.nextRetryAt ?? null,
+      verification: this.bridgeRestore.status, nativeTurnsCancelled: false };
+  }
+  retain(tunnel) {
+    if (this.closed || tunnel.exited || this.tunnels.get(tunnel.key) !== tunnel) throw error('Owned participant tunnel unavailable');
+    const record = { host: 'remote', remotePort: tunnel.remotePort, authority: new URL(this.address).host };
+    this.engine.store.data.participantBridge = record; this.engine.store.save();
+    this.savedBridge = record; tunnel.uses++;
+  }
+  scheduleReconnect() {
+    if (this.closed || !this.savedBridge || this.reconnectTimer) return;
+    const delay = Math.min(this.reconnectMaxMs, this.reconnectMinMs * 2 ** Math.min(this.reconnectAttempts, 10));
+    this.nextRetryAt = new Date(Date.now() + delay).toISOString();
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null; this.nextRetryAt = null; this.reconnectAttempts++;
+      try { await this.tunnel(); this.bridgeRestore.status = 'owned-tunnel-started'; }
+      catch { this.bridgeRestore.status = 'unavailable'; this.scheduleReconnect(); }
+    }, delay);
+    this.reconnectTimer.unref?.();
   }
   source(sessionId) {
     if (this.closed) throw error("Participant connection service closed");
@@ -86,9 +110,9 @@ export class ParticipantConnections {
       const handle = await this.tunnelFactory({ remotePort, localPort, host: "remote" });
       if (this.closed || handle.exited || handle.child?.exitCode != null) { handle.close(); throw error("Owned participant tunnel unavailable"); }
       const tunnel = { key, remotePort, handle, exited: false, uses: this.savedBridge ? 1 : 0 };
-      const exited = () => { tunnel.exited = true; this.bridgeRestore.status = "unavailable"; if (this.tunnels.get(key) === tunnel) this.tunnels.delete(key); };
+      const exited = () => { tunnel.exited = true; this.bridgeRestore.status = "unavailable"; if (this.tunnels.get(key) === tunnel) { this.tunnels.delete(key); this.scheduleReconnect(); } };
       handle.child?.on("error", exited); handle.child?.on("close", exited);
-      this.tunnels.set(key, tunnel); return tunnel;
+      this.tunnels.set(key, tunnel); clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.nextRetryAt = null; return tunnel;
     })();
     this.tunnelPending.set(key, pending);
     try { return await pending; } finally { this.tunnelPending.delete(key); }
@@ -120,9 +144,7 @@ export class ParticipantConnections {
       if (installed.transportStatus !== "verified-http-200") throw error("Participant scoped discovery was not verified");
       if (typeof installed.configPath !== "string" || installed.usageGuidePath !== installed.configPath.slice(0, -"participant.json".length) + "USE.md") throw error("Participant source guide was not installed");
       if (tunnel) {
-        const record = { host: "remote", remotePort: tunnel.remotePort, authority: new URL(this.address).host };
-        if (JSON.stringify(this.engine.store.data.participantBridge) !== JSON.stringify(record)) { this.engine.store.data.participantBridge = record; this.engine.store.save(); }
-        this.savedBridge = record; tunnel.uses++; this.bridgeRestore.status = "verified-http-200";
+        this.retain(tunnel); this.reconnectAttempts = 0; this.bridgeRestore.status = "verified-http-200";
       }
       return { connectionId, configPath: installed.configPath, cliPath: installed.cliPath, usageGuidePath: installed.usageGuidePath, nativeThreadId: snapshot.nativeThreadId, host: snapshot.host, transportStatus: installed.transportStatus,
         usageCommand: ["node", installed.cliPath, "--config", installed.configPath, "--source", snapshot.nativeThreadId, "discover"] };
@@ -132,5 +154,5 @@ export class ParticipantConnections {
       throw error("Participant connection preparation failed; new capability revoked");
     }
   }
-  close() { this.closed = true; for (const tunnel of this.tunnels.values()) tunnel.handle.close(); this.tunnels.clear(); }
+  close() { this.closed = true; clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.nextRetryAt = null; for (const tunnel of this.tunnels.values()) tunnel.handle.close(); this.tunnels.clear(); }
 }

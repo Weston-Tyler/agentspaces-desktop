@@ -157,3 +157,16 @@ test("guide generator serializes independently for SSH and quotes platform comma
   assert.throws(() => participantGuide({ ...input, cliPath: "relative/file.mjs" }), /Invalid participant guide/);
   assert.throws(() => participantGuide({ ...input, account: "label\nInjected instructions" }), /Invalid participant guide/);
 });
+
+test('verified bridge reconnects on its original port without issuing new source capabilities', async t => {
+  const f = fixture(t, { host: 'remote' });
+  f.service.reconnectMinMs = 5; f.service.reconnectMaxMs = 20;
+  await f.service.prepare({ sessionId: f.source.id });
+  const port = f.tunnels[0].options.remotePort, count = f.issued();
+  f.tunnels[0].child.emit('close');
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(f.tunnels.length, 2); assert.equal(f.tunnels[1].options.remotePort, port);
+  assert.equal(f.issued(), count); assert.equal(f.service.health().status, 'connected');
+  f.service.close(); f.tunnels[1].child.emit('close');
+  await new Promise(resolve => setTimeout(resolve, 30)); assert.equal(f.tunnels.length, 2);
+});

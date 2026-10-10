@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { CodexQueueAdapter } from "./codex-queue.mjs";
 import { nativeAdapterCompatible, observedVersion, qualifiedNativeVersion } from './native-versions.mjs';
+const transientTransport = new Set(['native_proxy_disconnected', 'native_proxy_not_connected', 'native_websocket_handshake_failed', 'native_websocket_not_ready', 'native_rpc_timeout']);
 const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 // Direct user-addressed conversation transport. These receipts are not work
 // claims, a task queue, a scheduler or upstream completion authority.
@@ -139,9 +140,14 @@ export class CodexDiscussionHub {
       if (!nativeReceipt && error.uncertainOutcome === false) { effect.undispatched = true; effect.uncertainOutcome = false; }
       // Do not retain native diagnostics, prompts, tool arguments or secrets.
       effect.reason = "Native agent unavailable, busy, needs attention or access changed";
-      const safeCodes = ['native_protocol_unavailable', 'native_daemon_version_mismatch', 'native_loaded_target_not_available', 'native_existing_thread_busy_or_unavailable', 'native_rpc_rejected', 'native_rpc_timeout'];
+      const safeCodes = [...transientTransport, 'native_protocol_unavailable', 'native_daemon_version_mismatch', 'native_loaded_target_not_available', 'native_existing_thread_busy_or_unavailable', 'native_rpc_rejected', 'native_rpc_timeout'];
       effect.reasonCode = safeCodes.includes(error.code) ? error.code : 'native_access_or_binding_unavailable';
       if (typeof error.rpcMethod === 'string') effect.failedMethod = error.rpcMethod;
+      if (effect.undispatched && !effect.uncertainOutcome && !nativeReceipt && transientTransport.has(effect.reasonCode)) {
+        effect.recoveryDeadline ??= new Date(Date.now() + 86400000).toISOString();
+        effect.nextRetryAt = new Date(Date.now() + Math.min(300000, 15000 * 2 ** Math.min(effect.retryCount ?? 0, 5))).toISOString();
+        effect.reason = 'Connection interrupted before message submission; waiting to reconnect';
+      }
       const reasons = { native_protocol_unavailable: 'Native protocol check failed; message was not queued', native_daemon_version_mismatch: 'Native daemon version differs from the checked CLI; message was not queued' };
       if (!answerAttempted && reasons[effect.reasonCode]) effect.reason = reasons[effect.reasonCode];
       const observationEnded = (nativeReceipt ?? error.receipt)?.observationEnded === true;
@@ -156,7 +162,7 @@ export class CodexDiscussionHub {
   wait(requestId) { return this.pending.get(requestId) ?? Promise.resolve(this.engine.store.data.codexDiscussionDeliveries[requestId]); }
   async recoverUndispatched({ includeLegacy = false } = {}) {
     if (this.recoveryRunning || this.closed) return { recovered: [], skipped: true };
-    const candidates = Object.values(this.engine.store.data.codexDiscussionDeliveries).filter(effect => effect.undispatched === true && !this.engine.store.data.codexDiscussionNativeReceipts[effect.requestId] && !effect.nativeTurnId && !this.aborters.has(effect.requestId) && (effect.retryCount ?? 0) < 3 && (effect.reasonCode === 'native_protocol_unavailable' || (includeLegacy && !effect.reasonCode)));
+    const candidates = Object.values(this.engine.store.data.codexDiscussionDeliveries).filter(effect => effect.undispatched === true && !this.engine.store.data.codexDiscussionNativeReceipts[effect.requestId] && !effect.nativeTurnId && !this.aborters.has(effect.requestId) && ((transientTransport.has(effect.reasonCode) && !effect.uncertainOutcome && Date.parse(effect.recoveryDeadline) > Date.now() && Date.parse(effect.nextRetryAt) <= Date.now()) || ((effect.retryCount ?? 0) < 3 && (effect.reasonCode === 'native_protocol_unavailable' || (includeLegacy && !effect.reasonCode)))));
     if (!candidates.length) return { recovered: [] };
     this.recoveryRunning = true;
     const recovered = [], sessions = new Set();
