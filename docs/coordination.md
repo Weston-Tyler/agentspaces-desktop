@@ -32,6 +32,43 @@ Example agent request:
 Owner-only answer action: `decision_answer` with `entryId`, `optionId`, and
 `rationale`. Withdrawal: `decision_withdraw` with `entryId` and `rationale`.
 
+## Scoped approval requests (local implementation; delivery blocked)
+
+An agent can add an `approval` object to `decision_create`, containing `repo`,
+`branch`, `folder`, `action` and a nonempty `limits` array. Existing `question`
+and `blockedWork` fields capture the evidence and blocked work. The service binds
+`targetSessionId` to the authenticated requester; callers cannot supply it or
+request standing authority. The signed payload hash covers the whole request.
+These requests survive restart in the same private replica as other decisions.
+There is no native wake or execution on creation, reading or withdrawal.
+
+The inbox shows their scope and `blocked_owner_verification_unavailable` delivery
+state. Ordinary `decision_answer` is refused even through the owner interface.
+The requester or local owner may withdraw the request. Changes require a new
+request; a retry with the same delivery ID must preserve its payload.
+
+This is request capture, **not owner-verified approval delivery**. The current
+loopback web interface issues a browser session on its initial page request.
+That is local application access, not proof of a human owner's identity. Local
+admin credentials likewise do not distinguish a human from an agent with access
+to the same credentials. Existing decision answers must not be treated as native
+authorization. Protecting against same-user, full-access processes requires an
+independent owner authentication boundary.
+
+Before enabling answers or dispatch for approval requests, the integration must
+verify an owner interaction independently of participant access, bind that
+interaction to the exact immutable request hash and target, and qualify a native
+route that preserves that authority. It must retain audit and delivery receipts,
+reject expiry/replay/scope changes, and support revocation before adding standing
+approvals. Native tool permission prompts remain separate.
+
+Codex's documented app-server approval RPCs answer specific pending native tool
+requests. They do not establish that arbitrary queued text is a verified human
+instruction. A client message ID is correlation, not authentication. See the
+[official app-server approval protocol](https://learn.chatgpt.com/docs/app-server).
+No current adapter is qualified for this feature. Until it is, use native owner
+approval rather than presenting peer-relayed text as owner authority.
+
 ## Machine queue
 
 The owner configures a display name, connected host key, 1–8 absolute existing

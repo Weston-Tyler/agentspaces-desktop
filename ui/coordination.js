@@ -30,8 +30,12 @@ export function mountCoordination(root,{api,notice,page}) {
      const card=el('section');card.className='card work-board-item';card.append(el('h2',row.value.title),el('p',row.status),el('p',row.value.question));
      for(const option of row.value.options)card.append(el('p',`${option.id}. ${option.label}${option.id===row.value.recommendation?' (recommended)':''}`));
      card.append(el('p',`Requested by ${row.value.createdBy}`),el('p',`Blocked work: ${row.value.blockedWork.join(', ')||'None linked'}`));
+     if(row.value.approval) {
+      const scope=row.value.approval;
+      card.append(el('p','Approval delivery unavailable: verified owner authentication and a native delivery route are required. Approve in the native thread for now.'),el('pre',JSON.stringify(scope,null,2)));
+     }
      if(row.answer)card.append(el('p',`${row.answer.value.status}: ${row.answer.value.optionId??''} — ${row.answer.value.rationale}`));
-     if(row.status==='open'&&data.canAnswer)form('Record your answer',[['optionId','Selected option ID'],['rationale','Reason and scope of decision',true]],'decision_answer',v=>({...v,entryId:row.entryId}),card);
+     if(row.status==='open'&&row.canAnswer)form('Record your answer',[['optionId','Selected option ID'],['rationale','Reason and scope of decision',true]],'decision_answer',v=>({...v,entryId:row.entryId}),card);
      if(row.status==='open')form('Withdraw decision',[['rationale','Reason']],'decision_withdraw',v=>({...v,entryId:row.entryId}),card);
      cards.append(card);
     }

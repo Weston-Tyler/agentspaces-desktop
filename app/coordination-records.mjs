@@ -25,23 +25,32 @@ export function decisionView(b,binding,options={}) {
  if(!Number.isInteger(limit)||limit<1||limit>200)throw Error('Invalid limit');
  b.access(binding);if(b.writing)throw Error('Work board is saving; refresh shortly');b.peer=null;b.open();b.access(binding);
  const answers=records(b,COORD.answer),now=b.engine.clock();
- const all=records(b,COORD.decision).map(r=>{const answer=answers.find(a=>a.value.decisionId===r.entryId);return {...r,status:r.completed?(answer?.value.status??'closed'):r.expiresAt<=now?'expired':'open',answer:answer??null};})
+ const all=records(b,COORD.decision).map(r=>{const answer=answers.find(a=>a.value.decisionId===r.entryId);return {...r,status:r.completed?(answer?.value.status??'closed'):r.expiresAt<=now?'expired':'open',answer:answer??null,canAnswer:!binding&&!r.value.approval,approvalDelivery:r.value.approval?'blocked_owner_verification_unavailable':null};})
  .sort((a,b)=>(a.status==='open'?0:1)-(b.status==='open'?0:1)||a.value.createdAt-b.value.createdAt||a.entryId.localeCompare(b.entryId));
  return {items:all.slice(0,limit),total:all.length,truncated:all.length>limit,canAnswer:!binding,authority:'Owner-recorded coordination decisions; native approvals remain authoritative'};
 }
-export const decisionFields={decision_create:['title','question','options','recommendation','blockedWork'],decision_answer:['entryId','optionId','rationale'],decision_withdraw:['entryId','rationale']};
+export const decisionFields={decision_create:['title','question','options','recommendation','blockedWork','approval'],decision_answer:['entryId','optionId','rationale'],decision_withdraw:['entryId','rationale']};
 export async function decisionChange(b,input,binding,actor,agent) {
  const now=b.engine.clock();
  if(input.action==='decision_create') {
   const {options,blockedWork=[]}=input;
+  let approval;
+  if(Object.hasOwn(input,'approval')) {
+   const scope=input.approval;
+   if(!scope||typeof scope!=='object'||Array.isArray(scope)||Object.keys(scope).some(k=>!['repo','branch','folder','action','limits'].includes(k)))throw Error('Invalid approval scope');
+   if(!binding?.sessionId)throw Error('Approval requests require a source-bound participant');
+   if(!Array.isArray(scope.limits)||scope.limits.length<1||scope.limits.length>20)throw Error('Approval limits required');
+   approval={repo:text(scope.repo,2000,'approval repository'),branch:text(scope.branch,300,'approval branch'),folder:text(scope.folder,2000,'approval folder'),action:text(scope.action,8000,'approval action'),limits:scope.limits.map(v=>text(v,2000,'approval limit')),targetSessionId:binding.sessionId};
+  }
   if(!Array.isArray(options)||options.length<2||options.length>8)throw Error('Provide 2–8 options');
   const choices=options.map(o=>({id:text(o.id,80,'option id'),label:text(o.label,2000,'option label')}));
   if(new Set(choices.map(o=>o.id)).size!==choices.length||!choices.some(o=>o.id===input.recommendation))throw Error('Unique options and matching recommendation required');
   if(!Array.isArray(blockedWork)||blockedWork.length>20||blockedWork.some(id=>typeof id!=='string'||!b.peer.states.has(id)||b.peer.states.get(id).record.type!=='agentspaces.desktop.FollowUpRequest#v1'))throw Error('Unknown blocked work item');
-  return {entryId:write(b,COORD.decision,{title:text(input.title,200,'title'),question:text(input.question,12000,'question'),options:choices,recommendation:input.recommendation,blockedWork:[...new Set(blockedWork)],createdBy:actor,createdAt:now},agent),status:'open'};
+  return {entryId:write(b,COORD.decision,{title:text(input.title,200,'title'),question:text(input.question,12000,'question'),options:choices,recommendation:input.recommendation,blockedWork:[...new Set(blockedWork)],createdBy:actor,createdAt:now,...(approval?{approval}:{})},agent),status:'open'};
  }
  const row=find(b,COORD.decision,input.entryId);
  if(row.completed||row.expiresAt<=now)throw Error('Decision is closed or expired');
+ if(input.action==='decision_answer'&&row.value.approval)throw Error('Verified owner approval route unavailable; native approval remains required');
  if(input.action==='decision_answer'&&binding)throw Error('Only the owner can answer decisions');
  if(input.action==='decision_withdraw'&&binding&&row.value.createdBy!==actor)throw Error('Only the requester or owner can withdraw');
  if(input.action==='decision_answer'&&!row.value.options.some(o=>o.id===input.optionId))throw Error('Unknown decision option');

@@ -86,3 +86,27 @@ test('two concurrent admission calls allocate different slots and durable duplic
  assert.notEqual(x.slotIds[0],y.slotIds[0]);
  const restored=new WorkBoard(f.engine);assert.equal(restored.machines(null).requests.filter(r=>r.state==='reserved').length,2);
 });
+
+const approvalScope={repo:'https://example.test/team/project',branch:'feat/example',folder:'/workspace/example',action:'Run the regression tests',limits:['No push','No deployment']};
+test('approval requests persist immutable scope and cannot become authority through ordinary owner answers',async t=>{
+ const f=fixture(t),actor={sessionId:'a'};
+ const request={...decision,approval:approvalScope};
+ const created=await f.board.mutate(request,actor);
+ assert.equal((await f.board.mutate(request,actor)).duplicate,true);
+ const restored=new WorkBoard(f.engine),row=restored.decisions(actor).items[0];
+ assert.deepEqual({...row.value.approval},{...approvalScope,targetSessionId:'a'});
+ assert.equal(row.approvalDelivery,'blocked_owner_verification_unavailable');
+ assert.equal(row.canAnswer,false);
+ for(const binding of [null,actor,{sessionId:'b'}])await assert.rejects(f.board.mutate(op('decision_answer',created.entryId,{optionId:'a',rationale:'Owner approved'}),binding),/verified owner approval route/i);
+ assert.equal(f.board.decisions(null).items[0].status,'open');
+ await f.board.mutate(op('decision_withdraw',created.entryId,{rationale:'Superseded'}),actor);
+ assert.equal(f.board.decisions(null).items[0].status,'withdrawn');
+});
+test('approval scope rejects forged targets and missing or malformed boundaries',async t=>{
+ const f=fixture(t),actor={sessionId:'a'};
+ for(const approval of [null,{}, {...approvalScope,targetSessionId:'b'}, {...approvalScope,limits:[]}, {...approvalScope,repo:''}, {...approvalScope,standing:true}]) {
+  await assert.rejects(f.board.mutate({...decision,approval},actor),/approval/i);
+ }
+ await assert.rejects(f.board.mutate({...decision,approval:approvalScope},null),/source-bound/i);
+ assert.equal(f.board.decisions(null).items.length,0);
+});
