@@ -34,6 +34,13 @@ Owner-only answer action: `decision_answer` with `entryId`, `optionId`, and
 
 ## Owner approval inbox (source implementation)
 
+AgentSpaces coordinates requests and authenticates their sender. It does not
+maintain a second command-permission system, classify shell commands as allowed
+or forbidden, or automatically approve client permission prompts. When the owner
+commands work, the receiving Codex or Claude client applies its existing
+sandbox, tool permissions and approval settings. Receipt verification establishes
+provenance and scope; it does not replace those client controls.
+
 This feature is opt-in. On the companion host, the owner runs
 `node app/cli.mjs owner-password` in an interactive terminal, using the same
 `AGENTSPACES_STATE` as the running service. The prompt hides input and requires
