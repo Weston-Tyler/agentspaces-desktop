@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
-import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,writeFileSync,rmSync,realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
 test('continuation inspection uses the configured remote identity without a live native route', t=>{
- const root=mkdtempSync(join(tmpdir(),'as-continuation-host-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const root=mkdtempSync(join(realpathSync(tmpdir()),'as-continuation-host-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
  const config=join(root,'host.json');writeFileSync(config,JSON.stringify({schema:1,remoteHost:'synthetic-lab-host',sshAlias:'synthetic-ssh-alias'}),{mode:0o600});
  const module=new URL('../app/codex-discussions.mjs',import.meta.url).href;
  const script=`import {CodexDiscussionHub} from ${JSON.stringify(module)};
