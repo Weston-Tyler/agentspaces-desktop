@@ -183,6 +183,50 @@ export class Discussions {
     if (binding && !g.members.some(member => member.sessionId === binding.sessionId) && this.policy(g).selfRegistration) this.join({ id }, binding);
     return this.context(id, binding);
   }
+  readPage(args, binding) {
+    const { id, limit = 50, cursor } = args;
+    if (Object.keys(args).some(key => !['id', 'limit', 'cursor'].includes(key)) ||
+        !Number.isInteger(limit) || limit < 1 || limit > 100 ||
+        cursor !== undefined && (typeof cursor !== 'string' || !cursor.length || cursor.length > 512))
+      throw denied('discussion_page_invalid', 'discussion_page_invalid: limit must be 1–100 and cursor must be the returned nextCursor');
+    // Keep full context for internal authorization/delivery. Only the external
+    // read projection is paged; no stored message or wire record is rewritten.
+    const context = this.contextOrJoin(id, binding), messages = context.messages;
+    let snapshot = messages.length, end = snapshot;
+    if (cursor !== undefined) {
+      let value;
+      try { value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch {}
+      if (!value || value.v !== 1 || value.id !== id ||
+          !Number.isSafeInteger(value.snapshot) || !Number.isSafeInteger(value.before) ||
+          value.snapshot < 1 || value.before < 1 || value.before >= value.snapshot ||
+          typeof value.anchor !== 'string')
+        throw denied('discussion_cursor_invalid', 'discussion_cursor_invalid: restart with no cursor');
+      // Revocation hides content even when an older cursor is presented.
+      if (!context.available) { snapshot = 0; end = 0; }
+      else {
+        if (value.snapshot > messages.length || messages[value.snapshot - 1]?.id !== value.anchor)
+          throw denied('discussion_cursor_stale', 'discussion_cursor_stale: restart with no cursor');
+        snapshot = value.snapshot; end = value.before;
+      }
+    }
+    const pageAt = start => ({
+      ...context,
+      messages: messages.slice(start, end),
+      page: {
+        limit, returned: end - start, totalMessages: context.storage.messageCount,
+        snapshotMessageCount: snapshot, startIndex: start, endIndexExclusive: end,
+        order: 'oldest-first', direction: 'backward', hasMore: start > 0,
+        nextCursor: start > 0 ? Buffer.from(JSON.stringify({v:1,id,snapshot,before:start,anchor:messages[snapshot-1].id})).toString('base64url') : null,
+      },
+    });
+    let start = Math.max(0, end - limit), result = pageAt(start);
+    while (Buffer.byteLength(JSON.stringify(result)) > 512 * 1024) {
+      if (end - start <= 1)
+        throw denied('discussion_page_record_too_large', 'discussion_page_record_too_large: room metadata or an individual message exceeds the page budget');
+      result = pageAt(++start);
+    }
+    return result;
+  }
   invite({ id, sessionId }, binding) {
     const caller = this.participant(binding), g = this.group(id);
     this.context(id, binding);
