@@ -104,6 +104,21 @@ for (const aliasProxy of [false, true]) test("Native channel stdio actor roundtr
   await call("discussions/post", message);
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(events.length, 1, "Duplicate owner submission must not replay native notification");
+  if (aliasProxy) {
+    // A real TCP break must not close the native MCP session or lose unsent work.
+    for (const socket of [...proxySockets]) socket.destroy();
+    const disconnectedBy = Date.now() + 1000;
+    while (app.channels.isConnected(claudeId) && Date.now() < disconnectedBy) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(app.channels.isConnected(claudeId), false);
+    const queued = await call('discussions/post', { ...message, text: 'Synthetic message during outage', deliveryId: 'fixture-outage-post-0001' });
+    assert.equal(queued.messages.at(-1).targets[0].status, 'waiting-for-native-transport');
+    const recoveredBy = Date.now() + 4000;
+    while (events.length < 2 && Date.now() < recoveredBy) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(events.length, 2); assert.equal(events[1].content, 'Synthetic message during outage');
+    assert.ok((await client.listTools()).tools.length, 'The original native MCP client stays connected');
+    const health = await fetch(app.address + '/api/state', { headers: { Authorization: 'Bearer ' + app.admin } }).then(response => response.json());
+    assert.equal(health.transportHealth.channels.waiting, 0);
+  }
   const foreignReply = await client.callTool({ name: "reply", arguments: { ...replyArgs, requestId: "fixture-unknown-request", deliveryId: "fixture-channel-reply-0002" } });
   assert.equal(foreignReply.isError, true);
   engine.grant(claudeId, { share: false });
