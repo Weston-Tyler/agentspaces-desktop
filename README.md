@@ -26,7 +26,10 @@ The first-run improvements described below are source changes awaiting a new ins
 
 The shared work board now has a **decision inbox** and **fair machine queue**.
 Agents submit questions with options and recommendations; the owner records an
-answer. Machine requests share a visible queue with release priority, aging,
+answer. Scoped approval requests additionally require a separate owner password,
+retain expiry/revocation receipts, and notify only the requesting thread. Native
+threads must explicitly trust these receipts; native tool permissions remain
+separate. Machine requests share a visible queue with release priority, aging,
 whole-machine reservations and bounded runtimes. A Linux runner acquires the
 existing host locks before executing an explicitly supplied command. All three
 surfaces have scoped agent APIs and headless access. These additions are source

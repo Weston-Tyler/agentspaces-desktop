@@ -86,7 +86,7 @@ export class WorkBoard {
   }
   machines(binding, options = {}) { return machineView(this, binding, options); }
   decisions(binding, options = {}) { return decisionView(this, binding, options); }
-  mutate(input, binding) {
+  mutate(input, binding, ownerProof = null) {
     const operation = this.tail.then(async () => {
       this.access(binding);
       protectStateDirectory(this.root, ['identity','agents','replica.cbor','replica.cbor.tmp','writer.lock']);
@@ -98,12 +98,12 @@ export class WorkBoard {
       try {
         writeFileSync(fd, JSON.stringify({ pid: process.pid }));
         this.writing = true; this.peer = null;
-        return await this.apply(input, binding);
+        return await this.apply(input, binding, ownerProof);
       } finally { this.writing = false; closeSync(fd); unlinkSync(lock); }
     });
     this.tail = operation.catch(() => {}); return operation;
   }
-  async apply(input, binding) {
+  async apply(input, binding, ownerProof) {
     const { action, deliveryId } = input;
     if (!['create', 'claim', 'renew', 'update', 'complete', ...Object.keys(decisionFields), ...Object.keys(machineFields)].includes(action)) throw new Error('Unknown work-board action');
     bounded(deliveryId, 100, 'deliveryId');
@@ -127,7 +127,7 @@ export class WorkBoard {
       if (machineFields[action]) {
         result = await machineChange(this,input,binding,actor,agent);
       } else if (decisionFields[action]) {
-        result = await decisionChange(this,input,binding,actor,agent);
+        result = await decisionChange(this,input,binding,actor,agent,ownerProof);
       } else if (action === 'create') {
         const value = { title: bounded(input.title, 200, 'title'), brief: bounded(input.brief, 12000, 'brief'),
           repository: bounded(input.repository, 2000, 'repository').trim().replace(/\/+$/, ''), base: bounded(input.base, 200, 'base'),

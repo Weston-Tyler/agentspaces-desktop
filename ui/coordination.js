@@ -14,6 +14,31 @@ export function mountCoordination(root,{api,notice,page}) {
   const button=el('button',title);button.type='submit';button.className='primary';f.append(button);parent.append(details);
   f.addEventListener('submit',async e=>{e.preventDefault();try {if(await change({action,...build(values(f))},button)){f.reset();details.open=false;}}catch(error){notice(error.message,true);}});return f;
  }
+ function approvalForm(card,row,revoke=false) {
+  const f=el('form'),heading=el('h3',revoke?'Revoke approval':'Confirm scoped owner decision');f.append(heading);
+  let outcome,limits,minutes;
+  if(!revoke){
+   const label=el('label','Decision');outcome=el('select');outcome.name='outcome';
+   for(const [value,text] of [['approve','Approve within the requested limits'],['approve_with_limits','Approve with additional limits'],['decline','Decline']]){const option=el('option',text);option.value=value;outcome.append(option);}label.append(outcome);f.append(label);
+   limits=field(f,'limits','Additional limits (one per line)',true,false);
+   minutes=field(f,'minutes','Valid for minutes (1–1440)');minutes.type='number';minutes.min='1';minutes.max='1440';minutes.value='60';
+  }
+  const rationale=field(f,'rationale','Reason',true),password=field(f,'password','Owner approval password');password.type='password';password.autocomplete='current-password';
+  const button=el('button',revoke?'Revoke':'Confirm and notify this thread');button.type='submit';f.append(button);card.append(f);
+  let pending;
+  f.addEventListener('input',e=>{if(e.target!==password)pending=null;});
+  f.addEventListener('submit',async event=>{
+   event.preventDefault();button.disabled=true;
+   try {
+    pending??={action:revoke?'decision_revoke':'decision_approve',entryId:row.entryId,deliveryId:crypto.randomUUID(),rationale:rationale.value,...(revoke?{}:{requestHash:row.hash,outcome:outcome.value,limits:limits.value.split('\n').map(x=>x.trim()).filter(Boolean),expiresAt:Date.now()+Number(minutes.value)*60000})};
+    const secret=password.value;password.value='';
+    const result=await api('approvals/answer',{password:secret,decision:pending});
+    if(result.notification?.status==='not_delivered')notice('Decision saved; notification unavailable: '+result.notification.reason,true);
+    else notice('Decision saved. Delivery status is visible in the Owner decisions room.');
+    pending=null;await load();
+   } catch(error){notice(error.message,true);}finally{button.disabled=false;}
+  });
+ }
  if(page==='decisions') form('Ask for a decision',[['title','Title'],['question','Question and relevant evidence',true],['options','Options (one per line)',true],['recommendation','Recommended option number'],['blockedWork','Blocked work item IDs (one per line)',true,false]],'decision_create',v=>{
   const options=v.options.split('\n').map(x=>x.trim()).filter(Boolean).map((label,i)=>({id:String(i+1),label}));
   return {...v,options,blockedWork:v.blockedWork.split('\n').map(x=>x.trim()).filter(Boolean)};
@@ -32,7 +57,19 @@ export function mountCoordination(root,{api,notice,page}) {
      card.append(el('p',`Requested by ${row.value.createdBy}`),el('p',`Blocked work: ${row.value.blockedWork.join(', ')||'None linked'}`));
      if(row.value.approval) {
       const scope=row.value.approval;
-      card.append(el('p','Approval delivery unavailable: verified owner authentication and a native delivery route are required. Approve in the native thread for now.'),el('pre',JSON.stringify(scope,null,2)));
+      const stateLabel={awaiting_owner_approval:'Awaiting your approval',available_for_target_verification:'Decision ready for the requesting agent',revoked:'Revoked',expired:'Expired',declined:'Declined',credential_changed:'Invalidated by password change'};
+      card.append(el('p',`Owner approval: ${stateLabel[row.approvalDelivery]??row.approvalDelivery}`));
+      for(const [label,value] of [['Action',scope.action],['Repository',scope.repo],['Branch',scope.branch],['Folder',scope.folder]])card.append(el('p',`${label}: ${value}`));
+      card.append(el('h3','Required limits'));const list=el('ul');for(const limit of scope.limits)list.append(el('li',limit));card.append(list);
+      if(row.answer?.value.verification){
+       const answer=row.answer.value;card.append(el('p',`${{approve:'Approved',approve_with_limits:'Approved with additional limits',decline:'Declined'}[answer.outcome]} · Expires ${new Date(answer.expiresAt).toLocaleString()}`));
+       for(const limit of answer.limits)card.append(el('p',`Additional limit: ${limit}`));
+       const details=el('details');details.append(el('summary','Verification receipt'),el('pre',JSON.stringify({requestHash:row.hash,target:scope.targetSessionId,...answer.verification},null,2)));card.append(details);
+      }
+      if(data.canAnswer&&data.ownerAuthentication?.configured){
+       if(row.status==='open')approvalForm(card,row);
+       else if(row.answer?.value.verification&&!row.revocation)approvalForm(card,row,true);
+      }else if(data.canAnswer)card.append(el('p','Set your separate approval password from the companion terminal: node app/cli.mjs owner-password. Never share that password with an agent.'));
      }
      if(row.answer)card.append(el('p',`${row.answer.value.status}: ${row.answer.value.optionId??''} — ${row.answer.value.rationale}`));
      if(row.status==='open'&&row.canAnswer)form('Record your answer',[['optionId','Selected option ID'],['rationale','Reason and scope of decision',true]],'decision_answer',v=>({...v,entryId:row.entryId}),card);

@@ -95,7 +95,7 @@ test('approval requests persist immutable scope and cannot become authority thro
  assert.equal((await f.board.mutate(request,actor)).duplicate,true);
  const restored=new WorkBoard(f.engine),row=restored.decisions(actor).items[0];
  assert.deepEqual({...row.value.approval},{...approvalScope,targetSessionId:'a'});
- assert.equal(row.approvalDelivery,'blocked_owner_verification_unavailable');
+ assert.equal(row.approvalDelivery,'awaiting_owner_approval');
  assert.equal(row.canAnswer,false);
  for(const binding of [null,actor,{sessionId:'b'}])await assert.rejects(f.board.mutate(op('decision_answer',created.entryId,{optionId:'a',rationale:'Owner approved'}),binding),/verified owner approval route/i);
  assert.equal(f.board.decisions(null).items[0].status,'open');
@@ -109,4 +109,37 @@ test('approval scope rejects forged targets and missing or malformed boundaries'
  }
  await assert.rejects(f.board.mutate({...decision,approval:approvalScope},null),/source-bound/i);
  assert.equal(f.board.decisions(null).items.length,0);
+});
+
+import { OwnerApprovalAuth } from '../app/owner-approval-auth.mjs';
+test('verified approval binds request hash, survives restart, is target scoped and can be revoked',async t=>{
+ const f=fixture(t),a={sessionId:'a'},password='synthetic password for approval lifecycle';
+ const auth=new OwnerApprovalAuth(f.engine.store,{clock:f.engine.clock});await auth.configure(password);
+ const d=await f.board.mutate({...decision,approval:approvalScope},a),row=f.board.decisions(a).items[0];
+ const answer=op('decision_approve',d.entryId,{requestHash:row.hash,outcome:'approve_with_limits',limits:['Only unit tests'],rationale:'Proceed locally',expiresAt:f.engine.clock()+3600000});
+ await assert.rejects(f.board.mutate(answer,null),/proof/);
+ const bad={...answer,requestHash:'0'.repeat(64)};await assert.rejects(f.board.mutate(bad,null,await auth.verify(password,bad)),/hash/);
+ await f.board.mutate(answer,null,await auth.verify(password,answer));
+ f.board=new WorkBoard(f.engine);
+ assert.equal(f.board.decisions(a).items[0].authorization.valid,true);
+ assert.equal(f.board.decisions({sessionId:'b'}).items[0].authorization.valid,false);
+ assert.equal(f.board.decisions(a).items[0].answer.value.verification.method,'owner-password');
+ const revoke=op('decision_revoke',d.entryId,{rationale:'Pause this work'});
+ await assert.rejects(f.board.mutate(revoke,a),/owner/);
+ await f.board.mutate(revoke,null,await auth.verify(password,revoke));
+ assert.equal(f.board.decisions(a).items[0].authorization.valid,false);
+ assert.equal(f.board.decisions(a).items[0].approvalDelivery,'revoked');
+});
+test('approval expiry and password rotation invalidate grants, while decision payloads cannot broaden scope',async t=>{
+ const f=fixture(t),a={sessionId:'a'},password='synthetic password for expiry lifecycle';
+ const auth=new OwnerApprovalAuth(f.engine.store,{clock:f.engine.clock});await auth.configure(password);
+ const d=await f.board.mutate({...decision,approval:approvalScope},a),row=f.board.decisions(a).items[0];
+ const answer=op('decision_approve',d.entryId,{requestHash:row.hash,outcome:'approve',limits:[],rationale:'Proceed',expiresAt:f.engine.clock()+1000});
+ await f.board.mutate(answer,null,await auth.verify(password,answer));
+ await auth.configure('a replacement synthetic owner password',password);
+ assert.equal(f.board.decisions(a).items[0].approvalDelivery,'credential_changed');
+ assert.equal(f.board.decisions(a).items[0].authorization.valid,false);
+ f.advance(1001);
+ assert.equal(f.board.decisions(a).items[0].authorization.valid,false);
+ assert.equal(f.board.decisions(a).items[0].approvalDelivery,'expired');
 });
