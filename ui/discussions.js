@@ -6,7 +6,7 @@ function el(tag, text, cls) {
   return n;
 }
 function replyLabel(status) {
-  const labels = { "connecting-native-agent": "Connecting…", "queued": "Queued in native chat", "conversation-budget-reached": "Automatic exchange paused", "awaiting-native-reply": "Waiting for reply", "native-agent-replied": "Replied", "needs-native-attention": "Needs attention in the native app", "native-reply-uncertain": "Reply status unknown", "native-agent-unavailable": "Agent unavailable", "delivered-to-native-transport": "Message delivered" };
+  const labels = { "connecting-native-agent": "Connecting…", "queued": "Queued in native chat", "conversation-budget-reached": "Automatic exchange paused", "awaiting-native-reply": "Waiting for reply", "native-agent-replied": "Replied", "needs-native-attention": "Needs attention in the native app", "native-reply-uncertain": "Reply status unknown", "native-reply-pending": "Reply pending; native work preserved", "native-agent-unavailable": "Agent unavailable", "delivered-to-native-transport": "Message delivered" };
   if (labels[status]) return labels[status];
   return /blocked|unavailable|access changed/.test(status ?? "") ? "Agent is not connected" : status;
 }

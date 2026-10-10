@@ -105,6 +105,8 @@ test("MCP channel declares only channel capability, authenticates app transport 
   const received = [];
   client.setNotificationHandler(z.object({ method: z.literal("notifications/claude/channel"), params: z.object({ content: z.string(), meta: z.record(z.string(), z.string()) }) }), event => received.push(event));
   await client.connect(clientTransport);
+  assert.match(client.getInstructions(), /next safe boundary/);
+  assert.match(client.getInstructions(), /Do not interrupt/);
   const capability = client.getServerCapabilities();
   assert.deepEqual(capability.experimental, { "claude/channel": {} });
   assert.ok(!("claude/channel/permission" in capability.experimental));

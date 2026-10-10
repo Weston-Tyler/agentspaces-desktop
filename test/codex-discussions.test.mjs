@@ -187,7 +187,7 @@ test("native identity mismatch, uncertain outcome and approval attention never p
   for (const kind of ["mismatch", "uncertain", "attention"]) {
     const controls = { answer: async (input, _options, adapter) => {
       if (kind === "mismatch") return { nativeThreadId: "99999999-2222-4333-8444-555555555555", nativeTurnId: TURN, text: "Wrong source", usage: { known: false } };
-      if (kind === "attention") adapter.events.emit("native-attention", { kind: "approval-required", nativeThreadId: input.threadId, action: "declined; native owner attention required" });
+      if (kind === "attention") adapter.events.emit("native-attention", { kind: "approval-required", nativeThreadId: input.threadId, action: "native owner response required; client approval preserved" });
       throw fail(kind === "attention" ? "native_queue_turn_failed" : "native_proxy_disconnected", true);
     } };
     const { engine, hub, args, counters } = setup({ controls }); t.after(() => hub.close());
@@ -304,4 +304,12 @@ test("a revoked historical root author blocks native dispatch before adapter cre
   const reply = group.messages.at(-1); engine.grant("sample-claude-new", { retrieve: false });
   assert.throws(() => hub.dispatch({ ...args, messageId: reply.id, requestId: "native-revoked-ancestor-request" }), /retrieval|grant|revoked/);
   assert.equal(counters.factory, 0); assert.equal(counters.answer, 0);
+});
+
+test('observation timeout reports native reply pending and never retries accepted input',async t=>{
+ const {engine,hub,args,counters}=setup({controls:{answer:async()=>{throw Object.assign(fail('native_queue_timeout',true),{receipt:{observationEnded:true,observationReason:'native_queue_timeout',nativeCancellationRequested:false}});}}});
+ t.after(()=>hub.close());hub.dispatch(args);await settle(hub,args.requestId);
+ assert.equal(engine.store.data.codexDiscussionDeliveries[args.requestId].status,'native-reply-pending');
+ assert.match(engine.store.data.codexDiscussionDeliveries[args.requestId].reason,/not interrupted/);
+ hub.dispatch(args);await settle(hub,args.requestId);assert.equal(counters.answer,1);
 });
