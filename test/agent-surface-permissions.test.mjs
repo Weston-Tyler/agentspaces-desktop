@@ -182,3 +182,28 @@ test('coordination HTTP surfaces deny agent owner powers and revoked reads',asyn
  assert.equal((await f.call('/api/decisions/change',create)).status,400);
  assert.equal(f.effects.nativeFactories,0);
 });
+
+test('scoped artifact drop/read and derived lanes expose no filesystem write and revoke with source sharing',async t=>{
+ const f=await fixture(t);
+ const made=await f.call('/api/work-board/change',{action:'create',deliveryId:'artifact-http-create',title:'Report task',brief:'Synthetic report',repository:'https://example.invalid/synthetic',base:'a'.repeat(40),allowedFiles:'src/report.js'});
+ assert.equal(made.status,200);
+ assert.equal((await f.call('/api/work-board/change',{action:'claim',deliveryId:'artifact-http-claim',entryId:made.body.entryId})).status,200);
+ const uploaded=await f.call('/api/artifacts/create',{deliveryId:'artifact-http-upload',workEntryId:made.body.entryId,name:'report.md',text:'Synthetic results',mediaType:'text/markdown'});
+ assert.equal(uploaded.status,200);const read=await f.call('/api/artifacts/list',{entryId:uploaded.body.entryId});assert.equal(read.status,200);assert.equal(read.body.items[0].value.source.participantId,f.source.id);
+ assert.equal((await f.call('/api/lanes/list')).body.items[0].status,'unknown');
+ assert.equal((await f.call('/api/artifacts/create',{deliveryId:'artifact-http-escape',workEntryId:made.body.entryId,name:'../escape',text:'Denied'})).status,400);
+ f.engine.store.data.grants[f.source.id].share=false;assert.equal((await f.call('/api/artifacts/list',{entryId:uploaded.body.entryId})).status,400);assert.equal((await f.call('/api/lanes/list')).status,400);
+ assert.equal(f.effects.nativeFactories,0);
+});
+
+test('artifact room links require exact existing message and current membership on every read',async t=>{
+ const f=await fixture(t),group=f.engine.discussions.create({title:'Reports',sessionIds:[f.source.id]});
+ const posted=f.engine.discussions.post({id:group.id,text:'Report here',deliveryId:'artifact-room-parent',targets:[]});
+ const input={deliveryId:'artifact-room-upload',discussionId:group.id,messageId:posted.messages[0].id,name:'report.txt',text:'Scoped report'};
+ assert.equal((await f.call('/api/artifacts/create',{...input,messageId:'unknown'})).status,400);
+ const created=await f.call('/api/artifacts/create',input);assert.equal(created.status,200);
+ assert.equal((await f.call('/api/artifacts/list',{entryId:created.body.entryId})).status,200);
+ assert.equal((await f.call('/api/artifacts/list',{entryId:created.body.entryId},f.app.admin)).status,200);
+ f.engine.discussions.group(group.id).members=[];
+ assert.equal((await f.call('/api/artifacts/list',{entryId:created.body.entryId})).status,400);
+});

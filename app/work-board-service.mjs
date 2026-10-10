@@ -1,4 +1,6 @@
 import {progressContinuation,continuationView} from './work-continuation.mjs';
+import { artifactFields, artifactChange, artifactView, checkArtifactReceipt } from './work-artifacts.mjs';
+import { laneView } from './lane-status.mjs';
 import { machineFields, machineChange, machineView } from './machine-queue.mjs';
 import { decisionFields, decisionChange, decisionView, approvalCheck } from './coordination-records.mjs';
 import { Identity, Peer, cbor, spaceIdLocal } from '@agentspaces/client';
@@ -86,6 +88,8 @@ export class WorkBoard {
       capabilities: { create: true, claim: true, update: true, complete: true, modelExecution: false } };
   }
   continuations(binding, options = {}) { return continuationView(this,binding,options); }
+  artifacts(binding, options = {}) { return artifactView(this, binding, options); }
+  lanes(binding, options = {}) { return laneView(this, binding, options); }
   machines(binding, options = {}) { return machineView(this, binding, options); }
   decisions(binding, options = {}) { return decisionView(this, binding, options); }
   async verifyApproval(binding,input) {
@@ -114,10 +118,10 @@ export class WorkBoard {
   }
   async apply(input, binding, ownerProof) {
     const { action, deliveryId } = input;
-    if (!['create', 'claim', 'renew', 'update', 'complete', ...Object.keys(decisionFields), ...Object.keys(machineFields)].includes(action)) throw new Error('Unknown work-board action');
+    if (!['create', 'claim', 'renew', 'update', 'complete', ...Object.keys(decisionFields), ...Object.keys(machineFields), ...Object.keys(artifactFields)].includes(action)) throw new Error('Unknown work-board action');
     bounded(deliveryId, 100, 'deliveryId');
     if (!/^[A-Za-z0-9-]{8,100}$/.test(deliveryId)) throw new Error('Stable deliveryId required');
-    const allowed = ['action','deliveryId', ...(decisionFields[action] ?? machineFields[action] ?? (action === 'create' ? ['title','brief','repository','base','allowedFiles'] : ['claim','renew'].includes(action) ? ['entryId','leaseMinutes'] : ['entryId','status','summary','branch','head','evidence','continuation']))];
+    const allowed = ['action','deliveryId', ...(artifactFields[action] ?? decisionFields[action] ?? machineFields[action] ?? (action === 'create' ? ['title','brief','repository','base','allowedFiles'] : ['claim','renew'].includes(action) ? ['entryId','leaseMinutes'] : ['entryId','status','summary','branch','head','evidence','continuation']))];
     if (Object.keys(input).some(k => !allowed.includes(k))) throw new Error('Unknown work-board field');
     this.access(binding); this.open();
     const actor = this.access(binding), key = createHash('sha256').update(`${actor}:${deliveryId}`).digest('hex');
@@ -125,6 +129,7 @@ export class WorkBoard {
     const prior = this.receipts[key];
     if (prior) {
       if (prior.digest !== digest) throw new Error('deliveryId reused with different work');
+      if (artifactFields[action]) checkArtifactReceipt(this,binding,prior.result.entryId);
       return { ...prior.result, duplicate: true };
     }
     if (Object.keys(this.receipts).length >= 10000 || this.peer.states.size >= 10000) throw new Error('Work-board capacity reached; archive through an explicit maintenance operation');
@@ -133,7 +138,9 @@ export class WorkBoard {
       this.access(binding, { create: true });
       const agent = this.agent(actor);
       let entryId = input.entryId, result;
-      if (machineFields[action]) {
+      if (artifactFields[action]) {
+        result = await artifactChange(this,input,binding,actor,agent);
+      } else if (machineFields[action]) {
         result = await machineChange(this,input,binding,actor,agent);
       } else if (decisionFields[action]) {
         result = await decisionChange(this,input,binding,actor,agent,ownerProof);

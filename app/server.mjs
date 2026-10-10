@@ -291,6 +291,9 @@ export async function startServer({
           "/api/machines/change",
           "/api/work-board/list",
           "/api/work-board/continuations",
+          "/api/lanes/list",
+          "/api/artifacts/list",
+          "/api/artifacts/create",
           "/api/work-board/change",
           "/api/discover",
           "/api/retrieve",
@@ -352,6 +355,13 @@ export async function startServer({
           result = await engine.workBoard.mutate(data, connector); break;
         case "/api/work-board/continuations":
           result = continuationWaker.view(connector,data); break;
+        case "/api/lanes/list":
+          result = engine.workBoard.lanes(connector, data); break;
+        case "/api/artifacts/list":
+          result = engine.workBoard.artifacts(connector, data); break;
+        case "/api/artifacts/create":
+          if (data.action !== undefined) throw new Error("Artifact action is fixed");
+          result = await engine.workBoard.mutate({...data, action:"artifact_create"}, connector); break;
         case "/api/work-board/list":
           result = engine.workBoard.view(connector, data); break;
         case "/api/work-board/change":
@@ -404,7 +414,7 @@ export async function startServer({
             findings: { discover: true, retrieveShared: true },
             ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
             unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
-            availableTools: ['list_work_continuations','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            availableTools: ['list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
           break;
         }

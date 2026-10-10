@@ -252,6 +252,7 @@ export class CodexReadAdapter {
               : t.status?.type === "idle"
                 ? "dormant"
                 : "unknown",
+          executionObservation: { state: t.status?.type ?? 'unknown', observedAt: new Date().toISOString(), source: 'native-thread-list' },
           updatedAt: new Date((t.updatedAt ?? 0) * 1000).toISOString(),
           sourceVersion: String(t.updatedAt ?? ""),
           topics: [],

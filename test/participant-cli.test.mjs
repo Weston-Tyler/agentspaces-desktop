@@ -212,3 +212,14 @@ test('CLI verifies exact owner approval receipts without widening participant au
   const help = await runParticipantCli(['verify-approval', '--help']);
   assert.deepEqual(help.stdinSchema.required, ['entryId', 'requestHash', 'receiptId']);
 });
+
+test('artifact CLI schemas and scoped routes carry report text without filesystem paths',async t=>{
+ const f=await setup(t);
+ const help=await runParticipantCli(['artifact-drop','--help']);assert.ok(help.stdinSchema.properties.previousEntryId);assert.equal(f.requests.length,0);
+ const input={deliveryId:'artifact-cli-upload',workEntryId:'work-entry',name:'report.md',text:'Synthetic report'};
+ await runParticipantCli(f.args('artifact-drop'),{input:JSON.stringify(input)});
+ await runParticipantCli(f.args('artifact-read'),{input:JSON.stringify({entryId:'artifact-entry'})});
+ await runParticipantCli(f.args('artifacts'),{input:'{}'});await runParticipantCli(f.args('lanes'));
+ assert.deepEqual(f.requests.map(row=>row.path),['/api/artifacts/create','/api/artifacts/list','/api/artifacts/list','/api/lanes/list']);assert.deepEqual(f.requests[0].body,input);
+ await assert.rejects(runParticipantCli(f.args('artifact-drop'),{input:JSON.stringify({...input,path:'/tmp/not-allowed'})}),/bounded_artifact_request_required/);
+});
