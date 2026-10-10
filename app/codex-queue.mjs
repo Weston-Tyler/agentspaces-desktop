@@ -106,8 +106,9 @@ export class CodexQueueAdapter {
         }
         if (message.method.includes("requestApproval")) {
           this.events.emit("native-attention", { host: this.host, kind: "approval-required", method: message.method, requestId: message.id,
-            nativeThreadId: params.threadId ?? null, nativeTurnId: params.turnId ?? null, action: "declined; native owner attention required" });
-          this.send({ id: message.id, result: { decision: "decline" } });
+            nativeThreadId: params.threadId ?? null, nativeTurnId: params.turnId ?? null, action: "native owner response required; client approval preserved" });
+          // Native clients own approval decisions. Notification delivery never
+          // accepts or declines a command on the owner's behalf.
         } else {
           this.events.emit("native-attention", { host: this.host, kind: "native-interaction-required", method: message.method, requestId: message.id, nativeThreadId: params.threadId ?? null, nativeTurnId: params.turnId ?? null, action: "native owner response required" });
         }
@@ -250,7 +251,7 @@ export class CodexQueueAdapter {
         activePermissionProfile: resumed.activePermissionProfile ?? null, fullAccessGranted, verifiedAt: new Date().toISOString(), source: "existing-native-thread-resume-response" };
       if (this.persistPermissionProof) await this.persistPermissionProof(structuredClone(proof));
       this.proofs.set(threadId, proof);
-      return { nativeThreadId: threadId, permissionProof: proof, limitations: ["Native configuration and approvals preserved; no policy overrides", "Native tools follow preserved policy; approval escalations are declined and report owner attention", "Persisted permission evidence requires explicit rebind after restart", "Output token ceiling is checked after completion"] };
+      return { nativeThreadId: threadId, permissionProof: proof, limitations: ["Native configuration and approvals preserved; no policy overrides", "Native tools follow preserved policy; approval requests remain with the native client", "Persisted permission evidence requires explicit rebind after restart", "Output token ceiling is checked after completion"] };
     } finally { this.bindingThreads.delete(threadId); }
   }
   async bindLoadedThread({ threadId, cwd, grant } = {}) {
@@ -260,7 +261,7 @@ export class CodexQueueAdapter {
     if (!["active", "idle"].includes(thread.status?.type) || thread.canAcceptDirectInput !== true || thread.ephemeral) throw fail("native_loaded_target_not_available");
     const proof = { nativeThreadId: threadId, host: this.host, cwd, source: "loaded-native-input-target", policyKnown: false, allowExistingNativePolicy: true, verifiedAt: new Date().toISOString() };
     this.proofs.set(threadId, proof);
-    return { nativeThreadId: threadId, permissionProof: proof, limitations: ["Loaded native input target only; effective sandbox and approval policy are not asserted", "Explicit owner accepts existing native policy; no settings are overridden", "Only this adapter's correlated turns can receive automatic approval declines"] };
+    return { nativeThreadId: threadId, permissionProof: proof, limitations: ["Loaded native input target only; effective sandbox and approval policy are not asserted", "Explicit owner accepts existing native policy; no settings are overridden", "Correlated approval requests raise attention without responding for the owner"] };
   }
   async bindReadTarget({ threadId, cwd, grant } = {}) {
     if (grant !== true || !UUID.test(threadId ?? "") || typeof cwd !== "string" || !posix.isAbsolute(cwd) || cwd.includes("\0")) throw fail("native_read_target_grant_required");
@@ -539,6 +540,17 @@ export class CodexQueueAdapter {
       const stop = async (code, allowContentLookup = true) => {
         if (settled || stopping) return;
         stopping = true;
+        // Existing native threads own their execution. An observer timeout,
+        // transport uncertainty or lost read grant is not a cancellation request.
+        const clientOwned = ["existing-native-thread-resume-response", "loaded-native-input-target"].includes(eligible.permissionProof.source);
+        if (clientOwned && code !== "cancelled" && !(code === "native_delivery_grant_revoked" && !receipt.nativeTurnId)) {
+          receipt.observationEnded = true;
+          receipt.observationReason = code;
+          receipt.nativeCancellationRequested = false;
+          await save().catch(() => {});
+          await finish(fail(code, true, { ...receipt }));
+          return;
+        }
         let cancelled = false;
         try {
           if (receipt.nativeTurnId) {

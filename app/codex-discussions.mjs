@@ -144,10 +144,12 @@ export class CodexDiscussionHub {
       if (typeof error.rpcMethod === 'string') effect.failedMethod = error.rpcMethod;
       const reasons = { native_protocol_unavailable: 'Native protocol check failed; message was not queued', native_daemon_version_mismatch: 'Native daemon version differs from the checked CLI; message was not queued' };
       if (!answerAttempted && reasons[effect.reasonCode]) effect.reason = reasons[effect.reasonCode];
+      const observationEnded = (nativeReceipt ?? error.receipt)?.observationEnded === true;
+      if(observationEnded){effect.reason='Response observation ended; queued input and native work were not interrupted';effect.reasonCode='native_observation_ended';}
       const message = this.engine.discussions.group(effect.discussionId).messages.find(message => message.id === effect.messageId);
       const target = message?.targets.find(target => target.sessionId === effect.sessionId);
       if (target) { target.reason = effect.reason; target.reasonCode = effect.reasonCode; target.undispatched = effect.undispatched === true; }
-      update(effect.status === "needs-native-attention" ? "needs-native-attention" : effect.uncertainOutcome ? "native-reply-uncertain" : "native-agent-unavailable");
+      update(effect.status === "needs-native-attention" ? "needs-native-attention" : observationEnded ? "native-reply-pending" : effect.uncertainOutcome ? "native-reply-uncertain" : "native-agent-unavailable");
     }
     return { ...effect };
   }

@@ -179,12 +179,14 @@ test("loaded request polls only after acknowledgement and returns exact-client r
   const count = f.calls.length; await new Promise(resolve => setTimeout(resolve, 35)); assert.equal(f.calls.length, count);
   assert.ok(!calls.includes("thread/resume") && !calls.includes("thread/start"));
 });
-test("busy queued waiting is separate from execution timeout and repeated polls never reset running budget", async () => {
+test("busy queued waiting is separate from observation timeout and native work is never interrupted", async () => {
   const f = pollingFixture({ queueWaitTimeoutMs: 500, data: count => count < 4 ? { data: [] } : { data: [{ id: "own-running", status: "inProgress", items: [{ type: "userMessage", clientId: "poll-client" }] }] } });
   await f.bind();
   await assert.rejects(f.answer({ budget: { timeoutMs: 30, maxOutputTokens: 800 } }), { code: "native_queue_timeout" });
   assert.ok(f.calls.filter(call => call.method === "thread/turns/list").length >= 4, "short execution budget did not expire while waiting for a busy native owner");
-  assert.deepEqual(f.calls.find(call => call.method === "turn/interrupt").params, { threadId, turnId: "own-running" });
+  assert.ok(!f.calls.some(call => ["turn/interrupt","thread/queue/delete"].includes(call.method)));
+  assert.equal(f.receipts.at(-1).observationEnded,true);
+  assert.equal(f.receipts.at(-1).status,"running");
 });
 test("read uncertainty backs off without model retry and can recover the same native client", async () => {
   const f = pollingFixture({ data: count => { if (count === 1) throw new Error("PRIVATE metadata diagnostic"); return { data: [{ id: "own-recovered", status: "completed", items: [{ type: "userMessage", clientId: "poll-client" }, { type: "agentMessage", text: "Recovered reply" }] }] }; } });
@@ -267,7 +269,7 @@ test("historical read target rechecks exact identity and cwd and still requires 
   await assert.rejects(adapter.reconcileAnswer({ threadId, clientId: "read-client", grant: false }), { code: "reconciliation_grant_required" });
   await assert.rejects(adapter.bindReadTarget({ threadId, cwd, grant: false }), { code: "native_read_target_grant_required" });
 });
-test("only correlated owned-turn approvals are declined; foreign native requests are untouched", async t => {
+test("native client retains all approval decisions; correlated requests only raise attention", async t => {
   const server = createServer(), wss = new WebSocketServer({ server });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const replies = [], attention = [], foreign = []; let peer;
@@ -297,15 +299,33 @@ test("only correlated owned-turn approvals are declined; foreign native requests
   peer.send(JSON.stringify({ id: "foreign-approval", method: "item/commandExecution/requestApproval", params: { threadId, turnId: "foreign-turn" } }));
   peer.send(JSON.stringify({ id: "approval-request", method: "item/commandExecution/requestApproval", params: { threadId, turnId: "native-turn", command: "PRIVATE NATIVE TOOL INPUT" } }));
   const approvalDeadline = Date.now() + 1000;
-  while (replies.length < 1 && Date.now() < approvalDeadline) await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal(replies.length, 1); assert.equal(replies[0].id, "approval-request"); assert.deepEqual(replies[0].result, { decision: "decline" }); assert.equal(attention[0].nativeThreadId, threadId);
+  while (attention.length < 1 && Date.now() < approvalDeadline) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(replies.length, 0); assert.match(attention[0].action,/native owner response required/); assert.equal(attention[0].nativeThreadId, threadId);
   assert.equal(foreign.length, 3);
   peer.send(JSON.stringify({ method: "turn/completed", params: { threadId, turn: { id: "native-turn", status: "completed", items: [{ type: "agentMessage", text: "Fixture done" }] } } }));
   await answer; assert.equal(adapter.activeOwnedTurns.size, 0);
   peer.send(JSON.stringify({ id: "late-approval", method: "item/commandExecution/requestApproval", params: { threadId, turnId: "native-turn" } }));
   const foreignDeadline = Date.now() + 1000;
   while (foreign.length < 4 && Date.now() < foreignDeadline) await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal(foreign.length, 4); assert.equal(replies.length, 1);
+  assert.equal(foreign.length, 4); assert.equal(replies.length, 0);
   assert.ok(!JSON.stringify(attention).includes("PRIVATE"));
   assert.ok(!JSON.stringify(foreign).includes("PRIVATE"));
+});
+
+// A notification may wait much longer than an observer remains attached.
+test('queued observation timeout preserves input and prevents duplicate model execution',async()=>{
+ const f=pollingFixture({queueWaitTimeoutMs:25});await f.bind();
+ await assert.rejects(f.answer(),{code:'native_queue_timeout'});
+ assert.ok(!f.calls.some(c=>['turn/interrupt','thread/queue/delete'].includes(c.method)));
+ assert.equal(f.receipts.at(-1).status,'queued');assert.equal(f.receipts.at(-1).observationEnded,true);
+ f.adapter.loadReceipt=async()=>f.receipts.at(-1);
+ await assert.rejects(f.answer(),{code:'receipt_exists_reconcile_without_retry'});
+ assert.equal(f.calls.filter(c=>c.method==='thread/queue/add').length,1);
+});
+test('revoking observation access cannot interrupt a running native turn',async()=>{
+ let permitted=true;const f=pollingFixture({fence:()=>permitted,data:[]});await f.bind();
+ const answer=f.answer();await new Promise(r=>setImmediate(r));
+ f.adapter.events.emit('notification',{method:'item/started',params:{threadId,turnId:'running-native',item:{type:'userMessage',clientId:'poll-client'}}});permitted=false;
+ await assert.rejects(answer,{code:'native_delivery_grant_revoked'});
+ assert.ok(!f.calls.some(c=>['turn/interrupt','thread/queue/delete'].includes(c.method)));
 });

@@ -10,7 +10,7 @@ Each native thread is a logical agent, not a permanently running model. Create a
 
 remote Codex sources use the shared daemon. Already loaded active/idle sources can accept queued discussion input under explicit acceptance of their existing native policy, without resume or configuration changes. Target evidence leaves sandbox policy unknown. Cold binding checks exact identity/cwd, refuses prior queues, and resumes with threadId only to verify effective permissions. A final dispatch fence rechecks context, room policy, grants and source identity before insertion.
 
-Actual thread/turn IDs come from native events. Results retain original message ancestry. This is execution attribution within the configured local boundary, not independent verification of a provider account. Approvals are declined and surfaced as needing native attention. Stable receipts prevent uncertain replay; persisted permission evidence requires rebind after restart.
+Actual thread/turn IDs come from native events. Results retain original message ancestry. This is execution attribution within the configured local boundary, not independent verification of a provider account. Approval requests remain with the native client and are surfaced as needing native attention. Stable receipts prevent uncertain replay; persisted permission evidence requires rebind after restart.
 
 This direct conversation route does not acquire delegated-work claims. AgentSpaces retains its authority and fabric nativeExecution stays false. See [background operation](headless.md) for startup and cancellation.
 
