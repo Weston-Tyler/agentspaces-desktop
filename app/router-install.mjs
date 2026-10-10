@@ -149,16 +149,24 @@ export function installRouter({
   const root = join(resolve(home), ".agentspaces-desktop"),
     router = join(root, "ROUTER.md"),
     manifestPath = join(root, "router-manifest.json");
+  const entries = existsSync(root) ? readdirSync(root) : [];
   if (
-    existsSync(root) &&
-    readdirSync(root).some(
+    entries.some(
       (name) =>
-        !["ROUTER.md", "router-manifest.json", "backups"].includes(name),
+        !["ROUTER.md", "router-manifest.json", "backups", "host.json"].includes(name),
     )
   )
     throw new Error(
       "Router directory contains unrelated files; existing bytes preserved",
     );
+  // Host identity is separately owned private configuration. Recognize only
+  // its regular-file entry; never read, back up, hash or rewrite its contents.
+  if (entries.includes("host.json")) {
+    const hostConfig = join(root, "host.json");
+    noLinks(hostConfig);
+    if (!lstatSync(hostConfig).isFile())
+      throw new Error("Router host configuration must be a regular file");
+  }
   const override = join(resolve(codexHome), "AGENTS.override.md"),
     codex = read(override).toString("utf8").trim()
       ? override
