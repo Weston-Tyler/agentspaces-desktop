@@ -19,7 +19,7 @@ function fixture(t) {
 const decision={action:'decision_create',deliveryId:'decision-new-001',title:'Choose mode',question:'Which profile?',options:[{id:'a',label:'Baseline'},{id:'b',label:'Candidate'}],recommendation:'a'};
 const machine={action:'machine_create',deliveryId:'machine-new-001',name:'Test host',host:'remote',lockPaths:['/tmp/synthetic-slot-1','/tmp/synthetic-slot-2'],gateCommand:[]};
 const op=(action,entryId,extra={})=>({action,entryId,deliveryId:crypto.randomUUID(),...extra});
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 const crypto={randomUUID};
 test('decisions retain source evidence and owner-only answers across restart',async t=>{
  const f=fixture(t),a={sessionId:'a'};const d=await f.board.mutate(decision,a);
@@ -135,11 +135,46 @@ test('approval expiry and password rotation invalidate grants, while decision pa
  const auth=new OwnerApprovalAuth(f.engine.store,{clock:f.engine.clock});await auth.configure(password);
  const d=await f.board.mutate({...decision,approval:approvalScope},a),row=f.board.decisions(a).items[0];
  const answer=op('decision_approve',d.entryId,{requestHash:row.hash,outcome:'approve',limits:[],rationale:'Proceed',expiresAt:f.engine.clock()+1000});
- await f.board.mutate(answer,null,await auth.verify(password,answer));
+ const issued=await f.board.mutate(answer,null,await auth.verify(password,answer));
+ const check={entryId:d.entryId,requestHash:row.hash,receiptId:issued.resultEntryId};
+ assert.equal((await f.board.verifyApproval(a,check)).authorization.valid,true);
  await auth.configure('a replacement synthetic owner password',password);
  assert.equal(f.board.decisions(a).items[0].approvalDelivery,'credential_changed');
+ assert.equal((await f.board.verifyApproval(a,check)).status,'credential_changed');
  assert.equal(f.board.decisions(a).items[0].authorization.valid,false);
  f.advance(1001);
  assert.equal(f.board.decisions(a).items[0].authorization.valid,false);
  assert.equal(f.board.decisions(a).items[0].approvalDelivery,'expired');
+ assert.equal((await f.board.verifyApproval(a,check)).authorization.valid,false);
+ assert.equal((await f.board.verifyApproval(a,check)).status,'expired');
+});
+test('exact approval verification records target receipt and rechecks revocation after duplicate and restart',async t=>{
+ const f=fixture(t),a={sessionId:'a'},password='synthetic exact receipt owner password';
+ const auth=new OwnerApprovalAuth(f.engine.store,{clock:f.engine.clock});await auth.configure(password);
+ const d=await f.board.mutate({...decision,approval:approvalScope},a),row=f.board.decisions(a).items[0];
+ const answer=op('decision_approve',d.entryId,{requestHash:row.hash,outcome:'approve_with_limits',limits:['Only unit tests'],rationale:'Proceed',expiresAt:f.engine.clock()+10000});
+ const issued=await f.board.mutate(answer,null,await auth.verify(password,answer));
+ const check={entryId:d.entryId,requestHash:row.hash,receiptId:issued.resultEntryId};
+ assert.equal(f.board.decisions(null).items[0].notification.status,'not_delivered');
+ const target={sessionId:'a',status:'native-queued'};
+ f.engine.store.data.discussions=[{id:'approval-room',creation:{sessionId:'desktop-owner',deliveryId:'approval-room-'+createHash('sha256').update('a').digest('hex')},messages:[{id:'notification',deliveryId:'approval-'+createHash('sha256').update(issued.resultEntryId).digest('hex'),targets:[target]}]}];
+ assert.equal(f.board.decisions(null).items[0].notification.status,'native-queued');
+ target.status='native-reply-pending';
+ assert.equal(f.board.decisions(null).items[0].notification.status,'native-reply-pending');
+
+ for(const actor of [null,{sessionId:'b'}])await assert.rejects(f.board.verifyApproval(actor,check),/target source/);
+ await assert.rejects(f.board.verifyApproval(a,{...check,requestHash:'0'.repeat(64)}),/hash/);
+ await assert.rejects(f.board.verifyApproval(a,{...check,receiptId:'invented'}),/receipt/);
+ const verified=await f.board.verifyApproval(a,check);assert.equal(verified.authorization.valid,true);
+ assert.deepEqual(verified.requiredLimits,[...approvalScope.limits,'Only unit tests']);
+ assert.equal(verified.nativeAuthority,'owner-delegation-required');
+ assert.equal(verified.scope.targetSessionId,'a');
+ assert.equal(f.board.decisions(null).items[0].targetVerification.value.receiptId,issued.resultEntryId);
+ f.board=new WorkBoard(f.engine);
+ assert.equal((await f.board.verifyApproval(a,check)).verificationEntryId,verified.verificationEntryId);
+ const revoke=op('decision_revoke',d.entryId,{rationale:'Stop future work'});
+ const revoked=await f.board.mutate(revoke,null,await auth.verify(password,revoke));
+ assert.equal((await f.board.verifyApproval(a,check)).authorization.valid,false);
+ assert.equal((await f.board.verifyApproval(a,{...check,receiptId:revoked.resultEntryId})).status,'revoked');
+ assert.equal((await f.board.verifyApproval(a,check)).status,'revoked');
 });

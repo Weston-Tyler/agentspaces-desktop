@@ -247,6 +247,7 @@ export async function startServer({
         connector &&
         ![
           "/api/decisions/list",
+          "/api/approvals/verify",
           "/api/decisions/change",
           "/api/machines/list",
           "/api/machines/change",
@@ -298,6 +299,8 @@ export async function startServer({
           catch(error){result.notification={status:'not_delivered',reason:error.message};}
           break;
         }
+        case "/api/approvals/verify":
+          result = await engine.workBoard.verifyApproval(connector, data); break;
         case "/api/decisions/list":
           result = {...engine.workBoard.decisions(connector, data),ownerAuthentication:ownerApprovals.status()}; break;
         case "/api/machines/list":
@@ -360,7 +363,7 @@ export async function startServer({
             findings: { discover: true, retrieveShared: true },
             ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
             unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
-            availableTools: ['list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            availableTools: ['verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
           break;
         }

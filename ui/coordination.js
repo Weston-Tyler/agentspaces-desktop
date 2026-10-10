@@ -59,6 +59,8 @@ export function mountCoordination(root,{api,notice,page}) {
       const scope=row.value.approval;
       const stateLabel={awaiting_owner_approval:'Awaiting your approval',available_for_target_verification:'Decision ready for the requesting agent',revoked:'Revoked',expired:'Expired',declined:'Declined',credential_changed:'Invalidated by password change'};
       card.append(el('p',`Owner approval: ${stateLabel[row.approvalDelivery]??row.approvalDelivery}`));
+      if(row.notification)card.append(el('p',`Native notification: ${row.notification.status}. Receipt retrieval is shown separately.`));
+      if(row.targetVerification)card.append(el('p',`Requesting thread checked receipt at ${new Date(row.targetVerification.value.checkedAt).toLocaleString()}. This records retrieval, not execution.`));
       for(const [label,value] of [['Action',scope.action],['Repository',scope.repo],['Branch',scope.branch],['Folder',scope.folder]])card.append(el('p',`${label}: ${value}`));
       card.append(el('h3','Required limits'));const list=el('ul');for(const limit of scope.limits)list.append(el('li',limit));card.append(list);
       if(row.answer?.value.verification){
