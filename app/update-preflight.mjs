@@ -4,7 +4,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { assertSavedHostIdentity } from './remote-host.mjs';
-import { assertStateDirectoryNames } from './state-security.mjs';
+import { assertStateDirectoryNames, protectStateDirectory } from './state-security.mjs';
 import { Store } from './store.mjs';
 import { Engine } from './engine.mjs';
 import { FabricAdapter } from './fabric.mjs';
@@ -37,6 +37,7 @@ export async function preflightUpdate({ stateRoot, candidateRoot = fileURLToPath
   const scratch = mkdtempSync(join(tmpdir(),'agentspaces-update-')); chmodSync(scratch,0o700);
   let app;
   try {
+    protectStateDirectory(scratch);
     // Reject linked private files before copying; their external targets are never read.
     files(stateRoot);
     for (const name of readdirSync(stateRoot)) {

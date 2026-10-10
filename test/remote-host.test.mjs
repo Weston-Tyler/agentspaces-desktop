@@ -152,3 +152,16 @@ test('Ask probes a selected legacy identity and never substitutes an unconfigure
   const result = await findNativeAnswerService({ hosts: ['legacy-lab'], api: async (_route, body) => { calls.push(body.host); return [{ provider: 'codex', available: true }]; } });
   assert.equal(result.host, 'legacy-lab'); assert.deepEqual(calls, ['legacy-lab']);
 });
+test('normal installed launches can retain private configuration outside the repository', async () => {
+  await run(`
+    import assert from 'node:assert/strict';import{mkdtempSync,mkdirSync,writeFileSync,rmSync,realpathSync}from'node:fs';import{join}from'node:path';import{tmpdir}from'node:os';
+    import{remoteHostConfiguration}from'./app/remote-host.mjs';
+    const home=mkdtempSync(join(realpathSync(tmpdir()),'as-private-host-'));
+    try{
+      assert.deepEqual(remoteHostConfiguration({},home),{remoteHost:'remote',sshAlias:'remote'});
+      mkdirSync(join(home,'.agentspaces-desktop'));writeFileSync(join(home,'.agentspaces-desktop','host.json'),JSON.stringify({schema:1,remoteHost:'fictional-host',sshAlias:'fictional-route'}),{mode:0o600});
+      assert.deepEqual(remoteHostConfiguration({},home),{remoteHost:'fictional-host',sshAlias:'fictional-route'});
+      assert.deepEqual(remoteHostConfiguration({AGENTSPACES_REMOTE_HOST:'test-host',AGENTSPACES_SSH_ALIAS:'test-route'},home),{remoteHost:'test-host',sshAlias:'test-route'});
+    }finally{rmSync(home,{recursive:true,force:true});}
+  `);
+});

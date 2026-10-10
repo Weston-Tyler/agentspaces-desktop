@@ -73,3 +73,10 @@ These are synthetic process/transport fixtures, not a live model invocation or
 proof that an installed service has been upgraded. Deployment must separately
 verify the retained workspace, startup configuration, source hashes and service
 health.
+
+For a normal installed launch, an optional owner-private
+`~/.agentspaces-desktop/host.json` uses the same configuration schema.
+Explicit `AGENTSPACES_HOST_CONFIG` selects another private file; explicit host
+and SSH environment values take precedence. The file is never shipped with the
+application or committed to source control. This makes an existing installation's
+identity persist independently of a temporary deployment shell.

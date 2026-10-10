@@ -1,11 +1,14 @@
-import { readFileSync, lstatSync } from "node:fs";
-import { isAbsolute, dirname } from "node:path";
+import { homedir } from 'node:os';
+import { readFileSync, lstatSync, existsSync } from "node:fs";
+import { isAbsolute, dirname, join } from "node:path";
 // Identity is part of durable source IDs, grants and native delivery receipts.
 // Configure it before startup; changing an existing identity is not a migration.
-export function remoteHostConfiguration(env = process.env) {
+export function remoteHostConfiguration(env = process.env, home = homedir()) {
   let saved = {};
-  if (env.AGENTSPACES_HOST_CONFIG) {
-    const path = env.AGENTSPACES_HOST_CONFIG;
+  const defaultPath = join(home, '.agentspaces-desktop', 'host.json');
+  const configuredPath = env.AGENTSPACES_HOST_CONFIG || (existsSync(defaultPath) ? defaultPath : undefined);
+  if (configuredPath) {
+    const path = configuredPath;
     if (!isAbsolute(path)) throw new Error('Remote host config requires an absolute private file');
     for (let part = path; ; part = dirname(part)) {
       const stat = lstatSync(part);

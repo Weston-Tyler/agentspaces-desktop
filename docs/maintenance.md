@@ -17,3 +17,41 @@ Pending deliveries use small turn summaries rather than hydrating unrelated full
 The root package manifest is the source of exact MCP, Zod and Claude read-SDK versions, including managed runtimes installed on remote hosts. Updating the manifest therefore updates installation payloads and SDK version checks instead of leaving hardcoded copies behind. A dependency update still needs passing contracts and review; fixture CI is not desktop packaging, native consent or model-response qualification.
 
 Dependabot maintains repository dependencies. It does not update a separately installed Codex/Claude binary, provide provider consent, restart other controllers or fix a breaking vendor protocol automatically. The app handles compatible Codex protocol updates; incompatible changes stay visible and need an adapter change. Native Claude channel loading, unsupported host/platform capabilities and provider policy remain separate boundaries.
+
+## Updates without cancelling native work
+
+Stage candidate source and dependencies in a separate folder first. Run
+`node scripts/update-preflight.mjs` from that candidate with `AGENTSPACES_STATE`
+pointing to the existing owner-private workspace. It validates saved host identity,
+state layout and schema, then boots an isolated private copy without discovery,
+provider calls or connection enrollment. It reports a candidate SHA-256; an
+incompatible candidate fails before the live service is stopped. Keep preflight
+output, backups and machine configuration outside the public repository.
+
+The companion exposes administrator-only `GET /api/updates/status` and
+`POST /api/updates/prepare`, `/abort`, `/commit`. Prepare accepts the exact
+`candidate` hash and returns a private lease token valid for five minutes.
+Commit and abort require that token. CLI equivalents are `update-status`,
+`update-prepare <sha256>`, `update-abort` and `update-commit`; the latter two
+read `AGENTSPACES_UPDATE_TOKEN`. Preparation drains new mutations. Reads remain
+available; refused requests return HTTP503, Retry-After and `undispatched:true`.
+Clients can retry those known-unsent requests with the same delivery identity.
+Messages already saved in the room retain exact transport receipts. Allocated
+or uncertain native sends are never blindly replayed.
+
+Commit rechecks that admitted requests have finished, native submissions are
+acknowledged, and no embedded terminal or native Ask process is running. A
+model process still counts after its response observer times out. If busy, the
+upgrade waits or is aborted; it never cancels a turn to make room. Independent
+native daemon work and acknowledged queued inputs can continue during the
+companion restart. Claude channels briefly reconnect; native opt-in still applies.
+An abandoned, uncommitted drain expires automatically.
+
+This is a controlled-update interface, not an unattended updater. After a ready
+commit, the installer must swap only the staged verified application files,
+restart with the same private configuration, and verify health, room identities
+and native receipts. Keep the previous application available for rollback;
+do not overwrite newer private work state with an older backup. First upgrades
+from versions without this interface require equivalent manual readiness checks.
+Host shutdowns, native app restarts and embedded process migration are outside
+this guarantee. The companion never promises a zero-disconnect update.
