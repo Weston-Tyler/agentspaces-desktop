@@ -15,6 +15,33 @@ export class CodexDiscussionHub {
     engine.store.data.codexDiscussionProofs ??= {};
     if (this.verifyProvider) { this.recoveryTimer = setInterval(() => { void this.recoverUndispatched().then(() => this.reconcileSubmitted()).catch(() => {}); }, 60000); this.recoveryTimer.unref?.(); }
   }
+  async inspectContinuation(sessionId) {
+    const source=this.engine.session(sessionId),grant=this.engine.permissions(source);
+    if(source.fixture||source.provider!=='codex'||source.host!=='remote')return {state:'unsupported',reason:'This native route does not expose qualified idle state'};
+    if(!grant.enrolled||!grant.retrieve||!grant.share||!grant.content)return {state:'unknown',reason:'Native source grant unavailable'};
+    if(this.engine.store.data.desktopPreferences?.allowNativeFullAccess!==true)return {state:'unsupported',reason:'Owner opt-in to existing native client policy is required'};
+    let adapter;
+    try {
+      if(this.verifyProvider){await this.engine.probe(source.host);const tool=this.engine.tools.find(t=>t.host===source.host&&t.provider==='codex');if(!nativeAdapterCompatible(tool))return {state:'unsupported',reason:'Native protocol not qualified'};}
+      adapter=this.adapterFactory({host:source.host});await adapter.open();
+      const response=await adapter.request('thread/read',{threadId:source.nativeThreadId,includeTurns:false}),thread=response.thread;
+      const cwd=source.cwd??this.engine.target(source).path;
+      if(!thread||thread.id!==source.nativeThreadId||thread.cwd!==cwd||thread.ephemeral||thread.canAcceptDirectInput!==true)return {state:'unknown',reason:'Loaded native target unavailable'};
+      if(thread.status?.type==='active')return {state:'busy',reason:'Native turn active; no wake issued'};
+      if(thread.status?.type!=='idle')return {state:'unknown',reason:'Native target is not loaded and idle; no resume attempted'};
+      const queue=await adapter.request('thread/queue/list',{threadId:source.nativeThreadId,limit:1});
+      if(!Array.isArray(queue.data))return {state:'unknown',reason:'Native queue observation unavailable'};
+      if(queue.data.length||queue.nextCursor)return {state:'queued',reason:'Native queue already contains input; no wake or resume issued'};
+      return {state:'idle',reason:'Loaded native target idle with empty queue; delivery remains native queue-only'};
+    } catch{return {state:'unknown',reason:'Native lifecycle observation unavailable'};}
+    finally{adapter?.close();}
+  }
+  validateContinuation(sessionId,discussionId,messageId) {
+    const message=this.engine.discussions.group(discussionId).messages.find(item=>item.id===messageId);
+    if(!message?.continuation)return;
+    const current=this.engine.workBoard.continuations({sessionId},{limit:200}).items.find(item=>item.deliveryId===message.continuation.deliveryId&&item.resultEntryId===message.continuation.resultEntryId);
+    if(!['wake_recorded','ready_to_deliver'].includes(current?.state))throw new Error('Standing continuation is no longer authorized');
+  }
   validate(sessionId, discussionId, messageId) {
     if (this.closed) throw new Error("Native conversation service is closed");
     const source = this.engine.session(sessionId), grant = this.engine.permissions(source);
@@ -68,8 +95,9 @@ export class CodexDiscussionHub {
       let loaded = false;
       if (nativeGrant?.allowFullAccess === true && adapter.bindLoadedThread) {
         try { await adapter.bindLoadedThread({ threadId: source.nativeThreadId, cwd, grant: { execution: true, allowExistingNativePolicy: true } }); loaded = true; }
-        catch (error) { if (error.code !== 'native_loaded_target_not_available') throw error; }
+        catch (error) { if (effect?.continuation||error.code !== 'native_loaded_target_not_available') throw error; }
       }
+      if(effect?.continuation&&!loaded)throw new Error('Standing wake requires a loaded native target; no resume attempted');
       if (!loaded) await adapter.bindExistingThread({ threadId: source.nativeThreadId, cwd, grant: nativeGrant });
       if (loaded && this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true) throw new Error('Existing native policy grant changed');
       const connector = this.engine.issueConnector(source.id), binding = this.engine.connector(connector.token);
@@ -80,13 +108,15 @@ export class CodexDiscussionHub {
   }
   dispatch({ sessionId, discussionId, messageId, text, requestId, budget = { timeoutMs: 90000, maxOutputTokens: 800 } }) {
     this.validate(sessionId, discussionId, messageId);
+    this.validateContinuation(sessionId,discussionId,messageId);
     if (!/^[a-zA-Z0-9_-]{8,128}$/.test(requestId ?? "") || typeof text !== "string" || !text.trim() || text.length > 8000) throw new Error("Invalid native conversation message");
     if (!Number.isInteger(budget.timeoutMs) || budget.timeoutMs < 1 || budget.timeoutMs > 90000 || !Number.isInteger(budget.maxOutputTokens) || budget.maxOutputTokens < 1 || budget.maxOutputTokens > 800) throw new Error("Invalid native conversation budget");
     const inputHash = hash({ sessionId, discussionId, messageId, text, budget });
     const effects = this.engine.store.data.codexDiscussionDeliveries, previous = effects[requestId];
     if (previous) { if (previous.inputHash !== inputHash) throw new Error("Native message identity reused for different content"); return { ...previous, duplicate: true, replayed: false }; }
     if (Object.keys(effects).length >= 1000) throw new Error("Native conversation receipt limit reached");
-    const effect = { requestId, sessionId, discussionId, messageId, inputHash, status: "connecting-native-agent", retryAllowed: false, at: new Date().toISOString() };
+    const continuation=!!this.engine.discussions.group(discussionId).messages.find(message=>message.id===messageId)?.continuation;
+    const effect = { requestId, sessionId, discussionId, messageId, inputHash, continuation, status: "connecting-native-agent", retryAllowed: false, at: new Date().toISOString() };
     effects[requestId] = effect; this.engine.store.save();
     const abort = new AbortController(); this.aborters.set(requestId, abort);
     const run = this.run(effect, text, budget, abort.signal).finally(() => this.aborters.delete(requestId));
@@ -122,6 +152,7 @@ export class CodexDiscussionHub {
         grant: true, budget, signal, dispatchFence: () => {
           if (connected.allowExistingNativePolicy && this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true) throw new Error('Existing native policy grant changed');
           const current = this.validate(effect.sessionId, effect.discussionId, effect.messageId);
+          this.validateContinuation(effect.sessionId,effect.discussionId,effect.messageId);
           this.engine.discussions.context(effect.discussionId, connected.binding);
           if (current.nativeThreadId !== connected.nativeThreadId || (current.cwd ?? this.engine.target(current).path) !== connected.cwd) throw new Error("Native source identity changed");
           return true;
@@ -207,6 +238,7 @@ export class CodexDiscussionHub {
           if (this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true) continue;
           const fence = () => {
             const current = this.validate(effect.sessionId, effect.discussionId, effect.messageId);
+          this.validateContinuation(effect.sessionId,effect.discussionId,effect.messageId);
             if (this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true || current.nativeThreadId !== source.nativeThreadId || current.cwd !== source.cwd || current.account !== source.account || current.project !== source.project || current.scopeId !== source.scopeId || receipt.clientId !== effect.requestId || receipt.nativeThreadId !== current.nativeThreadId) throw new Error('Reconciliation access changed');
           };
           adapter = this.adapterFactory({ host: source.host }); await adapter.open();

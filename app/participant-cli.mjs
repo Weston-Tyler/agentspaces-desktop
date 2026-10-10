@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = (code, details) => Object.assign(new Error(code), { code, ...(details ? { details } : {}) });
-const COMMAND_OPTIONS = { decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
+const COMMAND_OPTIONS = { continuations: [], decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
 const COMMANDS = Object.keys(COMMAND_OPTIONS);
 const string = (maxLength, extra = {}) => ({ type: "string", minLength: 1, maxLength, ...extra });
 const uuid = { type: "string", pattern: UUID.source.replaceAll("a-f", "a-fA-F") };
@@ -21,6 +21,7 @@ function helpFor(command) {
   const notes = ["Help is offline and never reads private configuration or stdin.", "All actual commands require --config PATH and --source UUID for this exact native thread."];
   if (!command) return { usage: "participant-cli.mjs [--config PATH --source UUID] COMMAND [OPTIONS]", commands: COMMANDS, help: "COMMAND --help", notes };
   if (["message", "broadcast", "contribute"].includes(command)) notes.push("nativeTurnId/--turn is a self-reported native turn reference, not verified sender authority.", "Reuse the same deliveryId/--delivery for a retry of the same request; use a new ID for a new request.");
+  if (command === "continuations") notes.push("Read explicit pending steps, standing grant status and native idle observations. No force-resume, cancellation or model polling; only owner-enabled scoped wakes may execute.");
   if (command === "verify-approval") notes.push("Verifies the exact receipt against current expiry, revocation and authenticated target source; records an audit receipt. Native owner delegation and client permissions remain authoritative.");
   return { command, usage: `participant-cli.mjs --config PATH --source UUID ${command}${COMMAND_OPTIONS[command].map(key => ` [--${key} VALUE]`).join("")}`, options: COMMAND_OPTIONS[command], ...(STDIN_SCHEMAS[command] ? { stdinSchema: STDIN_SCHEMAS[command] } : {}), notes };
 }
@@ -122,6 +123,7 @@ export async function runParticipantCli(args, { input, requestImpl = request } =
     body = validateStdin(command, await inputJson(input), "bounded_agent_message_required");
     path = command === 'message' ? '/api/agent/message' : '/api/agent/broadcast';
   }
+  else if (command === "continuations") { path="/api/work-board/continuations"; body={}; }
   else if (command === "verify-approval") {
     path = "/api/approvals/verify"; body = validateStdin(command, await inputJson(input), "exact_approval_receipt_required");
   }

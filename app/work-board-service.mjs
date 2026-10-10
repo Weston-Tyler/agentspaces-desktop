@@ -1,3 +1,4 @@
+import {progressContinuation,continuationView} from './work-continuation.mjs';
 import { machineFields, machineChange, machineView } from './machine-queue.mjs';
 import { decisionFields, decisionChange, decisionView, approvalCheck } from './coordination-records.mjs';
 import { Identity, Peer, cbor, spaceIdLocal } from '@agentspaces/client';
@@ -84,6 +85,7 @@ export class WorkBoard {
       coverage: { ...result.coverage, synchronized: true, source: 'durable companion-owned AgentSpaces replica' },
       capabilities: { create: true, claim: true, update: true, complete: true, modelExecution: false } };
   }
+  continuations(binding, options = {}) { return continuationView(this,binding,options); }
   machines(binding, options = {}) { return machineView(this, binding, options); }
   decisions(binding, options = {}) { return decisionView(this, binding, options); }
   async verifyApproval(binding,input) {
@@ -115,7 +117,7 @@ export class WorkBoard {
     if (!['create', 'claim', 'renew', 'update', 'complete', ...Object.keys(decisionFields), ...Object.keys(machineFields)].includes(action)) throw new Error('Unknown work-board action');
     bounded(deliveryId, 100, 'deliveryId');
     if (!/^[A-Za-z0-9-]{8,100}$/.test(deliveryId)) throw new Error('Stable deliveryId required');
-    const allowed = ['action','deliveryId', ...(decisionFields[action] ?? machineFields[action] ?? (action === 'create' ? ['title','brief','repository','base','allowedFiles'] : ['claim','renew'].includes(action) ? ['entryId','leaseMinutes'] : ['entryId','status','summary','branch','head','evidence']))];
+    const allowed = ['action','deliveryId', ...(decisionFields[action] ?? machineFields[action] ?? (action === 'create' ? ['title','brief','repository','base','allowedFiles'] : ['claim','renew'].includes(action) ? ['entryId','leaseMinutes'] : ['entryId','status','summary','branch','head','evidence','continuation']))];
     if (Object.keys(input).some(k => !allowed.includes(k))) throw new Error('Unknown work-board field');
     this.access(binding); this.open();
     const actor = this.access(binding), key = createHash('sha256').update(`${actor}:${deliveryId}`).digest('hex');
@@ -171,7 +173,8 @@ export class WorkBoard {
           const status = action === 'complete' ? 'completed' : input.status;
           if (!['in_progress','blocked','completed'].includes(status) || action === 'update' && status === 'completed') throw new Error('Invalid progress status');
           const sequence = [...this.peer.states.values()].filter(s => s.record?.type === TYPES.result && cbor.loads(Buffer.from(s.record.payload)).requestEntryId === entryId).length + 1;
-          const value = { requestEntryId: entryId, sequence, status, summary: bounded(input.summary, 8000, 'summary'),
+          const continuation=input.continuation===undefined?undefined:progressContinuation(this,input,binding);
+          const value = { requestEntryId: entryId, sequence, status,...(continuation?{continuation}:{}), summary: bounded(input.summary, 8000, 'summary'),
             branch: bounded(input.branch, 300, 'branch'), head: bounded(input.head, 200, 'head'),
             evidence: bounded(input.evidence, 12000, 'evidence', action !== 'complete'), actor,
             claimStamp: this.peer.claims.get(entryId).claim.stamp,

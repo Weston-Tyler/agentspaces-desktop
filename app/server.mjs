@@ -1,4 +1,5 @@
 import { UpdateGate } from './update-gate.mjs';
+import {ContinuationWaker} from './work-continuation.mjs';
 import { OwnerApprovalAuth } from './owner-approval-auth.mjs';
 import { notifyApproval } from './approval-notification.mjs';
 import http from "node:http";
@@ -130,6 +131,7 @@ export async function startServer({
     }
     return result;
   };
+  const continuationWaker=new ContinuationWaker(engine,{inspect:id=>codexAgents.inspectContinuation(id),route:(group,message)=>routeConversation(engine,{codexAgents,channels},group,message),dispatchAllowed:()=>!closing&&(!engine.dispatchAllowed||engine.dispatchAllowed())});
   let connections, participantConnections, sourceBindings, automaticConnections;
   const terminals = providedTerminals ?? new NativeTerminals({ resolveLaunch: options => connections.resolveLaunch(options) });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 65536, perMessageDeflate: false });
@@ -288,6 +290,7 @@ export async function startServer({
           "/api/machines/list",
           "/api/machines/change",
           "/api/work-board/list",
+          "/api/work-board/continuations",
           "/api/work-board/change",
           "/api/discover",
           "/api/retrieve",
@@ -347,6 +350,8 @@ export async function startServer({
         case "/api/machines/change":
           if (!String(data.action).startsWith('machine_')) throw new Error('Machine action required');
           result = await engine.workBoard.mutate(data, connector); break;
+        case "/api/work-board/continuations":
+          result = continuationWaker.view(connector,data); break;
         case "/api/work-board/list":
           result = engine.workBoard.view(connector, data); break;
         case "/api/work-board/change":
@@ -399,7 +404,7 @@ export async function startServer({
             findings: { discover: true, retrieveShared: true },
             ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
             unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
-            availableTools: ['verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            availableTools: ['list_work_continuations','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
           break;
         }
@@ -716,8 +721,10 @@ export async function startServer({
     for (const sessionId of channels.connections.keys()) void channels.flush(sessionId).catch(() => {});
   }, 5000);
   updateResumeTimer.unref?.();
+  continuationWaker.start();
   async function close() {
     clearInterval(updateResumeTimer);
+    continuationWaker.close();
     await participantConnections.close();
     await codexAgents.close();
     if (engine.workspace.running) engine.workspace.cancel();
@@ -732,5 +739,5 @@ export async function startServer({
       if (current.instance === instance) unlinkSync(runtimePath);
     }
   }
-  return { server, engine, store, address, instance, admin, close, updateGate, terminals, channels, connections, participantConnections, sourceBindings, automaticConnections, codexAgents, desktopDiscovery: desktopStartup };
+  return { server, engine, store, address, instance, admin, close, updateGate, terminals, channels, connections, participantConnections, sourceBindings, automaticConnections, codexAgents, continuationWaker, desktopDiscovery: desktopStartup };
 }

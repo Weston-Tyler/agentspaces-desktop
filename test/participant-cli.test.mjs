@@ -134,9 +134,9 @@ test("Real HTTP response over byte bound is rejected", async (t) => {
 
 test('decision and machine CLI commands keep source binding and route bounded JSON',async t=>{
  const f=await setup(t);
- for(const command of ['decisions','machines'])await runParticipantCli(f.args(command));
+ for(const command of ['decisions','machines','continuations'])await runParticipantCli(f.args(command));
  for(const command of ['decision-change','machine-change'])await runParticipantCli(f.args(command),{input:JSON.stringify({action:command==='decision-change'?'decision_withdraw':'machine_cancel',entryId:'synthetic',deliveryId:'synthetic-operation-001',rationale:'Reason',summary:'Reason'})});
- assert.deepEqual(f.requests.map(r=>r.path),['/api/decisions/list','/api/machines/list','/api/decisions/change','/api/machines/change']);
+ assert.deepEqual(f.requests.map(r=>r.path),['/api/decisions/list','/api/machines/list','/api/work-board/continuations','/api/decisions/change','/api/machines/change']);
  assert(f.requests.every(r=>r.auth==='Bearer '+TOKEN&&r.host==='127.0.0.1:43127'));
 });
 

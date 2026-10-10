@@ -16,11 +16,12 @@ export function mountCoordination(root,{api,notice,page}) {
  }
  function approvalForm(card,row,revoke=false) {
   const f=el('form'),heading=el('h3',revoke?'Revoke approval':'Confirm scoped owner decision');f.append(heading);
-  let outcome,limits,minutes;
+  let outcome,limits,minutes,wakeEnabled;
   if(!revoke){
    const label=el('label','Decision');outcome=el('select');outcome.name='outcome';
    for(const [value,text] of [['approve','Approve within the requested limits'],['approve_with_limits','Approve with additional limits'],['decline','Decline']]){const option=el('option',text);option.value=value;outcome.append(option);}label.append(outcome);f.append(label);
    limits=field(f,'limits','Additional limits (one per line)',true,false);
+   if(row.value.approval?.standing){const label=el('label','Wake this thread when an authorized next step is pending and it is idle');wakeEnabled=el('input');wakeEnabled.type='checkbox';label.prepend(wakeEnabled);f.append(label);}
    minutes=field(f,'minutes','Valid for minutes (1–1440)');minutes.type='number';minutes.min='1';minutes.max='1440';minutes.value='60';
   }
   const rationale=field(f,'rationale','Reason',true),password=field(f,'password','Owner approval password');password.type='password';password.autocomplete='current-password';
@@ -30,7 +31,7 @@ export function mountCoordination(root,{api,notice,page}) {
   f.addEventListener('submit',async event=>{
    event.preventDefault();button.disabled=true;
    try {
-    pending??={action:revoke?'decision_revoke':'decision_approve',entryId:row.entryId,deliveryId:crypto.randomUUID(),rationale:rationale.value,...(revoke?{}:{requestHash:row.hash,outcome:outcome.value,limits:limits.value.split('\n').map(x=>x.trim()).filter(Boolean),expiresAt:Date.now()+Number(minutes.value)*60000})};
+    pending??={action:revoke?'decision_revoke':'decision_approve',entryId:row.entryId,deliveryId:crypto.randomUUID(),rationale:rationale.value,...(revoke?{}:{requestHash:row.hash,outcome:outcome.value,limits:limits.value.split('\n').map(x=>x.trim()).filter(Boolean),expiresAt:Date.now()+Number(minutes.value)*60000,...(wakeEnabled?{wakeEnabled:wakeEnabled.checked}:{})})};
     const secret=password.value;password.value='';
     const result=await api('approvals/answer',{password:secret,decision:pending});
     if(result.notification?.status==='not_delivered')notice('Decision saved; notification unavailable: '+result.notification.reason,true);
@@ -62,9 +63,10 @@ export function mountCoordination(root,{api,notice,page}) {
       if(row.notification)card.append(el('p',`Native notification: ${row.notification.status}. Receipt retrieval is shown separately.`));
       if(row.targetVerification)card.append(el('p',`Requesting thread checked receipt at ${new Date(row.targetVerification.value.checkedAt).toLocaleString()}. This records retrieval, not execution.`));
       for(const [label,value] of [['Action',scope.action],['Repository',scope.repo],['Branch',scope.branch],['Folder',scope.folder]])card.append(el('p',`${label}: ${value}`));
+      if(scope.standing)card.append(el('p',`Standing brief: ${scope.standing.workEntryId} · SHA-256 ${scope.standing.workHash}`),el('p',`Always ask: ${scope.standing.alwaysAsk.join(', ')} · Maximum automatic wakes: ${scope.standing.maxWakes}`));
       card.append(el('h3','Required limits'));const list=el('ul');for(const limit of scope.limits)list.append(el('li',limit));card.append(list);
       if(row.answer?.value.verification){
-       const answer=row.answer.value;card.append(el('p',`${{approve:'Approved',approve_with_limits:'Approved with additional limits',decline:'Declined'}[answer.outcome]} · Expires ${new Date(answer.expiresAt).toLocaleString()}`));
+       const answer=row.answer.value;if(scope.standing)card.append(el('p',`Automatic idle waking: ${answer.wakeEnabled?'Owner enabled':'Off'}`));card.append(el('p',`${{approve:'Approved',approve_with_limits:'Approved with additional limits',decline:'Declined'}[answer.outcome]} · Expires ${new Date(answer.expiresAt).toLocaleString()}`));
        for(const limit of answer.limits)card.append(el('p',`Additional limit: ${limit}`));
        const details=el('details');details.append(el('summary','Verification receipt'),el('pre',JSON.stringify({requestHash:row.hash,target:scope.targetSessionId,...answer.verification},null,2)));card.append(details);
       }

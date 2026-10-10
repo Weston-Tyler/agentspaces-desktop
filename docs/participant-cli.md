@@ -82,3 +82,5 @@ substitute for verification.
 
 These CLI contracts are covered by synthetic HTTP and copied-script tests.
 They do not establish live native delivery or update installed connection files.
+
+`continuations` reads explicit pending steps, standing grant status and native idle/delivery observations; see [run-to-gate](run-to-gate.md). It does not invoke a model or authorize work.

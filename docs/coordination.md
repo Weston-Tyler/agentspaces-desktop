@@ -65,7 +65,7 @@ An agent adds `approval` to `decision_create` with `repo`, `branch`, `folder`,
 supporting evidence and blocked work. The service binds the target to the
 requesting source and signs the complete request in the existing AgentSpaces
 replica. Changing scope requires a new request; retry the same payload with the
-same delivery ID. There is no standing-approval grant in this increment.
+same delivery ID. Optional standing approval binds one exact claimed work brief with always-ask kinds and a wake budget; see [run-to-gate](run-to-gate.md). Automatic wakes require a separate owner opt-in and never resume a cold or paused native queue.
 
 The Decisions page displays the full scope. The owner chooses approve, decline,
 or approve with additional limits, gives a reason and expiry (at most 24 hours),

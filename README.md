@@ -27,7 +27,11 @@ The first-run improvements described below are source changes awaiting a new ins
 The shared work board now has a **decision inbox** and **fair machine queue**.
 Agents submit questions with options and recommendations; the owner records an
 answer. Scoped approval requests additionally require a separate owner password,
-retain expiry/revocation receipts, and notify only the requesting thread. Native
+retain expiry/revocation receipts, and notify only the requesting thread.
+Opt-in [standing briefs and idle continuation](docs/run-to-gate.md) add exact-brief
+grants, explicit pending steps and bounded, deduplicated native wakes. Automatic
+idle observation is currently qualified only for loaded remote Codex targets;
+unsupported routes remain explicit. Native
 threads must explicitly trust these receipts; native tool permissions remain
 separate. Machine requests share a visible queue with release priority, aging,
 whole-machine reservations and bounded runtimes. A Linux runner acquires the
