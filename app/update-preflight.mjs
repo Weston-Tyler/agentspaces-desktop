@@ -48,13 +48,14 @@ export async function preflightUpdate({ stateRoot, candidateRoot = fileURLToPath
       nativeFactory: () => { throw Error('preflight_native_execution_forbidden'); },
       answerFactory: () => { throw Error('preflight_model_execution_forbidden'); },
     });
-    app = await startServer({root:scratch,port:0,engine,desktopDiscovery:false,
+    app = await startServer({root:scratch,port:0,engine,desktopDiscovery:false,backgroundNative:false,
       codexAdapterFactory: () => {throw Error('preflight_native_execution_forbidden');},
       participantTunnelFactory: () => {throw Error('preflight_tunnel_forbidden');},
     });
     const response = await fetch(app.address+'/api/health',{headers:{Authorization:`Bearer ${app.admin}`},signal:AbortSignal.timeout(5000)});
     if (!response.ok || (await response.json()).instance !== app.instance) throw Error('preflight_health_failed');
     if (candidateFingerprint(candidateRoot) !== before) throw Error('candidate_changed_during_preflight');
+    if(engine.modelCalls !== 0) throw Error('preflight_unexpected_model_execution');
     return {passed:true,candidate:before,settingsSchema:settings.schema,privateCopyStartup:true,discovery:false,modelCalls:0,nativeCancellationRequested:false};
   } finally { if(app) await app.close(); rmSync(scratch,{recursive:true,force:true}); }
 }

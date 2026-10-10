@@ -67,6 +67,7 @@ export async function startServer({
   terminals: providedTerminals,
   remoteInstall,
   desktopDiscovery = !provided,
+  backgroundNative = true,
   allowDemo = false,
   codexAdapterFactory,
   participantInstallRemote,
@@ -101,6 +102,7 @@ export async function startServer({
   const updateGate = new UpdateGate({ blockers: () => {
     const blockers = [];
     if (activeMutations) blockers.push('request-in-progress');
+    if (codexAgents.reconciling || continuationWaker.running) blockers.push('native-observation-in-progress');
     if (activeAnswers.size || activeNativeProcessCount() || headlessJobs.activeCount()) blockers.push('embedded-native-process');
     if (terminals.list().some(item => ['starting','running'].includes(item.status))) blockers.push('embedded-native-terminal');
     for (const requestId of codexAgents.aborters.keys()) {
@@ -110,7 +112,7 @@ export async function startServer({
     if (automaticConnections?.pending?.size) blockers.push('native-setup-running');
     return blockers;
   } });
-  engine.dispatchAllowed = () => !closing && !updateGate.draining;
+  engine.dispatchAllowed = () => backgroundNative && !closing && !updateGate.draining;
   const channels = new ChannelHub(engine);
   const codexAgents = new CodexDiscussionHub(engine, { adapterFactory: codexAdapterFactory, onContribution: (group, message) => routeConversation(engine, { codexAgents, channels }, group, message) });
   const nativeThreads = new NativeThreadCreation(engine, { adapterFactory: nativeThreadAdapterFactory, registerSource: async input => {
@@ -758,7 +760,7 @@ export async function startServer({
     for (const sessionId of channels.connections.keys()) void channels.flush(sessionId).catch(() => {});
   }, 5000);
   updateResumeTimer.unref?.();
-  continuationWaker.start();
+  if (backgroundNative) continuationWaker.start();
   async function close() {
     clearInterval(updateResumeTimer);
     continuationWaker.close();

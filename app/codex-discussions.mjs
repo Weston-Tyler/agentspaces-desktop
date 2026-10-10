@@ -225,7 +225,7 @@ export class CodexDiscussionHub {
     } finally { this.recoveryRunning = false; }
   }
   async reconcileSubmitted() {
-    if (this.reconciling || this.closed) return { reconciled: [], skipped: true };
+    if (this.reconciling || this.closed || this.engine.dispatchAllowed?.() === false) return { reconciled: [], skipped: true };
     this.reconciling = true; const reconciled = [];
     try {
       for (const effect of Object.values(this.engine.store.data.codexDiscussionDeliveries)) {
@@ -237,6 +237,7 @@ export class CodexDiscussionHub {
           if (receipt.clientId !== effect.requestId || receipt.nativeThreadId !== source.nativeThreadId) continue;
           if (this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true) continue;
           const fence = () => {
+            if (this.engine.dispatchAllowed?.() === false) throw new Error('Update drain; observation deferred');
             const current = this.validate(effect.sessionId, effect.discussionId, effect.messageId);
           this.validateContinuation(effect.sessionId,effect.discussionId,effect.messageId);
             if (this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true || current.nativeThreadId !== source.nativeThreadId || current.cwd !== source.cwd || current.account !== source.account || current.project !== source.project || current.scopeId !== source.scopeId || receipt.clientId !== effect.requestId || receipt.nativeThreadId !== current.nativeThreadId) throw new Error('Reconciliation access changed');
