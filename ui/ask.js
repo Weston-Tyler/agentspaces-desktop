@@ -38,7 +38,7 @@ function answerText(text) {
   }
   return body;
 }
-export async function mountAsk(root, { api, notice }) {
+export async function mountAsk(root, { api, notice, remoteHost = "remote" }) {
   const mount = crypto.randomUUID();
   root.dataset.askMount = mount;
   const form = node("form", null, "card ask-form"),
@@ -61,7 +61,7 @@ export async function mountAsk(root, { api, notice }) {
       ["claude", "Claude through provider-permitted API"],
     ]),
     host = select("host", [
-      ["remote", "remote / Linux"],
+      [remoteHost, "Another computer / Linux"],
       ["local", "This device"],
     ]);
   const topic = node("input");

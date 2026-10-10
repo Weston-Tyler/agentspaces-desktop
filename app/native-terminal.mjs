@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -10,28 +11,28 @@ const argumentsValid = args => Array.isArray(args) && args.length <= 30 &&
   args.every(a => typeof a === "string" && a.length <= 4096 && !a.includes("\0"));
 
 export function terminalLaunch({ provider, host = "local", cwd, intent = "chat" }, trustedArgs = [], sshOptions = []) {
-  if (!["codex", "claude"].includes(provider) || !["local", "remote"].includes(host) || !["chat", "login"].includes(intent))
+  if (!["codex", "claude"].includes(provider) || !["local", REMOTE_HOST].includes(host) || !["chat", "login"].includes(intent))
     throw new Error("Unsupported native terminal provider, host or intent");
   if (!argumentsValid(trustedArgs)) throw new Error("Invalid internal native launch arguments");
   if (!Array.isArray(sshOptions)) throw new Error("Invalid internal SSH forwarding options");
   if (sshOptions.length) {
     const route = /^127\.0\.0\.1:(\d+):127\.0\.0\.1:(\d+)$/.exec(sshOptions[3] ?? "");
-    if (host !== "remote" || sshOptions.length !== 4 || sshOptions[0] !== "-o" ||
+    if (host !== REMOTE_HOST || sshOptions.length !== 4 || sshOptions[0] !== "-o" ||
         sshOptions[1] !== "ExitOnForwardFailure=yes" || sshOptions[2] !== "-R" || !route ||
         route.slice(1).some(port => Number(port) < 1 || Number(port) > 65535))
       throw new Error("Only trusted loopback reverse forwarding is supported");
   }
   if (trustedArgs.some(a => ["-p", "--print", "--bare", "--dangerously-skip-permissions", "--dangerously-bypass-approvals-and-sandbox"].includes(a)))
     throw new Error("Native terminal requires interactive native approvals");
-  if (cwd !== undefined && (typeof cwd !== "string" || cwd.includes("\0") || cwd.length > 4096 || !(host === "remote" ? posix.isAbsolute(cwd) : isAbsolute(cwd))))
+  if (cwd !== undefined && (typeof cwd !== "string" || cwd.includes("\0") || cwd.length > 4096 || !(host === REMOTE_HOST ? posix.isAbsolute(cwd) : isAbsolute(cwd))))
     throw new Error("Native working directory must be absolute for its host");
   const nativeArgs = intent === "login"
-    ? provider === "codex" ? ["login", ...(host === "remote" ? ["--device-auth"] : [])] : ["auth", "login"]
+    ? provider === "codex" ? ["login", ...(host === REMOTE_HOST ? ["--device-auth"] : [])] : ["auth", "login"]
     : trustedArgs;
   if (host === "local") return { file: provider + (process.platform === "win32" ? ".exe" : ""), args: nativeArgs, cwd: cwd ?? process.cwd() };
   const command = (cwd ? "cd -- " + quote(cwd) + " && " : "") + "exec " + provider +
     (nativeArgs.length ? " " + nativeArgs.map(quote).join(" ") : "");
-  return { file: process.platform === "win32" ? "ssh.exe" : "ssh", args: ["-tt", ...sshOptions, "remote", command], cwd: process.cwd() };
+  return { file: process.platform === "win32" ? "ssh.exe" : "ssh", args: ["-tt", ...sshOptions, SSH_ALIAS, command], cwd: process.cwd() };
 }
 
 /** Ephemeral native terminal handles only; no transcript, credential or work persistence. */

@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve, posix } from "node:path";
@@ -11,17 +12,17 @@ export function openNativeSignIn(provider, host = "local") {
       "This companion sign-in launcher is qualified only for Windows",
     );
   if (
-    !["local", "remote"].includes(host) ||
+    !["local", REMOTE_HOST].includes(host) ||
     !["codex", "claude"].includes(provider)
   )
     throw new Error("Unsupported native provider or host");
   const native =
     provider === "codex"
-      ? host === "remote"
+      ? host === REMOTE_HOST
         ? "codex login --device-auth"
         : "codex login"
       : "claude auth login";
-  const authCommand = (host === "remote" ? "ssh remote " : "") + native;
+  const authCommand = (host === REMOTE_HOST ? "ssh " + SSH_ALIAS + " " : "") + native;
   const command =
     "Start-Process -FilePath 'cmd.exe' -ArgumentList '/k','" +
     authCommand +
@@ -42,13 +43,13 @@ export function openNativeSignIn(provider, host = "local") {
   };
 }
 export async function detectTools(host = "local") {
-  if (!["local", "remote"].includes(host)) throw new Error("Unsupported host");
+  if (!["local", REMOTE_HOST].includes(host)) throw new Error("Unsupported host");
   return Promise.all(
     ["codex", "claude"].map(async (provider) => {
       try {
         const { stdout } = await exec(
           host === "local" ? provider : "ssh",
-          host === "local" ? ["--version"] : ["remote", provider, "--version"],
+          host === "local" ? ["--version"] : [SSH_ALIAS, provider, "--version"],
           { timeout: 5000, windowsHide: true },
         );
         const version = stdout.trim();
@@ -73,7 +74,7 @@ export async function detectTools(host = "local") {
             execution: "Not qualified",
           },
           nativeSignInCommand:
-            (host === "remote" ? "ssh remote " : "") +
+            (host === REMOTE_HOST ? "ssh " + SSH_ALIAS + " " : "") +
             (provider === "codex" ? "codex login" : "claude auth login"),
         };
       } catch {
@@ -96,13 +97,13 @@ export class CodexReadAdapter {
     onDiagnostic = () => {},
     enableThreadCreation = false,
   } = {}) {
-    if (!["local", "remote"].includes(host))
+    if (!["local", REMOTE_HOST].includes(host))
       throw new Error("Unsupported host");
     this.host = host;
     this.onDiagnostic = onDiagnostic;
     this.#threadCreationEnabled = enableThreadCreation === true;
     this.normalize =
-      host === "remote"
+      host === REMOTE_HOST
         ? (value) => posix.normalize(value).replace(/\/$/, "")
         : resolve;
     this.spawnProcess = spawnProcess;
@@ -115,7 +116,7 @@ export class CodexReadAdapter {
       this.host === "local" ? "codex" : "ssh",
       this.host === "local"
         ? ["app-server", "--stdio"]
-        : ["remote", "codex", "app-server", "--stdio"],
+        : [SSH_ALIAS, "codex", "app-server", "--stdio"],
       { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
     );
     this.child.stderr.on("data", () => {}); // Provider logs can contain private material. Never persist them.

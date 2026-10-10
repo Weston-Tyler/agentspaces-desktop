@@ -1,3 +1,4 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { AgentBroadcast } from "./agent-broadcast.mjs";
 import { parseAgentSelectors } from "./agent-selection.mjs";
@@ -75,7 +76,7 @@ export class Discussions {
       available: this.allowed(m),
       replyMode: m.fixture
         ? "synthetic"
-        : m.provider === "codex" && m.host === "remote"
+        : m.provider === "codex" && m.host === REMOTE_HOST
           ? "shared native connection; current eligibility checked when addressed"
           : "source-bound participant connection; enrollment and transport required",
     }));
@@ -106,7 +107,7 @@ export class Discussions {
       policy: this.policy(g),
       agentInitiation: this.policy(g).agentInitiation,
       automaticNativeWake: {
-        availability: members.some(m => !m.fixture && m.provider === "codex" && m.host === "remote")
+        availability: members.some(m => !m.fixture && m.provider === "codex" && m.host === REMOTE_HOST)
           ? "requires-native-binding" : "reference-or-participant-only",
         idlePolling: false,
       },
@@ -411,7 +412,7 @@ export class Discussions {
       alias: m.alias,
       status: m.fixture
         ? "synthetic reply"
-        : m.provider === "codex" && m.host === "remote"
+        : m.provider === "codex" && m.host === REMOTE_HOST
           ? "pending native eligibility check; no wake dispatched"
           : "participant connection required; no wake dispatched",
     }));

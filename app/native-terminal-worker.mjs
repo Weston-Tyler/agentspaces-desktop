@@ -1,3 +1,4 @@
+import { SSH_ALIAS } from "./remote-host.mjs";
 import pty from "node-pty";
 import { execFileSync } from "node:child_process";
 import { isAbsolute } from "node:path";
@@ -27,7 +28,7 @@ process.on("message", message => {
     if (message.type === "start" || message.type === "smoke") {
       if (started) throw new Error("Already started"); started = true;
       const launch = message.type === "smoke" ? message.remote
-        ? { file: process.platform === "win32" ? "ssh.exe" : "ssh", args: ["-tt", "remote", "sh -c 'test -t 0 && test -t 1 && echo AGENTSPACES_REMOTE_PTY_OK'"], cwd: process.cwd() }
+        ? { file: process.platform === "win32" ? "ssh.exe" : "ssh", args: ["-tt", SSH_ALIAS, "sh -c 'test -t 0 && test -t 1 && echo AGENTSPACES_REMOTE_PTY_OK'"], cwd: process.cwd() }
         : process.platform === "win32"
           ? { file: "cmd.exe", args: ["/d", "/c", "echo AGENTSPACES_LOCAL_PTY_OK"], cwd: process.cwd() }
           : { file: "/bin/sh", args: ["-c", "test -t 0 && test -t 1 && echo AGENTSPACES_LOCAL_PTY_OK"], cwd: process.cwd() }

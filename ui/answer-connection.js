@@ -2,7 +2,8 @@
 // delay a fresh local installation or receive an implicit connection attempt.
 export async function findNativeAnswerService({ api, hosts = ['local'], preferredHost, ensureActive = () => {} }) {
   const selected = new Set(Array.isArray(hosts) ? hosts : ['local']);
-  const ordered = ['local', 'remote'].filter(host => selected.has(host));
+  const ordered = [...selected].filter(host => typeof host === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(host));
+  if (ordered.includes('local')) ordered.unshift(...ordered.splice(ordered.indexOf('local'), 1));
   if (ordered.includes(preferredHost)) ordered.unshift(...ordered.splice(ordered.indexOf(preferredHost), 1));
   for (const host of ordered) {
     ensureActive();

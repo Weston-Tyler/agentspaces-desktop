@@ -20,11 +20,12 @@ const select = (options) => {
 // Only provider-owned interactive native UI handles model authentication and
 // approvals. This view never captures terminal output into an application log.
 export function mountNativeChat(root, state, { api, notice }) {
+  const remoteHost = state.remoteHost ?? "remote";
   const mountId = crypto.randomUUID();
   root.dataset.nativeChatMount = mountId;
   const card = el("section", null, "card native-chat"),
     provider = select([["codex", "Codex"], ["claude", "Claude Code"]]),
-    host = select([["local", "This device"], ["remote", "remote / Linux over SSH"]]),
+    host = select([["local", "This device"], [remoteHost, "Another computer / Linux over SSH"]]),
     cwd = el("input"),
     source = select([["", "Choose a discovered source thread"]]),
     runningTerminals = select([["", "Choose a running terminal"]]),

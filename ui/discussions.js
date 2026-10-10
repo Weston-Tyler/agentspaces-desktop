@@ -17,6 +17,7 @@ function button(text, fn, cls = "secondary") {
   return n;
 }
 export async function mountDiscussions(root, state, { api, notice, demoAvailable = false }) {
+  const remoteHost = state.remoteHost ?? "remote";
   const mountId = crypto.randomUUID();
   root.dataset.discussionMount = mountId;
   let groups = [],
@@ -124,7 +125,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
             el("b", s.title),
             el(
               "small",
-              (s.host === "remote" ? "remote" : "This device") + (s.fixture ? " · Demo" : s.status && s.status !== "unknown" ? " · " + s.status : ""),
+              (s.host === remoteHost ? "remote" : "This device") + (s.fixture ? " · Demo" : s.status && s.status !== "unknown" ? " · " + s.status : ""),
             ),
           );
           row.append(input, caption);

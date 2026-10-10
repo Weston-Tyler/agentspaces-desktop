@@ -1,4 +1,5 @@
 export function nativeControls(state, { api, notice }) {
+  const remoteHost = state.remoteHost ?? "remote";
   for (const heading of document.querySelectorAll(".card h2")) {
     if (heading.textContent === "Development status")
       heading.nextElementSibling.textContent =
@@ -20,7 +21,7 @@ export function nativeControls(state, { api, notice }) {
       "Host",
       [
         ["local", "This device / " + state.localOS],
-        ["remote", "remote / Linux over SSH"],
+        [remoteHost, "Another computer / Linux over SSH"],
       ],
     ],
     [
@@ -71,7 +72,7 @@ export function nativeControls(state, { api, notice }) {
     const tool = state.tools[index];
     const caption = card.querySelector("small");
     caption.textContent +=
-      tool.host === "remote"
+      tool.host === remoteHost
         ? " · remote / Linux"
         : " · this device / " + state.localOS;
     if (tool.installed && state.localOS === "Windows") {
@@ -95,7 +96,7 @@ export function nativeControls(state, { api, notice }) {
   const result = document.createElement("p");
   result.className = "fineprint";
   router.append(heading, text);
-  for (const host of ["local", "remote"])
+  for (const host of ["local", remoteHost])
     for (const dryRun of [true, false]) {
       const button = document.createElement("button");
       button.type = "button";

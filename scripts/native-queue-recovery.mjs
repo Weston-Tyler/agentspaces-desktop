@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "../app/remote-host.mjs";
 import assert from "node:assert/strict";
 
 /** Read only the two proof-owned native threads and three receipt-bound turns. */
@@ -6,7 +7,7 @@ export async function recoverOwnedNativeAnswers(queue, original) {
   assert.equal(original.__proof?.dispatchedCalls, 3);
   assert(Array.isArray(threads) && threads.length === 2);
   for (const proof of threads) {
-    assert.equal(proof.host, "remote");
+    assert.equal(proof.host, REMOTE_HOST);
     assert.equal(proof.source, "owned-native-thread-start-response");
     assert.equal(proof.sandbox?.type, "readOnly");
     assert.equal(proof.sandbox?.networkAccess, false);
@@ -75,7 +76,7 @@ export async function recoverOwnedNativeAnswers(queue, original) {
     };
     answers.set(order[i], {
       provider: "codex",
-      host: "remote",
+      host: REMOTE_HOST,
       executionKind: "native-shared-daemon-queue-recovered",
       nativeThreadId: receipt.nativeThreadId,
       nativeTurnId: receipt.nativeTurnId,

@@ -1,3 +1,4 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 // Metadata selection only. Conversation admission, durable posting and native
 // delivery remain owned by the existing discussion and routing surfaces.
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
@@ -5,7 +6,7 @@ const MAX_LOOKUPS = 200;
 const DAY_MS = 86400000;
 const fail = code => Object.assign(new Error(code), { code });
 const canonical = source => source && !source.fixture && ["codex", "claude"].includes(source.provider)
-  && ["local", "remote"].includes(source.host) && UUID.test(source.nativeThreadId ?? "")
+  && ["local", REMOTE_HOST].includes(source.host) && UUID.test(source.nativeThreadId ?? "")
   && source.id === source.provider + "@" + source.host + ":" + source.nativeThreadId;
 
 function validate(input) {

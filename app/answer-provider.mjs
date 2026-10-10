@@ -1,3 +1,4 @@
+import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -118,12 +119,12 @@ export async function detectAnswerProviders({
 } = {}) {
   hostCheck(host);
   let records;
-  if (host === "remote") {
+  if (host === REMOTE_HOST) {
     try {
       const r = await collect(
         spawnProcess,
         "ssh",
-        ["remote", "node --input-type=module"],
+        [SSH_ALIAS, "node --input-type=module"],
         { input: remoteProbe, timeoutMs: 12000 },
       );
       records = r.code === 0 ? JSON.parse(r.output) : [];
@@ -377,7 +378,7 @@ export class NativeAnswerProvider {
                 throw failure("answer_output_budget_exceeded", true);
             }
           : undefined;
-      const remote = this.host === "remote";
+      const remote = this.host === REMOTE_HOST;
       if (beforeDispatch) {
         try {
           await beforeDispatch();
@@ -391,7 +392,7 @@ export class NativeAnswerProvider {
         this.spawnProcess,
         remote ? "ssh" : this.provider,
         remote
-          ? ["remote", "node --input-type=module"]
+          ? [SSH_ALIAS, "node --input-type=module"]
           : nativeArgs(this.provider, scratch, budget),
         {
           input: remote

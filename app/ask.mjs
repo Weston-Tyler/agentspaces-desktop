@@ -1,3 +1,4 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 import { createHash } from "node:crypto";
 import { scopePathExcluded } from "./workspace-map.mjs";
 const digest = (value) =>
@@ -76,7 +77,7 @@ export class Ask {
     if (
       !["general", "work"].includes(mode) ||
       !["codex", "claude"].includes(provider) ||
-      !["local", "remote"].includes(host)
+      !["local", REMOTE_HOST].includes(host)
     )
       throw new Error("Unsupported Ask mode, provider or host");
     return {

@@ -1,3 +1,4 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 import { createHash } from "node:crypto";
 import { CodexQueueAdapter } from "./codex-queue.mjs";
 import { nativeAdapterCompatible, observedVersion, qualifiedNativeVersion } from './native-versions.mjs';
@@ -17,7 +18,7 @@ export class CodexDiscussionHub {
   validate(sessionId, discussionId, messageId) {
     if (this.closed) throw new Error("Native conversation service is closed");
     const source = this.engine.session(sessionId), grant = this.engine.permissions(source);
-    if (source.fixture || source.provider !== "codex" || source.host !== "remote") throw new Error("Shared native Codex connection is available on remote only");
+    if (source.fixture || source.provider !== "codex" || source.host !== REMOTE_HOST) throw new Error("Shared native Codex connection is available on remote only");
     if (!grant.enrolled || !grant.content || !grant.share || !grant.retrieve) throw new Error("Native agent connection was revoked or unavailable");
     if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(source.nativeThreadId ?? "")) throw new Error("Original native thread identity is unavailable");
     const group = this.engine.discussions.group(discussionId);
@@ -233,7 +234,7 @@ export class CodexDiscussionHub {
     } finally { this.reconciling = false; }
   }
   async refreshTools(host) {
-    if (host !== 'remote') return { status: 'new-session-load-required' };
+    if (host !== REMOTE_HOST) return { status: 'new-session-load-required' };
     const adapter = this.adapterFactory({ host });
     try { await adapter.open(); await adapter.request('config/mcpServer/reload', null); return { status: 'refresh-requested-for-next-native-turn' }; }
     catch { return { status: 'native-refresh-unavailable' }; }

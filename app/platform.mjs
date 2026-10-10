@@ -1,9 +1,10 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 import { posix, win32 } from "node:path";
 export function hostPaths(host, platform = process.platform) {
-  return host === "remote" || platform !== "win32" ? posix : win32;
+  return host === REMOTE_HOST || platform !== "win32" ? posix : win32;
 }
 export function hostOS(host, platform = process.platform) {
-  return host === "remote"
+  return host === REMOTE_HOST
     ? "Linux"
     : ({ win32: "Windows", darwin: "macOS", linux: "Linux" }[platform] ??
         platform);

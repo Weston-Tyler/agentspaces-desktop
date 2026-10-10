@@ -1,3 +1,4 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 // Explicit owner action. WorkspaceMap owns every scan, continuation and cache;
 // this bounded workflow neither schedules model work nor creates a work queue.
 const operations = new WeakMap();
@@ -6,7 +7,7 @@ const safeState = status => ({ status, stage: status, batchesCompleted: 0, parti
 export function connectAllOwnedWork(engine, { hosts, maxBatches = 32 } = {}) {
   hosts ??= engine.workspace.index?.profile?.active === true && !engine.workspace.index.fixture
     ? engine.workspace.index.profile.hosts ?? ["local"] : ["local"];
-  if (!Array.isArray(hosts) || !hosts.length || hosts.some(host => !["local", "remote"].includes(host))) throw new Error("Choose supported native hosts");
+  if (!Array.isArray(hosts) || !hosts.length || hosts.some(host => !["local", REMOTE_HOST].includes(host))) throw new Error("Choose supported native hosts");
   hosts = [...new Set(hosts)];
   if (!Number.isInteger(maxBatches) || maxBatches < 2 || maxBatches > 32) throw new Error("Invalid inventory batch bound");
   const running = operations.get(engine);

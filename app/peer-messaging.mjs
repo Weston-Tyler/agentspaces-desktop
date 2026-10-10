@@ -1,3 +1,4 @@
+import { REMOTE_HOST } from "./remote-host.mjs";
 import { createHash } from "node:crypto";
 
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
@@ -5,7 +6,7 @@ const hash = value => createHash("sha256").update(JSON.stringify(value)).digest(
 const fail = code => Object.assign(new Error(code), { code });
 const pendingByEngine = new WeakMap();
 const canonical = source => source && !source.fixture && ["codex", "claude"].includes(source.provider)
-  && ["local", "remote"].includes(source.host) && UUID.test(source.nativeThreadId ?? "")
+  && ["local", REMOTE_HOST].includes(source.host) && UUID.test(source.nativeThreadId ?? "")
   && source.id === source.provider + "@" + source.host + ":" + source.nativeThreadId;
 
 export class PeerMessaging {
@@ -24,7 +25,7 @@ export class PeerMessaging {
       || (input.sessionId !== undefined) === (input.nativeThreadId !== undefined)
       || input.sessionId !== undefined && (typeof input.sessionId !== "string" || !input.sessionId || input.sessionId.length > 300)
       || input.nativeThreadId !== undefined && !UUID.test(input.nativeThreadId ?? "")
-      || input.host !== undefined && !["local", "remote"].includes(input.host)
+      || input.host !== undefined && !["local", REMOTE_HOST].includes(input.host)
       || input.provider !== undefined && !["codex", "claude"].includes(input.provider)
       || typeof input.text !== "string" || !input.text.trim() || input.text.length > 8000
       || typeof input.nativeTurnId !== "string" || !input.nativeTurnId || input.nativeTurnId.length > 200

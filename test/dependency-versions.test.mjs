@@ -5,7 +5,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { dependencyVersions, exactDependencyVersion } from "../app/dependency-versions.mjs";
 import { ClaudeReadAdapter, CLAUDE_SDK_PIN } from "../app/claude-adapter.mjs";
-import { NativeAutoInstaller } from "../app/native-auto-install.mjs";
+import { NativeAutoInstaller, remoteInstallScript } from "../app/native-auto-install.mjs";
 
 test("Managed SDK versions derive directly from the root package manifest", () => {
   const root = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")), actual = dependencyVersions();
@@ -31,7 +31,7 @@ test("Fixture manifest SDK updates change the serialized remote reader pin witho
   assert.throws(() => new ClaudeReadAdapter({ sdkPin: "bad'pin" }), /Exact read SDK/);
 });
 test("Remote installer source retains only builtin static imports and carries injected versions", () => {
-  const source = readFileSync(new URL("../app/native-auto-install.mjs", import.meta.url), "utf8");
+  const source = remoteInstallScript({ config: { host: "remote" }, versions: dependencyVersions() });
   const staticImports = [...source.matchAll(/^import\s.*?from\s+['"]([^'"]+)['"]/gm)].map(match => match[1]);
   assert.ok(staticImports.every(name => name.startsWith("node:")));
   assert.ok(source.includes("({ config: device, sources, versions })"));

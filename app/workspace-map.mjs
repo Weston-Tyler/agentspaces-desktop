@@ -1,3 +1,4 @@
+import { REMOTE_HOST, assertSavedHostIdentity } from "./remote-host.mjs";
 import { readFileSync, existsSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -165,6 +166,7 @@ export class WorkspaceMap {
       !Array.isArray(this.index?.sessions)
     )
       this.index = null;
+    assertSavedHostIdentity(engine.store.data, this.index);
     if (this.index?.profile?.active) {
       this.index.stale = true;
       this.restore(this.index.sessions ?? []);
@@ -213,7 +215,7 @@ export class WorkspaceMap {
       providers = input.providers ?? ["codex", "claude"];
     if (
       !hosts.length ||
-      hosts.some((h) => !["local", "remote"].includes(h)) ||
+      hosts.some((h) => !["local", REMOTE_HOST].includes(h)) ||
       !providers.length ||
       providers.some((p) => !["codex", "claude"].includes(p))
     )
