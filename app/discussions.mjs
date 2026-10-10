@@ -10,6 +10,7 @@ export const SNAPSHOT_TYPE =
 export const MAX_DISCUSSION_MEMBERS = 200;
 // Storage capacity is independent of the per-exchange wake budget.
 export const MAX_DISCUSSION_MESSAGES = 10000;
+const denied = (code, message) => Object.assign(new Error(message), {code});
 const fingerprint = (value) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export class Discussions {
@@ -144,17 +145,19 @@ export class Discussions {
   participant(binding) {
     if (!binding) throw new Error("Participant connector required");
     const caller = this.engine.session(binding.sessionId), grant = this.engine.permissions(caller);
-    if (caller.fixture || !["codex", "claude"].includes(caller.provider) || caller.id !== caller.provider + "@" + caller.host + ":" + caller.nativeThreadId || caller.account !== binding.account || caller.project !== binding.project || (caller.scopeId ?? null) !== (binding.scopeId ?? null) || !grant.enrolled || !grant.retrieve || !grant.share) throw new Error("Current enrolled sharing participant required");
+    if (caller.fixture || !["codex", "claude"].includes(caller.provider) || caller.id !== caller.provider + "@" + caller.host + ":" + caller.nativeThreadId || caller.account !== binding.account || caller.project !== binding.project || (caller.scopeId ?? null) !== (binding.scopeId ?? null) || !grant.enrolled || !grant.retrieve || !grant.share) throw denied("discussion_sharing_denied", "Current enrolled sharing participant required");
     return caller;
   }
   sharingBoundary(caller, ids) {
     for (const id of ids) {
       const source = this.engine.session(id), grant = this.engine.permissions(source);
-      if (source.fixture || source.account !== caller.account || !(source.scopeId && source.scopeId === caller.scopeId || source.project === caller.project) || !grant.enrolled || !grant.share || !grant.retrieve) throw new Error("Participants must permit sharing within the current account and scope");
+      if (source.fixture || source.account !== caller.account || !(source.scopeId && source.scopeId === caller.scopeId || source.project === caller.project) || !grant.enrolled || !grant.share || !grant.retrieve) throw denied("discussion_sharing_denied", "Participants must permit sharing within the current account and scope");
     }
   }
   joinEligible(g, caller) {
-    if (!this.policy(g).selfRegistration || g.members.length >= MAX_DISCUSSION_MEMBERS || !g.members.every(m => this.allowed(m)) || !this.view(g).available) throw new Error("Discussion self-registration unavailable");
+    if (!this.policy(g).selfRegistration) throw denied('discussion_self_registration_disabled','Discussion self-registration unavailable');
+    if (g.members.length >= MAX_DISCUSSION_MEMBERS) throw denied('discussion_member_limit','Discussion member limit reached');
+    if (!g.members.every(m => this.allowed(m)) || !this.view(g).available) throw denied('discussion_source_unavailable','Discussion source scope revoked or stale');
     this.sharingBoundary(caller, g.members.map(m => m.sessionId));
   }
   discoverJoinable({ query = "" } = {}, binding) {
@@ -257,13 +260,13 @@ export class Discussions {
   context(id, binding) {
     const g = this.group(id);
     if (!binding || !g.members.some((m) => m.sessionId === binding.sessionId))
-      throw new Error("Connector is not a discussion participant");
+      throw denied("discussion_participant_required", "Connector is not a discussion participant");
     if (!g.members.every((m) => this.allowed(m)))
-      throw new Error("Discussion source scope revoked or stale");
+      throw denied("discussion_source_unavailable", "Discussion source scope revoked or stale");
     const caller = this.engine.session(binding.sessionId),
       grant = this.engine.permissions(caller);
     if (!grant.enrolled || !grant.retrieve)
-      throw new Error("Discussion retrieval denied");
+      throw denied("discussion_retrieval_denied", "Discussion retrieval denied");
     for (const m of g.members) {
       const source = this.engine.session(m.sessionId),
         p = this.engine.permissions(source);
@@ -272,9 +275,7 @@ export class Discussions {
           source.account === caller.account) ||
         (source.scopeId && source.scopeId === caller.scopeId);
       if (!boundary || !p.enrolled || !p.share)
-        throw new Error(
-          "All participants must permit sharing within the connector boundary",
-        );
+        throw denied("discussion_sharing_denied", "All participants must permit sharing within the connector boundary");
     }
     return {
       ...this.view(g),
@@ -359,7 +360,7 @@ export class Discussions {
   post({ id, text, targets = [], deliveryId, fixtureDialogueTurns = 0 }, { exactTargets = false } = {}) {
     const g = this.group(id);
     if (!g.members.every((m) => this.allowed(m)))
-      throw new Error("Discussion source scope revoked or stale");
+      throw denied("discussion_source_unavailable", "Discussion source scope revoked or stale");
     if (typeof text !== "string" || !text.trim() || text.length > 8000)
       throw new Error("Use a message of 1–8000 characters");
     if (

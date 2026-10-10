@@ -112,3 +112,22 @@ test("concurrent wrong-cwd registration cannot inherit another request's scoped 
   release(); await valid; await refusal;
   assert.equal(observations, 2); assert.equal(Object.keys(f.engine.store.data.connectors).length, 1);
 });
+test('background discovery cannot erase a source that self-registers while inventory is running', async t => {
+  const observed={nativeObserved:true,nativeThreadId:thread,cwd:'/home/owner/work',host:'remote',provider:'claude',sourceVersion:'registered-during-scan'};
+  const f=fixture(t,{known:false,resolveMetadata:async()=>observed});let registered,room;
+  f.engine.probe=async()=>{
+    if(registered)return;
+    registered=await f.service.register(f.device.token,{nativeThreadId:thread});
+    room=f.engine.discussions.create({title:'Registration race fixture',sessionIds:[registered.sessionId],agentInitiation:true,selfRegistration:true});
+  };
+  await f.engine.workspace.scan(f.engine.workspace.index.profile,{continuePages:true,catalogOnly:true});
+  assert.equal(f.engine.session(registered.sessionId).nativeThreadId,thread);
+  assert.equal(f.engine.workspace.index.sessions.some(s=>s.id===registered.sessionId),true);
+  assert.equal(f.engine.discussions.context(room.id,f.engine.connector(registered.token)).available,true);
+  // A prior affected installation can recover missing derived metadata from its
+  // exact retained source binding without issuing a grant or starting a model.
+  f.engine.workspace.index.sessions=[];f.engine.catalog=[];
+  // A later incomplete first page must also retain registered metadata.
+  await f.engine.workspace.scan(f.engine.workspace.index.profile,{catalogOnly:true});
+  assert.equal(f.engine.discussions.context(room.id,f.engine.connector(registered.token)).available,true);
+});
