@@ -17,7 +17,7 @@ export class CodexDiscussionHub {
   }
   async inspectContinuation(sessionId) {
     const source=this.engine.session(sessionId),grant=this.engine.permissions(source);
-    if(source.fixture||source.provider!=='codex'||source.host!=='remote')return {state:'unsupported',reason:'This native route does not expose qualified idle state'};
+    if(source.fixture||source.provider!=='codex'||source.host!==REMOTE_HOST)return {state:'unsupported',reason:'This native route does not expose qualified idle state'};
     if(!grant.enrolled||!grant.retrieve||!grant.share||!grant.content)return {state:'unknown',reason:'Native source grant unavailable'};
     if(this.engine.store.data.desktopPreferences?.allowNativeFullAccess!==true)return {state:'unsupported',reason:'Owner opt-in to existing native client policy is required'};
     let adapter;
