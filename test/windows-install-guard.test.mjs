@@ -15,7 +15,17 @@ const ready=child=>new Promise((resolve,reject)=>{
 });
 test('Windows setup refuses a live bundled companion without terminating it', {skip:process.platform!=='win32'},async t=>{
  const root=mkdtempSync(join(realpathSync(tmpdir()),"as-installer's guard-"));let child;
- t.after(async()=>{if(child?.exitCode===null){const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await exited;}rmSync(root,{recursive:true,force:true});});
+ const stop=async()=>{
+  const current=child;child=undefined;
+  // A signal-terminated child keeps a null exitCode after its exit event.
+  if(!current?.pid||current.exitCode!==null||current.signalCode!==null)return;
+  await new Promise((resolve,reject)=>{
+   const finish=error=>{clearTimeout(timer);current.off('exit',exited);error?reject(error):resolve();};
+   const exited=()=>finish(),timer=setTimeout(()=>finish(new Error('Synthetic fixture cleanup timed out')),10000);
+   current.once('exit',exited);if(!current.kill())finish(new Error('Synthetic fixture could not be stopped'));
+  });
+ };
+ t.after(async()=>{await stop();rmSync(root,{recursive:true,force:true});});
  const runtime=join(root,'resources','runtime');mkdirSync(runtime,{recursive:true});
  const binary=join(runtime,'node.exe');copyFileSync(process.execPath,binary);
  const shell=join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe');
@@ -32,7 +42,7 @@ test('Windows setup refuses a live bundled companion without terminating it', {s
  assert.equal(await check(root+'-different'),0,'sibling path is not the installed directory');
  assert.equal(await check(root,child.pid),0,'installer itself is excluded without excluding its siblings');
  assert.equal(await check(''),2,'missing observation scope refuses setup');
- child.kill();await new Promise(resolve=>child.once('exit',resolve));
+ await stop();
  assert.equal(await check(root),0);
  const scripts=join(root,'app');mkdirSync(scripts);const entry=join(scripts,'fixture-headless.mjs');
  writeFileSync(entry,"console.log('ready');setInterval(()=>{},1000)");
@@ -40,5 +50,5 @@ test('Windows setup refuses a live bundled companion without terminating it', {s
  await ready(child);
  assert.equal(await check(root),10,'external Node using installed scripts also fences setup');
  assert.equal(child.exitCode,null);
- child.kill();await new Promise(resolve=>child.once('exit',resolve));
+ await stop();
 });
