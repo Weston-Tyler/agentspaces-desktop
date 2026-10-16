@@ -11,7 +11,7 @@ try {
   $running = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | Where-Object {
     $_.ProcessId -ne $installerPid -and (
       ($_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) -or
-      ($_.Name -eq 'node.exe' -and $_.CommandLine -and (
+      ($_.CommandLine -and (
         $_.CommandLine.Replace('/', '\').IndexOf($prefix, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
         $_.CommandLine -match '(?i)(?:^|[\s"''])(?:\.[\/])?app[\/]cli\.mjs["'']?\s+serve(?:\s|$)'
       ))

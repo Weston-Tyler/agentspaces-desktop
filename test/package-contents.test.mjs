@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 const require = createRequire(import.meta.url);
 const verifyPackage = require('../scripts/verify-package.cjs');
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -91,7 +91,7 @@ test('preparation refuses leftover state before copying or following any runtime
   writeFileSync(forbidden, 'SYNTHETIC CONTENT MUST BE PRESERVED');
   const preload = join(root, 'guard.mjs');
   writeFileSync(preload, "import fs from 'node:fs'; import {syncBuiltinESMExports} from 'node:module'; fs.copyFileSync=()=>{throw Error('unexpected_runtime_copy')}; syncBuiltinESMExports(); globalThis.fetch=()=>{throw Error('unexpected_network')};");
-  const run = spawnSync(process.execPath, ['--import', preload, join(root, 'scripts', 'prepare-package.mjs')], { cwd: root, encoding: 'utf8', timeout: 10000 });
+  const run = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, join(root, 'scripts', 'prepare-package.mjs')], { cwd: root, encoding: 'utf8', timeout: 10000 });
   assert.equal(run.status, 1); assert.match(run.stderr, /runtime.*unexpected entry/i);
   assert.doesNotMatch(run.stderr, /unexpected_runtime_copy|unexpected_network/);
   assert.equal(readFileSync(forbidden, 'utf8'), 'SYNTHETIC CONTENT MUST BE PRESERVED');

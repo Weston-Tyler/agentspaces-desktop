@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,copyFileSync,rmSync,writeFileSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,copyFileSync,rmSync,writeFileSync,realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -8,7 +8,7 @@ import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 const exec=promisify(execFile);
 test('Windows setup refuses a live bundled companion without terminating it', {skip:process.platform!=='win32'},async t=>{
- const root=mkdtempSync(join(tmpdir(),"as-installer's-guard-"));let child;
+ const root=mkdtempSync(join(realpathSync(tmpdir()),"as-installer's-guard-"));let child;
  t.after(async()=>{if(child?.exitCode===null){const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await exited;}rmSync(root,{recursive:true,force:true});});
  const runtime=join(root,'resources','runtime');mkdirSync(runtime,{recursive:true});
  const binary=join(runtime,'node.exe');copyFileSync(process.execPath,binary);
