@@ -57,9 +57,15 @@ try {
   $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\AgentSpaces Desktop.lnk'
   if (!(Test-Path $shortcut)) { throw 'Start menu registration is absent.' }
   $registered = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Get-ItemProperty | Where-Object {
-    $_.DisplayName -eq 'AgentSpaces Desktop' -and ([string]$_.InstallLocation).TrimEnd('\') -eq $destination.TrimEnd('\')
+    $_.DisplayName -eq 'AgentSpaces Desktop'
   })
   if ($registered.Count -ne 1) { throw 'Installed Apps registration is absent.' }
+  # electron-builder stores InstallLocation in its separate installation key.
+  # Installed Apps identifies the executable through its quoted uninstall command.
+  $registeredCommand = [regex]::Match([string]$registered[0].UninstallString, '^"([^"]+)"(?:\s|$)')
+  if (!$registeredCommand.Success) { throw 'Installed Apps uninstall command is invalid.' }
+  & $binary --input-type=module -e "import{realpathSync}from'node:fs';if(realpathSync.native(process.argv[1])!==realpathSync.native(process.argv[2]))throw Error('Installed Apps target mismatch');" $registeredCommand.Groups[1].Value $uninstaller
+  if ($LASTEXITCODE -ne 0) { throw 'Installed Apps points to another installation.' }
   Push-Location $app
   try {
     & $binary --input-type=module -e "import{wire}from'@agentspaces/client';import{readFileSync}from'node:fs';if(wire.WIRE_VERSION!==3||JSON.parse(readFileSync('package.json')).version!=='0.1.0-alpha.4')throw Error('Installed version mismatch');"
