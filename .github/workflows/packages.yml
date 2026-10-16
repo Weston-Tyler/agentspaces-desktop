@@ -28,6 +28,10 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run ${{ matrix.command }}
+      - name: Verify Windows install, busy refusal and uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/verify-windows-installer.ps1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: preview-${{ matrix.os }}
