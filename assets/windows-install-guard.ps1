@@ -44,7 +44,9 @@ public static class AgentSpacesInstallPaths {
     if (!$command) { return $false }
     if ($command.Replace('/', '\').IndexOf($prefix, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
     foreach ($argument in [AgentSpacesInstallPaths]::Arguments($command)) {
-      if ([IO.Path]::IsPathRooted($argument) -and [AgentSpacesInstallPaths]::Expand($argument.Replace('/', '\')).StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+      # Most arguments are code/options, not paths. Path.IsPathRooted on .NET
+      # Framework throws on valid non-path arguments containing quotes or pipes.
+      if ($argument -match '^(?:[A-Za-z]:[\\/]|\\\\)' -and [AgentSpacesInstallPaths]::Expand($argument.Replace('/', '\')).StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { return $true }
     }
     return $command -match '(?i)(?:^|[\s"''])(?:\.[\/])?app[\/]cli\.mjs["'']?\s+serve(?:\s|$)'
   }
