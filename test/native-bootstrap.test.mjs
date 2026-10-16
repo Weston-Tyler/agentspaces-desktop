@@ -1,7 +1,7 @@
 import test from "node:test";
 import { realpathSync } from "node:fs";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, readdir, readFile } from "node:fs/promises";
+import { mkdtemp, writeFile, readdir, readFile, mkdir, symlink, unlink, rmdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import http from "node:http";
@@ -251,4 +251,40 @@ test('Provider MCP status and handoff preview retain bound source; availability 
   assert.deepEqual(calls.filter(row=>row.path!=='/api/native/register').map(row=>row.path),['/api/providers/status','/api/providers/availability','/api/providers/handoff/preview']);
   const count=calls.length;await assert.rejects(invoke('report_native_availability',{provider:'claude',state:'available'}),/bounded_native_tool/);assert.equal(calls.length,count);
  }finally{await bootstrap.server.close();}
+});
+
+test("Claude lifecycle follows only the configured launcher across native upgrades", async () => {
+  const { root, configPath, device, participantConfig } = await setup();
+  const name = process.platform === "win32" ? "claude.exe" : "claude";
+  const oldRoot = join(root, "version-old"), nextRoot = join(root, "version-new"), launcherRoot = join(root, "bin");
+  for (const dir of [oldRoot, nextRoot]) { await mkdir(dir); await writeFile(join(dir, name), "synthetic executable"); }
+  await symlink(oldRoot, launcherRoot, process.platform === "win32" ? "junction" : "dir");
+  const launcher = join(launcherRoot, name), pinned = realpathSync(launcher);
+  await writeFile(configPath, JSON.stringify({ ...device, nativeExecutable: pinned, nativeLauncher: launcher }));
+  const original = { ...processRecord, exe: pinned }, requestImpl = async (_, path) => path === "/api/native/register" ? { participantConfig } : [];
+  await runNativeSessionHook(event(), { configPath, ancestors: async () => [original], requestImpl });
+  if (process.platform === "win32") await rmdir(launcherRoot); else await unlink(launcherRoot);
+  await symlink(nextRoot, launcherRoot, process.platform === "win32" ? "junction" : "dir");
+  const upgraded = { ...processRecord, pid: 4243, startedAt: "fixture-upgrade", exe: realpathSync(launcher) };
+  assert.notEqual(upgraded.exe, pinned);
+  assert.equal((await resolveClaudeSource(configPath, { ancestors: async () => [original] })).nativeThreadId, UUID);
+  await runNativeSessionHook(event({ hook_event_name: "UserPromptSubmit" }), { configPath, ancestors: async () => [upgraded], requestImpl });
+  assert.equal((await resolveClaudeSource(configPath, { ancestors: async () => [upgraded] })).nativeThreadId, UUID);
+  await assert.rejects(resolveClaudeSource(configPath, { ancestors: async () => [{ ...upgraded, startedAt: "reused-pid" }] }), /stale_or_missing/);
+  let calls = 0;
+  await assert.rejects(runNativeSessionHook(event(), { configPath, ancestors: async () => [{ ...upgraded, exe: join(root, "unrelated", name) }], requestImpl: async () => { calls++; } }), /native_process_not_identified/);
+  assert.equal(calls, 0);
+});
+
+test("Claude launcher configuration rejects invalid paths and keeps a running pin when the launcher is absent", async () => {
+  const { root, configPath, device, participantConfig } = await setup();
+  const nativeExecutable = join(root, "pinned-version");
+  for (const invalid of ["relative/claude", join(root, "node"), 1]) {
+    await writeFile(configPath, JSON.stringify({ ...device, nativeExecutable, nativeLauncher: invalid }));
+    await assert.rejects(runNativeSessionHook(event(), { configPath, ancestors: async () => [processRecord] }), /native_launcher_invalid/);
+  }
+  await writeFile(configPath, JSON.stringify({ ...device, nativeExecutable, nativeLauncher: join(root, "absent", "claude") }));
+  const original = { ...processRecord, exe: nativeExecutable };
+  await runNativeSessionHook(event(), { configPath, ancestors: async () => [original], requestImpl: async (_, path) => path === "/api/native/register" ? { participantConfig } : [] });
+  assert.equal((await resolveClaudeSource(configPath, { ancestors: async () => [original] })).nativeThreadId, UUID);
 });

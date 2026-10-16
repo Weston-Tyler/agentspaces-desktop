@@ -4,6 +4,8 @@ In the target native thread, call `ensure_native_connection` with no arguments. 
 
 A fixed-source connector can call the same tool, or run `ensure-connection` using its current private `USE.md`. This reports readiness for its existing connection; use the source-neutral native tool for automatic registration. Never copy another thread's configuration.
 
+Automatic Claude setup prefers the installed per-user native launcher over an older system npm installation. It privately records the launcher and its resolved executable. Lifecycle checks follow that exact launcher after upgrades while retaining the setup-time executable for already running sessions; process identity and source grants still have to match. Setup never creates a lifecycle record on behalf of a session. A genuine `SessionStart` or `UserPromptSubmit` hook must run before source-neutral tools can identify it.
+
 For Claude, the managed MCP name is `agentspaces-desktop`. At the next owner-controlled native launch, enable its custom channel with:
 
 ```sh

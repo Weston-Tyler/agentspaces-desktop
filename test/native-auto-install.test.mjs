@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, realpathSync, chmodSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { installOnCurrentHost } from "../app/native-auto-install.mjs";
@@ -110,4 +110,34 @@ test('an existing two-module managed runtime upgrades to the channel runtime wit
  const result=await installOnCurrentHost(f.options);assert.ok(result);
  const updated=JSON.parse(readFileSync(f.nativePath,'utf8'));assert.deepEqual(updated.mcpServers.another,config.mcpServers.another);
  const installed=updated.mcpServers['agentspaces-desktop'].args.find(arg=>arg.endsWith('native-bootstrap-mcp.mjs'));assert.notEqual(installed,registration.args.find(arg=>arg.endsWith('native-bootstrap-mcp.mjs')));assert.equal(readFileSync(join(dirname(installed),'native-bootstrap-channel.mjs'),'utf8'),f.options.sources.channel);
+});
+
+test("Claude setup migrates a stale PATH pin to the installed per-user native launcher", async () => {
+  const f = fixture();
+  const first = await installOnCurrentHost(f.options);
+  assert.equal(JSON.parse(readFileSync(first.configPath)).nativeExecutable, f.binary);
+  const launcher = join(f.home, ".local", "bin", process.platform === "win32" ? "claude.exe" : "claude");
+  const version = join(f.home, "native-version");
+  const actual = join(version, process.platform === "win32" ? "claude.exe" : "claude");
+  mkdirSync(version); mkdirSync(join(f.home, ".local"));
+  writeFileSync(actual, "synthetic native executable, never executed"); chmodSync(actual, 0o700);
+  symlinkSync(version, join(f.home, ".local", "bin"), process.platform === "win32" ? "junction" : "dir");
+  const refreshed = await installOnCurrentHost(f.options);
+  const config = JSON.parse(readFileSync(refreshed.configPath));
+  assert.equal(config.nativeExecutable, realpathSync(launcher));
+  assert.equal(config.nativeLauncher, launcher);
+  assert.equal(refreshed.activeSessionReloaded, false);
+  assert.equal(refreshed.inboundChannelConnected, false);
+  assert.equal(f.calls.filter(c => c.args[1] === "add").length, 1);
+  assert.equal(config.token, TOKEN);
+});
+
+test("Claude setup falls back to PATH when the standard launcher is not an executable file", async () => {
+  const f = fixture();
+  const launcher = join(f.home, ".local", "bin", process.platform === "win32" ? "claude.exe" : "claude");
+  mkdirSync(launcher, { recursive: true });
+  const installed = await installOnCurrentHost(f.options);
+  const device = JSON.parse(readFileSync(installed.configPath));
+  assert.equal(device.nativeExecutable, f.binary);
+  assert.equal(device.nativeLauncher, undefined);
 });
