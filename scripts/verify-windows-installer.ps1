@@ -57,7 +57,7 @@ try {
   $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\AgentSpaces Desktop.lnk'
   if (!(Test-Path $shortcut)) { throw 'Start menu registration is absent.' }
   $registered = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Get-ItemProperty | Where-Object {
-    $_.DisplayName -eq 'AgentSpaces Desktop' -and $_.InstallLocation.TrimEnd('\') -eq $destination.TrimEnd('\')
+    $_.DisplayName -eq 'AgentSpaces Desktop' -and ([string]$_.InstallLocation).TrimEnd('\') -eq $destination.TrimEnd('\')
   })
   if ($registered.Count -ne 1) { throw 'Installed Apps registration is absent.' }
   Push-Location $app
@@ -74,10 +74,18 @@ try {
     throw 'Busy uninstall did not refuse without stopping the fixture.'
   }
   Stop-Fixture
-  $removed = Run-Setup $uninstaller @('/S', ('_?=' + $destination))
-  if ($removed -ne 0) { throw 'Uninstallation failed.' }
-  if (Test-Path (Join-Path $destination 'AgentSpaces Desktop.exe')) { throw 'Uninstallation left the application executable.' }
-  if (!(Test-Path $sentinel)) { throw 'Uninstallation removed retained workspace state.' }
+  # Exercise NSIS's normal temporary-launch path. Its parent can exit before
+  # the temporary uninstaller; observe removal rather than assuming completion.
+  $removed = Run-Setup $uninstaller @('/S')
+  if ($removed -ne 0) { throw 'Uninstaller launcher failed.' }
+  $deadline = [DateTime]::UtcNow.AddSeconds(90)
+  do {
+    $pending = (Test-Path (Join-Path $destination 'AgentSpaces Desktop.exe')) -or (Test-Path $uninstaller) -or (Test-Path $registered[0].PSPath) -or (Test-Path $shortcut)
+    if (!$pending) { break }
+    if ([DateTime]::UtcNow -ge $deadline) { throw 'Normal uninstallation did not finish removing application and registration.' }
+    Start-Sleep -Milliseconds 500
+  } while ($true)
+  if (!(Test-Path $sentinel) -or [IO.File]::ReadAllText($sentinel) -ne 'Synthetic retained workspace; no credentials or native account.') { throw 'Uninstallation changed retained workspace state.' }
   [pscustomobject]@{freshInstall=$true;startMenu=$true;installedApps=$true;runtimeImports=$true;busyInstallRefused=$true;busyUninstallRefused=$true;uninstall=$true;workspaceRetained=$true;nativeModelCalls=0} | ConvertTo-Json -Compress
 } finally {
   Stop-Fixture
