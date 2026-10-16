@@ -1,5 +1,5 @@
 import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
-import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, lstatSync, realpathSync, chmodSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, lstatSync, realpathSync, chmodSync, statSync, accessSync, constants } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -29,7 +29,18 @@ function executable(name) {
   const candidates = output.trim().split(/\r?\n/);
   const path = candidates.find(candidate => /\.exe$/i.test(candidate)) ?? candidates.find(candidate => /\.cmd$/i.test(candidate)) ?? candidates[0];
   if (!path || !existsSync(path)) throw new Error('Native executable unavailable');
-  return realpathSync(path);
+  return realpathSync.native(path);
+}
+// Background SSH environments may still resolve the old npm installation.
+// Prefer Claude's standard per-user native launcher and retain its stable path
+// so a native upgrade does not strand lifecycle registration on the old binary.
+function claudeLauncher(home) {
+  const path = join(home, '.local', 'bin', process.platform === 'win32' ? 'claude.exe' : 'claude');
+  try {
+    if (!statSync(path).isFile()) return undefined;
+    accessSync(path, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
+    return path;
+  } catch { return undefined; }
 }
 function cli(binary, args, { acceptedFailure = false, timeout = 15000, cwd } = {}) {
   // Token values never appear in arguments. Native diagnostics stay private.
@@ -88,8 +99,11 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
     if (!dependenciesPresent()) throw new Error('Automatic native runtime dependencies are not ready');
     await runCLI(nodeBinary, ['--input-type=module', '-e', "await import('@modelcontextprotocol/sdk/server/index.js');await import('@modelcontextprotocol/sdk/server/stdio.js');await import('zod');await import('@anthropic-ai/claude-agent-sdk');await import('ws');"], { cwd: base, timeout: 10000 });
   }
-  const binary = resolveExecutable(config.provider), folder = join(base, config.provider), configPath = join(folder, 'device.json');
+  const launcher = config.provider === 'claude' ? claudeLauncher(home) : undefined;
+  const binary = launcher ? realpathSync.native(launcher) : resolveExecutable(config.provider), folder = join(base, config.provider), configPath = join(folder, 'device.json');
   const device = { ...config, ...(config.provider === 'claude' ? { nativeExecutable: binary } : {}) };
+  delete device.nativeLauncher;
+  if (launcher) device.nativeLauncher = launcher;
   savePrivate(configPath, JSON.stringify(device));
   const bootstrap = join(runtime, 'native-bootstrap-mcp.mjs'), name = 'agentspaces-desktop';
   const nativePath = config.provider === 'codex' ? join(home, '.codex', 'config.toml') : join(home, '.claude.json');

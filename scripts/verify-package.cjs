@@ -1,3 +1,4 @@
+const { assertRuntimeContents } = require("./package-contents.cjs");
 const { existsSync, readFileSync, readdirSync } = require("node:fs");
 const { join } = require("node:path");
 const { execFileSync } = require("node:child_process");
@@ -5,9 +6,11 @@ const { createHash } = require("node:crypto");
 module.exports = async context => {
   const resources = join(context.appOutDir, "resources"), app = join(resources, "app");
   const runtime = join(resources, "runtime"), binary = join(runtime, process.platform === "win32" ? "node.exe" : "node");
+  assertRuntimeContents(runtime, context.electronPlatformName);
   const manifest = JSON.parse(readFileSync(join(runtime, "build-manifest.json"), "utf8"));
   if (manifest.platform !== context.electronPlatformName || manifest.architecture !== process.arch)
     throw new Error("Bundled worker runtime does not match the package target");
+  if (!manifest.sourceFiles?.["scripts/machine-run.py"]) throw new Error("Application source manifest must include the machine runner");
   if (!manifest.sourceFiles?.["app/desktop.mjs"] || createHash("sha256").update(JSON.stringify(manifest.sourceFiles)).digest("hex") !== manifest.sourceSHA256) throw new Error("Application source manifest is absent or inconsistent");
   if (createHash("sha256").update(readFileSync(binary)).digest("hex") !== manifest.nodeSHA256) throw new Error("Bundled Node runtime hash differs from the preparation manifest");
   for (const [relative, expected] of Object.entries(manifest.sourceFiles ?? {})) {

@@ -1,3 +1,4 @@
+import packageContents from "./package-contents.cjs";
 import { copyFileSync, chmodSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, lstatSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,7 @@ if (!["win32", "linux"].includes(process.platform) || process.arch !== "x64" || 
 execFileSync(process.execPath, ["--input-type=module", "-e", "await import('@agentspaces/client'); await import('node-pty'); await import('@modelcontextprotocol/sdk/server/mcp.js');"], { cwd: root, stdio: "inherit", timeout: 15000 });
 const destination = join(root, "build", "runtime");
 mkdirSync(destination, { recursive: true });
+packageContents.assertRuntimeContents(destination, process.platform, { complete: false });
 const binaryName = process.platform === "win32" ? "node.exe" : "node";
 copyFileSync(process.execPath, join(destination, binaryName));
 if (process.platform !== "win32") chmodSync(join(destination, binaryName), 0o755);
@@ -40,11 +42,12 @@ function observe(relative) {
   if (stat.isDirectory()) for (const name of readdirSync(absolute).sort()) observe(relative + "/" + name);
   else if (stat.isFile()) sourceFiles[relative] = createHash("sha256").update(readFileSync(absolute)).digest("hex");
 }
-for (const relative of ["app", "ui", "assets", "package.json", "package-lock.json", "README.md", "LICENSE", "NOTICE", "docs/installer.md", "scripts/install-linux.mjs"]) observe(relative);
+for (const relative of ["app", "ui", "assets", "package.json", "package-lock.json", "README.md", "LICENSE", "NOTICE", "docs/installer.md", "scripts/install-linux.mjs", "scripts/machine-run.py"]) observe(relative);
 const manifest = { schema: 1, version: JSON.parse(readFileSync(join(root, "package.json"))).version,
   platform: process.platform, architecture: process.arch, nodeVersion: process.versions.node, nodeModuleABI: process.versions.modules,
   nodeSHA256: createHash("sha256").update(readFileSync(process.execPath)).digest("hex"), nodeLicenseSource: licenseSource,
   gitHead, gitDirty, sourceSHA256: createHash("sha256").update(JSON.stringify(sourceFiles)).digest("hex"), sourceFiles,
   providerBinariesIncluded: false, credentialsIncluded: false };
 writeFileSync(join(destination, "build-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+packageContents.assertRuntimeContents(destination, process.platform);
 console.log("Prepared owned runtime: Node " + manifest.nodeVersion + ", " + manifest.platform + "/" + manifest.architecture + "; native worker addon imports verified.");

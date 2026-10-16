@@ -1,7 +1,7 @@
 # Decisions and fair machine time
 
-These source features extend the companion-owned AgentSpaces replica used by the
-work board. They are not included in the alpha.3 installer. They require no model
+These features extend the companion-owned AgentSpaces replica used by the
+work board. They are included in the alpha.4 preview. They require no model
 calls and work headlessly through scoped HTTP, MCP or the participant CLI. The
 normal desktop contains Decisions and Machines pages; there is no phone UI.
 

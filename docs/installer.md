@@ -2,9 +2,9 @@
 
 AgentSpaces Desktop is built on [AgentSpaces by Bad Monkey](https://www.badmonkey.ai/agentspaces/). Its Apache 2.0 license and attribution notice accompany each package; dependencies retain their own notices and terms.
 
-Windows releases provide `AgentSpaces-Desktop-Setup-<version>-x64.exe`. Run it under your normal account. The per-user NSIS installer adds AgentSpaces Desktop to Start/search, creates a desktop shortcut, and registers an uninstaller in Settings → Apps → Installed apps (Apps & Features). It does not require administrator access. Uninstalling preserves application data.
+Windows releases provide `AgentSpaces-Desktop-Setup-<version>-x64.exe`. Run it under your normal account. The per-user NSIS installer adds AgentSpaces Desktop to Start/search, creates a desktop shortcut, and registers an uninstaller in Settings → Apps → Installed apps (Apps & Features). It does not require administrator access. Uninstalling preserves application data. Setup and uninstall refuse to proceed while a process is running from the installation directory. They never stop or force-kill AgentSpaces or native work. Finish active work, quit the tray application, and stop the companion before upgrading; silent setup returns a nonzero exit code while busy.
 
-Alpha installers are unsigned and automatic updating is not implemented. Download version-specific artifacts from [v0.1.0-alpha.3](https://github.com/Weston-Tyler/agentspaces-desktop/releases/tag/v0.1.0-alpha.3) or [all GitHub releases](https://github.com/Weston-Tyler/agentspaces-desktop/releases); verify the supplied SHA-256 checksum before installation. Publication and package construction do not establish platform/native acceptance or a production release.
+Alpha installers are unsigned and automatic updating is not implemented. Download version-specific artifacts from [v0.1.0-alpha.4](https://github.com/Weston-Tyler/agentspaces-desktop/releases/tag/v0.1.0-alpha.4) or [all GitHub releases](https://github.com/Weston-Tyler/agentspaces-desktop/releases); verify the supplied SHA-256 checksum before installation. Publication and package construction do not establish platform/native acceptance or a production release.
 
 The companion is licensed under [Apache 2.0](../LICENSE) and built on [AgentSpaces](https://www.badmonkey.ai/agentspaces/) by [BadMonkey](https://www.badmonkey.ai/). Preserve the application's and bundled components' notices. See [brand and attribution](brand-and-attribution.md) for upstream links and repository ownership.
 
@@ -34,8 +34,8 @@ Official references: [electron-builder release](https://github.com/electron-user
 
 The supported remote host uses the generic SSH alias `remote`. Configure that alias in your own SSH configuration with your chosen host and user; no personal host address, username, key or password is distributed with the application. Confirm `ssh remote` works before connecting the remote tools. Native logins stay on that host.
 
-This preview changes the old development-specific host identifier. Existing installations should keep their current private workspace and credentials backed up and use a separate workspace when evaluating this release. Old source-bound connections and delivery receipts are not automatically migrated or replayed. Do not replace an active companion mid-conversation.
+A new setup uses the generic `remote` alias. Existing setups retain their current host identity through the private `~/.agentspaces-desktop/host.json` file; no such file is distributed. Keep the same private workspace and back it up before upgrading. If startup reports a host-identity mismatch, preserve the state and configure the existing identity rather than renaming saved records. Before an upgrade, run the private-copy preflight described in [maintenance](maintenance.md#updates-without-cancelling-native-work). Unknown native outcomes remain unresolved and are never blindly replayed.
 
-## First run on a new computer (next release)
+## First run on a new computer
 
-Open the installed application, use the provider setup links if no native tool is installed, sign in through Native chat, and select **Connect work on this device**. Discovery and Ask start locally. Adding a second computer is optional; select it in Connected work only after SSH setup. These source changes are not yet included in the alpha.3 downloads.
+Open the installed application, use the provider setup links if no native tool is installed, sign in through Native chat, and select **Connect work on this device**. Discovery and Ask start locally. Adding a second computer is optional; select it in Connected work only after SSH setup. These setup features are included in the alpha.4 downloads.

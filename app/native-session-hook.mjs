@@ -1,4 +1,4 @@
-import { readFile, lstat, readlink, mkdir, writeFile, rename, readdir } from "node:fs/promises";
+import { readFile, lstat, readlink, mkdir, writeFile, rename, readdir, realpath } from "node:fs/promises";
 import { resolve, dirname, join, basename, posix, win32 } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -25,6 +25,7 @@ export async function readDeviceConfig(path) {
   const c = await privateFile(path);
   if (c.schemaVersion !== 1 || !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(c.address ?? "") || !/^127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(c.authority ?? "") || !/^[a-f0-9]{64}$/.test(c.token ?? "") || !["claude", "codex"].includes(c.provider) || typeof c.host !== "string" || !c.host || c.host.length > 100 || Number(new URL(c.address).port) > 65535 || Number(c.authority.split(":")[1]) > 65535) throw fail("device_config_invalid");
   if (c.nativeExecutable !== undefined && (typeof c.nativeExecutable !== "string" || (!posix.isAbsolute(c.nativeExecutable) && !win32.isAbsolute(c.nativeExecutable)) || /^node(?:\.exe)?$/i.test(basename(c.nativeExecutable.replaceAll("\\", "/"))))) throw fail("native_executable_invalid");
+  if (c.nativeLauncher !== undefined && (c.provider !== "claude" || !c.nativeExecutable || typeof c.nativeLauncher !== "string" || (!posix.isAbsolute(c.nativeLauncher) && !win32.isAbsolute(c.nativeLauncher)) || !/^claude(?:\.exe)?$/i.test(basename(c.nativeLauncher.replaceAll("\\", "/"))))) throw fail("native_launcher_invalid");
   return c;
 }
 export async function scopedRequest(config, path, body) {
@@ -91,11 +92,30 @@ export async function processAncestors({ pid = process.ppid, inspect = inspectPr
   }
   return chain;
 }
-const nativeExecutable = (process, provider, configured) => configured ? process.exe === configured : new RegExp("^" + provider + "(?:\\.exe)?$", "i").test(basename(process.exe.replaceAll("\\", "/")));
+async function nativeExecutableMatcher(config, chain) {
+  const allowed = new Set(config.nativeExecutable ? [config.nativeExecutable] : []);
+  // Native realpath expands Windows 8.3 aliases consistently. Keep exact raw
+  // identities too: an already running executable can have been removed.
+  for (const path of [config.nativeExecutable, config.nativeLauncher].filter(Boolean)) {
+    let current;
+    try { current = await realpath(path); } catch { /* Retain only the exact configured pin when resolution is unavailable. */ }
+    if (current) {
+      if (/^node(?:\.exe)?$/i.test(basename(current.replaceAll("\\", "/")))) throw fail("native_executable_invalid");
+      allowed.add(current);
+    }
+  }
+  const observed = new Map();
+  if (config.nativeExecutable) await Promise.all([...new Set(chain.map(p => p.exe))].map(async path => {
+    try { observed.set(path, await realpath(path)); } catch { /* Raw identity remains available for a deleted running binary. */ }
+  }));
+  // Configured identities never fall back to accepting a basename or an
+  // arbitrary version-directory member. Record PID/start-time/exe stay exact.
+  return process => config.nativeExecutable ? allowed.has(process.exe) || allowed.has(observed.get(process.exe)) : new RegExp("^" + config.provider + "(?:\\.exe)?$", "i").test(basename(process.exe.replaceAll("\\", "/")));
+}
 export async function resolveClaudeSource(configPath, { ancestors = processAncestors, readRecord = privateFile } = {}) {
   const config = await readDeviceConfig(configPath);
   if (config.provider !== "claude") throw fail("claude_device_required");
-  const chain = await ancestors(), root = join(dirname(resolve(configPath)), "bindings");
+  const chain = await ancestors(), matchesExecutable = await nativeExecutableMatcher(config, chain), root = join(dirname(resolve(configPath)), "bindings");
   let files; try { files = await readdir(root); } catch { throw fail("native_lifecycle_binding_missing"); }
   const matches = [];
   for (const file of files.slice(0, 2000)) {
@@ -103,7 +123,7 @@ export async function resolveClaudeSource(configPath, { ancestors = processAnces
     let record; try { record = await readRecord(join(root, file)); } catch { continue; }
     if (record.schemaVersion !== 1 || record.hookEvent === "SessionEnd" || record.provider !== config.provider || record.host !== config.host || !nativeUuid.test(record.nativeThreadId ?? "") || !record.process) continue;
     const current = chain.find(p => p.pid === record.process.pid);
-    if (current && nativeExecutable(current, "claude", config.nativeExecutable) && current.startedAt === record.process.startedAt && current.exe === record.process.exe) matches.push({...record,channelOptIn:current.channelOptIn===true});
+    if (current && matchesExecutable(current) && current.startedAt === record.process.startedAt && current.exe === record.process.exe) matches.push({...record,channelOptIn:current.channelOptIn===true});
   }
   if (matches.length !== 1) throw fail(matches.length ? "native_lifecycle_binding_ambiguous" : "native_lifecycle_binding_stale_or_missing");
   return matches[0];
@@ -145,7 +165,7 @@ export async function runNativeSessionHook(input, { configPath = process.env.AGE
   if (!configPath) throw fail("device_config_required");
   let event; try { event = typeof input === "string" ? JSON.parse(input) : input; } catch { throw fail("native_hook_invalid"); }
   if (!event || typeof event.session_id !== "string" || !event.session_id || event.session_id.length > 200 || typeof event.cwd !== "string" || (!posix.isAbsolute(event.cwd) && !win32.isAbsolute(event.cwd)) || event.cwd.length > 2000 || !["SessionStart", "UserPromptSubmit", "SessionEnd"].includes(event.hook_event_name)) throw fail("native_hook_invalid");
-  const config = await readDeviceConfig(configPath), chain = await ancestors(), native = chain.find(p => nativeExecutable(p, config.provider, config.nativeExecutable));
+  const config = await readDeviceConfig(configPath), chain = await ancestors(), matchesExecutable = await nativeExecutableMatcher(config, chain), native = chain.find(matchesExecutable);
   if (!native || !Number.isSafeInteger(native.pid) || typeof native.startedAt !== "string" || !native.startedAt) throw fail("native_process_not_identified");
   if (config.provider === "claude" && !nativeUuid.test(event.session_id)) throw fail("native_source_uuid_required");
   const root = join(dirname(resolve(configPath)), "bindings"), key = createHash("sha256").update(JSON.stringify([native.pid, native.startedAt, event.session_id])).digest("hex");
