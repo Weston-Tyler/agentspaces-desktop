@@ -124,7 +124,7 @@ test("Claude setup migrates a stale PATH pin to the installed per-user native la
   symlinkSync(version, join(f.home, ".local", "bin"), process.platform === "win32" ? "junction" : "dir");
   const refreshed = await installOnCurrentHost(f.options);
   const config = JSON.parse(readFileSync(refreshed.configPath));
-  assert.equal(config.nativeExecutable, realpathSync(launcher));
+  assert.equal(config.nativeExecutable, realpathSync.native(launcher));
   assert.equal(config.nativeLauncher, launcher);
   assert.equal(refreshed.activeSessionReloaded, false);
   assert.equal(refreshed.inboundChannelConnected, false);

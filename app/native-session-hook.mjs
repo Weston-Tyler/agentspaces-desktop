@@ -92,25 +92,30 @@ export async function processAncestors({ pid = process.ppid, inspect = inspectPr
   }
   return chain;
 }
-async function nativeExecutableMatcher(config) {
+async function nativeExecutableMatcher(config, chain) {
   const allowed = new Set(config.nativeExecutable ? [config.nativeExecutable] : []);
-  if (config.nativeLauncher) {
+  // Native realpath expands Windows 8.3 aliases consistently. Keep exact raw
+  // identities too: an already running executable can have been removed.
+  for (const path of [config.nativeExecutable, config.nativeLauncher].filter(Boolean)) {
     let current;
-    try { current = await realpath(config.nativeLauncher); } catch { /* The pinned running binary remains valid if the launcher is temporarily absent. */ }
+    try { current = await realpath(path); } catch { /* Retain only the exact configured pin when resolution is unavailable. */ }
     if (current) {
       if (/^node(?:\.exe)?$/i.test(basename(current.replaceAll("\\", "/")))) throw fail("native_executable_invalid");
       allowed.add(current);
     }
   }
-  // Keep legacy configurations compatible. Configured identities never fall
-  // back to accepting a basename or an arbitrary version-directory member.
-  return process => config.nativeExecutable ? allowed.has(process.exe) : new RegExp("^" + config.provider + "(?:\\.exe)?$", "i").test(basename(process.exe.replaceAll("\\", "/")));
+  const observed = new Map();
+  if (config.nativeExecutable) await Promise.all([...new Set(chain.map(p => p.exe))].map(async path => {
+    try { observed.set(path, await realpath(path)); } catch { /* Raw identity remains available for a deleted running binary. */ }
+  }));
+  // Configured identities never fall back to accepting a basename or an
+  // arbitrary version-directory member. Record PID/start-time/exe stay exact.
+  return process => config.nativeExecutable ? allowed.has(process.exe) || allowed.has(observed.get(process.exe)) : new RegExp("^" + config.provider + "(?:\\.exe)?$", "i").test(basename(process.exe.replaceAll("\\", "/")));
 }
 export async function resolveClaudeSource(configPath, { ancestors = processAncestors, readRecord = privateFile } = {}) {
   const config = await readDeviceConfig(configPath);
   if (config.provider !== "claude") throw fail("claude_device_required");
-  const matchesExecutable = await nativeExecutableMatcher(config);
-  const chain = await ancestors(), root = join(dirname(resolve(configPath)), "bindings");
+  const chain = await ancestors(), matchesExecutable = await nativeExecutableMatcher(config, chain), root = join(dirname(resolve(configPath)), "bindings");
   let files; try { files = await readdir(root); } catch { throw fail("native_lifecycle_binding_missing"); }
   const matches = [];
   for (const file of files.slice(0, 2000)) {
@@ -160,7 +165,7 @@ export async function runNativeSessionHook(input, { configPath = process.env.AGE
   if (!configPath) throw fail("device_config_required");
   let event; try { event = typeof input === "string" ? JSON.parse(input) : input; } catch { throw fail("native_hook_invalid"); }
   if (!event || typeof event.session_id !== "string" || !event.session_id || event.session_id.length > 200 || typeof event.cwd !== "string" || (!posix.isAbsolute(event.cwd) && !win32.isAbsolute(event.cwd)) || event.cwd.length > 2000 || !["SessionStart", "UserPromptSubmit", "SessionEnd"].includes(event.hook_event_name)) throw fail("native_hook_invalid");
-  const config = await readDeviceConfig(configPath), matchesExecutable = await nativeExecutableMatcher(config), chain = await ancestors(), native = chain.find(matchesExecutable);
+  const config = await readDeviceConfig(configPath), chain = await ancestors(), matchesExecutable = await nativeExecutableMatcher(config, chain), native = chain.find(matchesExecutable);
   if (!native || !Number.isSafeInteger(native.pid) || typeof native.startedAt !== "string" || !native.startedAt) throw fail("native_process_not_identified");
   if (config.provider === "claude" && !nativeUuid.test(event.session_id)) throw fail("native_source_uuid_required");
   const root = join(dirname(resolve(configPath)), "bindings"), key = createHash("sha256").update(JSON.stringify([native.pid, native.startedAt, event.session_id])).digest("hex");

@@ -261,12 +261,13 @@ test("Claude lifecycle follows only the configured launcher across native upgrad
   await symlink(oldRoot, launcherRoot, process.platform === "win32" ? "junction" : "dir");
   const launcher = join(launcherRoot, name), pinned = realpathSync(launcher);
   await writeFile(configPath, JSON.stringify({ ...device, nativeExecutable: pinned, nativeLauncher: launcher }));
-  const original = { ...processRecord, exe: pinned }, requestImpl = async (_, path) => path === "/api/native/register" ? { participantConfig } : [];
+  const original = { ...processRecord, exe: realpathSync.native(launcher) }, requestImpl = async (_, path) => path === "/api/native/register" ? { participantConfig } : [];
   await runNativeSessionHook(event(), { configPath, ancestors: async () => [original], requestImpl });
   if (process.platform === "win32") await rmdir(launcherRoot); else await unlink(launcherRoot);
   await symlink(nextRoot, launcherRoot, process.platform === "win32" ? "junction" : "dir");
-  const upgraded = { ...processRecord, pid: 4243, startedAt: "fixture-upgrade", exe: realpathSync(launcher) };
+  const upgraded = { ...processRecord, pid: 4243, startedAt: "fixture-upgrade", exe: realpathSync.native(launcher) };
   assert.notEqual(upgraded.exe, pinned);
+  // The stored pin may use a Windows 8.3 alias; real process observations use the native path.
   assert.equal((await resolveClaudeSource(configPath, { ancestors: async () => [original] })).nativeThreadId, UUID);
   await runNativeSessionHook(event({ hook_event_name: "UserPromptSubmit" }), { configPath, ancestors: async () => [upgraded], requestImpl });
   assert.equal((await resolveClaudeSource(configPath, { ancestors: async () => [upgraded] })).nativeThreadId, UUID);

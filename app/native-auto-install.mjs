@@ -29,7 +29,7 @@ function executable(name) {
   const candidates = output.trim().split(/\r?\n/);
   const path = candidates.find(candidate => /\.exe$/i.test(candidate)) ?? candidates.find(candidate => /\.cmd$/i.test(candidate)) ?? candidates[0];
   if (!path || !existsSync(path)) throw new Error('Native executable unavailable');
-  return realpathSync(path);
+  return realpathSync.native(path);
 }
 // Background SSH environments may still resolve the old npm installation.
 // Prefer Claude's standard per-user native launcher and retain its stable path
@@ -100,7 +100,7 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
     await runCLI(nodeBinary, ['--input-type=module', '-e', "await import('@modelcontextprotocol/sdk/server/index.js');await import('@modelcontextprotocol/sdk/server/stdio.js');await import('zod');await import('@anthropic-ai/claude-agent-sdk');await import('ws');"], { cwd: base, timeout: 10000 });
   }
   const launcher = config.provider === 'claude' ? claudeLauncher(home) : undefined;
-  const binary = launcher ? realpathSync(launcher) : resolveExecutable(config.provider), folder = join(base, config.provider), configPath = join(folder, 'device.json');
+  const binary = launcher ? realpathSync.native(launcher) : resolveExecutable(config.provider), folder = join(base, config.provider), configPath = join(folder, 'device.json');
   const device = { ...config, ...(config.provider === 'claude' ? { nativeExecutable: binary } : {}) };
   delete device.nativeLauncher;
   if (launcher) device.nativeLauncher = launcher;
