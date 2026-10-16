@@ -1,3 +1,4 @@
+import { configureFleetObservations } from './observed-fleet.mjs';
 import { REMOTE_HOST } from "./remote-host.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { isAbsolute, resolve, posix } from "node:path";
@@ -314,7 +315,10 @@ export class Engine {
       throw new Error(
         "Native private-content fabric admission is not qualified; local fixture project only",
       );
+    const observations = configureFleetObservations(config.observationSpaces);
     await this.fabric.connect(config);
+    this.fabricObservationOptions = observations;
+    for (const key of ['usage', 'advisory']) if (observations[key]) this.fabric.peer.pullSpace(observations[key]);
     this.fabricProject = p.id;
     this.store.audit("Loopback fabric connected", { project: p.id });
     return this.fabric.diagnostics();

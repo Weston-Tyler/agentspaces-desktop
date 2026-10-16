@@ -4,11 +4,30 @@ import {
   cbor,
   spaceIdLocal,
   verifySignedGroupAd,
+  wire,
 } from "@agentspaces/client";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
+import { discoverFabricCards } from "./fabric-discovery.mjs";
 import { protectStateDirectory } from "./state-security.mjs";
+const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const declaredBinding = /#([a-f0-9]{40})$/.exec(manifest.dependencies?.["@agentspaces/client"] ?? "")?.[1] ?? "unknown";
+const counter = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
+function ignoredKindCounters(kinds) {
+  const total = kinds instanceof Map ? kinds.size : 0;
+  const entries = [];
+  let inspected = 0;
+  for (const [kind, count] of kinds instanceof Map ? kinds : []) {
+    if (inspected++ >= 100) break;
+    // Frame-kind text is remote input. Omit oversized keys instead of shortening
+    // them into collisions, and bound iteration as well as the returned payload.
+    if (typeof kind !== "string" || kind.length > 128) continue;
+    entries.push([kind, counter(count)]);
+  }
+  return { ignoredKinds: Object.fromEntries(entries), ignoredKindsTotal: total,
+    ignoredKindsOmitted: total - entries.length, ignoredKindsTruncated: total > entries.length };
+}
 export const TYPES = Object.freeze({
   finding: "agentspaces.desktop.Finding#v1",
   request: "agentspaces.desktop.FollowUpRequest#v1",
@@ -24,6 +43,11 @@ export class FabricAdapter {
     this.reason = "No fabric seed configured";
     this.agents = new Map();
   }
+  get status() {
+    if (this._status === "connected" && !this.peer?.connected()) return "disconnected";
+    return this._status;
+  }
+  set status(value) { this._status = value; }
   async connect({ host, port, groupId }) {
     if (!["127.0.0.1", "::1"].includes(host))
       throw new Error("This alpha qualifies literal-loopback seeds only.");
@@ -39,6 +63,7 @@ export class FabricAdapter {
     this.close();
     const identity = Identity.loadOrCreate(`${this.stateRoot}/fabric-keys`);
     this.peer = new Peer(identity, groupId, this.clock);
+    this.status = "connecting";
     try {
       const path = join(this.stateRoot, "founding.cbor");
       const saved = existsSync(path) ? cbor.loads(readFileSync(path)) : null;
@@ -53,11 +78,13 @@ export class FabricAdapter {
         writeFileSync(temp, cbor.dumps(this.peer.founding), { mode: 0o600 });
         renameSync(temp, path);
       }
+      this.peer.pullAds();
       this.status = "connected";
       this.reason =
         "Verified founding document and loopback TCP connection; admission/liveness not independently acknowledged";
     } catch (e) {
       this.close();
+      this.status = "disconnected";
       this.reason = "Seed connection or group verification failed";
       throw e;
     }
@@ -117,16 +144,34 @@ export class FabricAdapter {
   close() {
     this.peer?.close();
     this.peer = null;
-    this.status = "disconnected";
+    this.status = "closed";
+    this.reason = "Fabric closed by the owner; automatic reconnect is stopped";
     this.agents.clear();
   }
+  discovery(options = {}) {
+    return discoverFabricCards(this.peer, { ...options, now: this.clock() });
+  }
   diagnostics() {
+    const disconnected = this.status === "disconnected" && !!this.peer;
     return {
       status: this.status,
-      reason: this.reason,
-      binding: "d30423d2a32685a2c2bb107acf66aca5065450d8",
+      reason: disconnected ? "Seed socket disconnected; upstream manages bounded reconnect attempts, but exposes no in-progress/exhausted signal" : this.reason,
+      binding: declaredBinding,
+      bindingSource: "package.json declared dependency pin",
+      wireVersion: wire.WIRE_VERSION,
+      recovery: { managedBy: "upstream Peer", inProgress: disconnected ? null : false, reconnectWindowMillis: counter(this.peer?.reconnectWindowMs) },
+      counters: {
+        reconnects: counter(this.peer?.reconnects ?? 0),
+        staleFrames: counter(this.peer?.frames?.stale ?? 0),
+        futureFrames: counter(this.peer?.frames?.ahead ?? 0),
+        replayedFrames: counter(this.peer?.frames?.replayed ?? 0),
+        malformedFrames: counter(this.peer?.malformedFrames ?? 0),
+        ...ignoredKindCounters(this.peer?.ignoredKinds),
+      },
       capabilities: {
         signedEntries: true,
+        signedDiscovery: true,
+        nativeIdentityFromAgentCards: false,
         claims: "upstream LEASE_RACE",
         sealedSpaces: false,
         remoteAssetExchange: false,

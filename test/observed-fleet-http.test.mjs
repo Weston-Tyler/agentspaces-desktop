@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {Store} from '../app/store.mjs';
+import {Engine} from '../app/engine.mjs';
+import {FabricAdapter} from '../app/fabric.mjs';
+import {startServer} from '../app/server.mjs';
+test('fleet observation HTTP route preserves owner and exact fixture connector boundaries',async t=>{
+ const root=mkdtempSync(join(tmpdir(),'as-fleet-http-'));
+ const engine=new Engine(new Store(root),new FabricAdapter({stateRoot:root}));engine.loadSample();
+ const app=await startServer({root,port:0,engine,backgroundNative:false});t.after(async()=>{await app.close();rmSync(root,{recursive:true,force:true});});
+ const post=(token,path,body={})=>fetch(app.address+path,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});
+ const owner=await post(app.admin,'/api/fabric/observations');assert.equal(owner.status,200);const value=await owner.json();assert.equal(value.health.wireVersion,3);assert.equal(value.usage.enabled,false);
+ engine.grant('sample-codex-new',{enrolled:true,retrieve:true});const connector=engine.issueConnector('sample-codex-new');
+ assert.equal((await post(connector.token,'/api/fabric/observations')).status,400);
+ engine.fabricProject='sample-research';
+ assert.equal((await post(connector.token,'/api/fabric/observations',{query:'summary',limit:2})).status,200);
+ assert.equal((await post(connector.token,'/api/fabric/connect',{host:'127.0.0.1',port:1,groupId:'forbidden'})).status,400);
+ engine.grant('sample-codex-new',{retrieve:false});
+ assert.notEqual((await post(connector.token,'/api/fabric/observations')).status,200);
+ assert.equal(engine.modelCalls,0);
+});

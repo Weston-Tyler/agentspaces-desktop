@@ -1,3 +1,5 @@
+import { cbor } from '@agentspaces/client';
+import { assertReplicaRetained } from './replica-compatibility.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, lstatSync, readFileSync, mkdtempSync, cpSync, rmSync, chmodSync } from 'node:fs';
 import { resolve, join } from 'node:path';
@@ -35,7 +37,7 @@ export async function preflightUpdate({ stateRoot, candidateRoot = fileURLToPath
   assertSavedHostIdentity(settings,index);
   const before = candidateFingerprint(candidateRoot);
   const scratch = mkdtempSync(join(tmpdir(),'agentspaces-update-')); chmodSync(scratch,0o700);
-  let app;
+  let app, engine;
   try {
     protectStateDirectory(scratch);
     // Reject linked private files before copying; their external targets are never read.
@@ -44,10 +46,17 @@ export async function preflightUpdate({ stateRoot, candidateRoot = fileURLToPath
       if (/^(runtime\.json|stdout\.log|stderr\.log|.*\.tmp)$/.test(name)) continue;
       cpSync(join(stateRoot,name),join(scratch,name),{recursive:true});
     }
-    const store = new Store(scratch), engine = new Engine(store,new FabricAdapter({stateRoot:scratch}), {
+    const store = new Store(scratch);
+    engine = new Engine(store,new FabricAdapter({stateRoot:scratch}), {
       nativeFactory: () => { throw Error('preflight_native_execution_forbidden'); },
       answerFactory: () => { throw Error('preflight_model_execution_forbidden'); },
     });
+    let workReplica = {present:false};
+    if (existsSync(engine.workBoard.path)) {
+      const saved = cbor.loads(readFileSync(engine.workBoard.path));
+      engine.workBoard.open();
+      workReplica = {present:true,...assertReplicaRetained(saved.replica,engine.workBoard.peer.exportSnapshot()),receipts:Object.keys(saved.receipts ?? {}).length};
+    }
     // Engine restores historical dispatch counts from saved receipts.
     const priorModelCalls = engine.modelCalls;
     app = await startServer({root:scratch,port:0,engine,desktopDiscovery:false,backgroundNative:false,
@@ -58,6 +67,6 @@ export async function preflightUpdate({ stateRoot, candidateRoot = fileURLToPath
     if (!response.ok || (await response.json()).instance !== app.instance) throw Error('preflight_health_failed');
     if (candidateFingerprint(candidateRoot) !== before) throw Error('candidate_changed_during_preflight');
     if(engine.modelCalls !== priorModelCalls) throw Error('preflight_unexpected_model_execution');
-    return {passed:true,candidate:before,settingsSchema:settings.schema,privateCopyStartup:true,discovery:false,modelCalls:0,nativeCancellationRequested:false};
-  } finally { if(app) await app.close(); rmSync(scratch,{recursive:true,force:true}); }
+    return {passed:true,candidate:before,settingsSchema:settings.schema,privateCopyStartup:true,workReplica,discovery:false,modelCalls:0,nativeCancellationRequested:false};
+  } finally { if(app) await app.close(); else engine?.workBoard.close(); rmSync(scratch,{recursive:true,force:true}); }
 }

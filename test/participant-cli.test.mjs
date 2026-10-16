@@ -24,6 +24,19 @@ async function setup(t, handler) {
   await writeFile(path, JSON.stringify(config), { mode: 0o600 });
   return { requests, path, root, config, args: (...args) => ["--config", path, "--source", SOURCE, ...args] };
 }
+test('fleet observations CLI documents bounds offline and forwards only bounded read arguments',async t=>{
+ const help=await runParticipantCli(['fabric-observations','--help'],{input:{[Symbol.asyncIterator](){throw Error('Help must not read stdin');}}});
+ assert.deepEqual(help.options,['query','limit']);assert.match(help.notes.join(' '),/1–100/);assert.match(help.notes.join(' '),/untrusted/);
+ const {args,requests}=await setup(t);
+ await runParticipantCli(args('fabric-observations'));
+ await runParticipantCli(args('fabric-observations','--query','synthetic recipe','--limit','5'));
+ assert.deepEqual(requests.map(row=>({path:row.path,body:row.body})),[
+  {path:'/api/fabric/observations',body:{query:'',limit:100}},
+  {path:'/api/fabric/observations',body:{query:'synthetic recipe',limit:5}}
+ ]);
+ for(const invalid of [['--limit','0'],['--limit','101'],['--limit','1.5'],['--query','x'.repeat(501)],['--discussion',GROUP]])await assert.rejects(runParticipantCli(args('fabric-observations',...invalid)));
+ assert.equal(requests.length,2);
+});
 test("Participant CLI exact source check precedes all network access and local info omits secrets", async (t) => {
   const { args, requests } = await setup(t);
   const wrong = args("discover"); wrong[3] = GROUP;

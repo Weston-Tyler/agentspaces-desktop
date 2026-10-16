@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -128,7 +129,7 @@ try {
         wrongSpaceUnclaimed: true,
         consumedRequestsNotRetaken: true,
         nativeProviderCalls: 0,
-        upstreamTypeScript: "be025e7aba72e1837e0ccb3999bb76098d012fe0",
+        upstreamTypeScript: JSON.parse(readFileSync(new URL("../package.json", import.meta.url))).dependencies["@agentspaces/client"].split("#").at(-1),
       },
       null,
       2,

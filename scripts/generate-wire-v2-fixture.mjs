@@ -1,0 +1,31 @@
+// Regenerate only with the previously pinned ab091a4 client, in an isolated checkout.
+// All identities are generated for this fixture. Only signed public material is saved.
+import { pathToFileURL } from 'node:url';
+import { writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+const modulePath = process.argv[2], outputPath = process.argv[3];
+if (!modulePath || !outputPath) throw Error('Usage: generate-wire-v2-fixture.mjs OLD_CLIENT_MODULE OUTPUT_JSON');
+const {Identity,Peer,cbor,wire,revocation}=await import(pathToFileURL(modulePath));
+if(wire.WIRE_VERSION!==2)throw Error('Requires wire-v2 client');
+let now=1800000000000; const clock=()=>now, group='synthetic-desktop-upgrade-fixture';
+const host=Identity.generate(),worker=host.renewingSubordinate('fixture-worker','PT24H',Identity.generate(),clock);
+const retired=host.renewingSubordinate('fixture-retired','PT24H',Identity.generate(),clock);
+const peer=new Peer(host,group,clock), space='desktop-work-board',type='agentspaces.desktop.FollowUpRequest#v1';
+const request=name=>({title:name,brief:'Synthetic migration fixture',repository:'https://example.invalid/fixture',base:'a'.repeat(40),allowedFiles:'src/'+name+'.js'});
+const active=peer.writeEntry(space,type,request('active'),'fixture',600000,worker);
+const completed=peer.writeEntry(space,type,request('completed'),'fixture',600000,worker);
+const history=peer.writeEntry(space,type,request('retired'),'fixture',600000,retired);
+await peer.takeEntry(space,type,'fixture-worker',120000,0,1000,worker,active);
+now+=1000;peer.renewClaim(space,active,240000,worker);peer.renewEntry(space,active,900000,worker);
+await peer.takeEntry(space,type,'fixture-worker',120000,0,1000,worker,completed);
+peer.completeEntry(space,completed,worker);
+now+=1000;
+const target={kind:'AGENT',agent:retired.agentId};
+const ad={id:revocation.revocationId(group,target),issuer:host.peerId,group,issued:new Date(now).toISOString(),ttl:'PT720H',target,reason:'retired',effectiveFrom:new Date(now).toISOString()};
+const adBytes=cbor.dumps(ad);
+if(!peer.revocations.acceptSigned(revocation.CREDENTIAL_STREAM,{adBytes,publicKey:host.publicRaw,signature:host.sign(adBytes)},now))throw Error('Fixture revocation failed');
+const frame=wire.encodeFrame(wire.envelope(group,'PING',host.peerId,wire.hlcNow(host.peerId,now),cbor.dumps({nonce:1})),host);
+const saved={version:1,scope:{id:'fixture-scope',account:'fixture-account'},replica:peer.exportSnapshot(),receipts:{'fixture-delivery':{digest:'b'.repeat(64),result:{entryId:completed,status:'completed'}}}};
+const bytes=cbor.dumps(saved);
+writeFileSync(outputPath,JSON.stringify({generatedBy:'ab091a4fd9b325679ceca9dfa3d3042ff572696b',synthetic:true,privateKeysIncluded:false,clock:now,group,ids:{active,completed,history},retiredAgent:retired.agentId,workerAgent:worker.agentId,snapshotSha256:createHash('sha256').update(bytes).digest('hex'),snapshot:bytes.toString('base64'),wireV2Frame:frame.toString('base64')},null,2)+'\n');
+peer.close();

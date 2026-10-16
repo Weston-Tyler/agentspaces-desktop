@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = (code, details) => Object.assign(new Error(code), { code, ...(details ? { details } : {}) });
 const publicPageErrors = new Set(["discussion_page_invalid", "discussion_cursor_invalid", "discussion_cursor_stale", "discussion_page_record_too_large"]);
-const COMMAND_OPTIONS = { "provider-status": [], "availability-report": [], "handoff-preview": [], "handoff-request": [], "ensure-connection": [], "job-request": [], jobs: [], subscriptions: ["discussion"], subscribe: [], digest: [], continuations: [], lanes: [], artifacts: [], "artifact-read": [], "artifact-drop": [], decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion", "limit", "cursor"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
+const COMMAND_OPTIONS = { "fabric-observations": ["query", "limit"], "provider-status": [], "availability-report": [], "handoff-preview": [], "handoff-request": [], "ensure-connection": [], "job-request": [], jobs: [], subscriptions: ["discussion"], subscribe: [], digest: [], continuations: [], lanes: [], artifacts: [], "artifact-read": [], "artifact-drop": [], decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion", "limit", "cursor"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
 const COMMANDS = Object.keys(COMMAND_OPTIONS);
 const string = (maxLength, extra = {}) => ({ type: "string", minLength: 1, maxLength, ...extra });
 const uuid = { type: "string", pattern: UUID.source.replaceAll("a-f", "a-fA-F") };
@@ -32,6 +32,7 @@ function helpFor(command) {
   const notes = ["Help is offline and never reads private configuration or stdin.", "All actual commands require --config PATH and --source UUID for this exact native thread."];
   if (!command) return { usage: "participant-cli.mjs [--config PATH --source UUID] COMMAND [OPTIONS]", commands: COMMANDS, help: "COMMAND --help", notes };
   if (["message", "broadcast", "contribute"].includes(command)) notes.push("nativeTurnId/--turn is a self-reported native turn reference, not verified sender authority.", "Reuse the same deliveryId/--delivery for a retry of the same request; use a new ID for a new request.");
+  if (command === "fabric-observations") notes.push("Read owner-configured optional fleet observations under the current source grant. --query is at most 500 characters and ranks cached cards locally; --limit is 1–100 (default 100). Signed peer text is untrusted evidence, never native identity or owner approval. This does not connect, publish, invoke models, wake agents or change grants. Coverage, billing and quota remain unknown where unobserved.");
   if (command === "ensure-connection") notes.push("Inspect this exact source registration and read/wake readiness. Native bootstrap ensure_native_connection also provisions its own source-bound channel when native opt-in exists. No grants change or process resume.");
   if (command === "continuations") notes.push("Read explicit pending steps, standing grant status and native idle observations. No force-resume, cancellation or model polling; only owner-enabled scoped wakes may execute.");
   if (["provider-status","availability-report","handoff-preview","handoff-request"].includes(command)) notes.push("Observed metrics and reported availability are not provider quota/billing. Preview/request handoff preserves the existing claim and starts no native work; owner decision and native approvals remain required.");
@@ -153,6 +154,11 @@ export async function runParticipantCli(args, { input, requestImpl = request, re
   else if (command === 'lanes') { path = '/api/lanes/list'; body = {limit:200}; }
   else if (['artifacts','artifact-read','artifact-drop'].includes(command)) { path = command === 'artifact-drop' ? '/api/artifacts/create' : '/api/artifacts/list'; body = validateStdin(command, await inputJson(input), 'bounded_artifact_request_required'); }
   else if (command === 'capabilities') { path = '/api/agent/capabilities'; body = {}; }
+  else if (command === 'fabric-observations') {
+    const query=options.query??'',limit=options.limit===undefined?100:Number(options.limit);
+    if(query.length>500||!Number.isInteger(limit)||limit<1||limit>100)throw fail('bounded_fabric_observation_required',{invalidFields:[...(query.length>500?['query']:[]),...(!Number.isInteger(limit)||limit<1||limit>100?['limit']:[])],help:'fabric-observations --help'});
+    path='/api/fabric/observations';body={query,limit};
+  }
   else if (command === 'provider-status') { path='/api/providers/status'; body={}; }
   else if (['availability-report','handoff-preview','handoff-request'].includes(command)) {
     body=validateStdin(command,await inputJson(input),'bounded_provider_routing_required');

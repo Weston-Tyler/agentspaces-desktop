@@ -1,23 +1,66 @@
 # AgentSpaces ecosystem reuse assessment
 
-Source inspection on 2026-10-08. This is a dependency assessment for the existing desktop product, not another program plan or a claim that these components are integrated here.
+Reviewed 2026-10-16 against the exact upstream revisions below. Desktop owns the
+companion, UI and native adapters; AgentSpaces owns identity, peering, discovery,
+signed work, claims and leases. This assessment describes source integration and
+bounded qualification, not an installer release or deployment.
 
-| Repository | Fit for this desktop product | Current disposition |
+| Repository and inspected revision | Role | Desktop disposition |
 | --- | --- | --- |
-| [AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) | Owning identity, peering, signed replicated entries, work, typed templates, claims/leases/results and discovery | REUSE: existing Java/TypeScript loopback proof; selected core bb52d8a7b37458b147ee7660e0b8dbc43da4d392 |
-| [agentspaces-typescript](https://github.com/badmonkeyai/agentspaces-typescript) | Electron/Node-side wire binding and actual peer transport | REUSE: dependency pinned at be025e7aba72e1837e0ccb3999bb76098d012fe0; targeted-take filtering gap remains explicit |
-| [agentspaces-model-wire](https://github.com/badmonkeyai/agentspaces-model-wire) | Shared messages, versioned ConversationSnapshot, model service/cancel/chunk/usage records and canonical CBOR vectors | REUSE: desktop snapshot projection preserves owning namespace/shape at f55a89eb974cea30fdc295238a071239b462f1eb; Java/CBOR interoperability not yet tested |
-| [agentspaces-springai](https://github.com/badmonkeyai/agentspaces-springai) | Replicated chat memory, fleet tools, leased model workers, streaming/cancellation, usage and controlled MCP export | RESEARCH_ONLY: inspected main 4d5e283f04527f1c11012bfeb3fa37e1829ef443; candidate for a future JVM connector/worker, not installed or executed |
-| [agentspaces-micronaut](https://github.com/badmonkeyai/agentspaces-micronaut) | MCP export of fleet tools and import of external MCP tools as signed fleet actions; LangChain4j shares the model-wire records/chat memory | RESEARCH_ONLY: inspected main 491c8549271e5533332c200f3501198994fc13c3; candidate JVM bridge; requires its JDK 25/Micronaut runtime qualification |
-| [agentspaces-spec](https://github.com/badmonkeyai/agentspaces-spec) | Normative wire/identity/security rules and golden-vector conformance kit across bindings | REUSE as contract reference; adding a new protocol implementation is unnecessary |
-| [agentspaces-python](https://github.com/badmonkeyai/agentspaces-python) | Python workers and research/analysis integrations can join the existing fabric | Optional future adapter; no dependency added to this Node application |
-| [agentspaces-clj](https://github.com/badmonkeyai/agentspaces-clj) | Clojure applications can use the owning Java fabric | Optional future connection for Clojure workloads; no other product altered |
-| [agentspaces-perf](https://github.com/badmonkeyai/agentspaces-perf) | Owning JMH benchmark suite | Later scale qualification; not evidence of desktop/native-thread performance |
-| [agentspaces-partybus](https://github.com/badmonkeyai/agentspaces-partybus) | Trip-planning example | Pattern reference, not the chat or execution backend |
-| [agentspaces-example-apps](https://github.com/badmonkeyai/agentspaces-example-apps) | Intended example collection | Empty at this inspection; GitHub states empty and remote HEAD returned no refs. Inspect actual examples in Spring AI/Micronaut instead |
+| [AgentSpaces `c47758ac`](https://github.com/badmonkeyai/AgentSpaces/tree/c47758ac6c253bcb2ad31c264291bee5ed16c7cf) | Java identity, peering, discovery, replicated spaces and capabilities | Owning runtime; Java 21 loopback interoperability tested. Not bundled into Desktop. |
+| [TypeScript `3996234b`](https://github.com/badmonkeyai/agentspaces-typescript/tree/3996234b6d8323538ad806671bd55a4f76cd1e07) | Node peer, signed entries, targeted claims, snapshots, Space events and optional capabilities | Exact dependency pin. Wire v3, health/discovery, work activity and optional observation projections integrated. |
+| [Specification `bdba7424`](https://github.com/badmonkeyai/agentspaces-spec/tree/bdba742418c162c4b6456d1fe6803c2a9ccd2e04) | Owning wire and identity contracts | Contract reference; no new Desktop protocol implementation. |
+| [Model-wire `8546c3c4`](https://github.com/badmonkeyai/agentspaces-model-wire/tree/8546c3c4ca3dd323d5b29a296db8b406aa13b752) | Shared conversation, model request/result and `ModelUsageTotal` records | Preserve the owning namespace; optional observed usage projection. No billing/quota authority. |
+| [Spring AI `03610170`](https://github.com/badmonkeyai/agentspaces-springai/tree/036101702d10712c02aea3380d3ec91b795e6110) | JVM chat memory, model workers, fleet tools, optional capability tools and MCP export | Optional external service integration; not installed or invoked by this change. |
+| [LangChain4j `94c51a77`](https://github.com/badmonkeyai/agentspaces-langchain4j/tree/94c51a770f45b62f539c35e99192318df10ad5b0) | Host-neutral fleet runtime, shared model-wire and worker integrations | Optional JVM application integration. |
+| [Micronaut `f2d8bb22`](https://github.com/badmonkeyai/agentspaces-micronaut/tree/f2d8bb22565b5e1ade990004a788ada72013568e) | Framework wiring and MCP import/export around the JVM runtime | Optional bridge for a separately qualified external service. |
+| [Groovy `17482c77`](https://github.com/badmonkeyai/agentspaces-groovy/tree/17482c77e1cc41f9b69b7a8b96d66605079f0821) | DSL and compile-time validation for AgentSpaces applications | Application authoring option; no Electron dependency. |
+| [Python `04799e3a`](https://github.com/badmonkeyai/agentspaces-python/tree/04799e3ad3adc5e14250264c3e8b472f3999ab1a) | Python workers on the owning fabric | Optional external worker; no Python peer dependency added here. |
+| [Clojure `c55fd2af`](https://github.com/badmonkeyai/agentspaces-clj/tree/c55fd2af8102ae4cd704d9bcaa5ed17e4127e7a2) | Clojure access to the Java fabric | Optional application integration; no other product altered. |
+| [Performance suite `0486cfe8`](https://github.com/badmonkeyai/agentspaces-perf/tree/0486cfe87dea0c47a9b46c2088ddcd4174196dd9) | Owning JMH benchmarks | Future scale qualification; no Desktop performance claim. |
+| [Partybus `e9f55a9f`](https://github.com/badmonkeyai/agentspaces-partybus/tree/e9f55a9f5cd29996b6c31982120d1228eff905bf) | Example application composition | Pattern reference, not the native chat backend. |
 
-The concrete reuse opportunity is the existing SpaceChatMemoryRepository/SpaceChatMemoryStore plus model-wire records, and the Micronaut MCP bridge that exports fleet actions and imports external MCP tools. Its source uses the owning Java typed template filtered by server for calls; this avoids inventing another claim algorithm. Spring AI also explicitly documents that a fleet tool request goes to a matching type taker rather than necessarily the agent named by its card. A future native-thread bridge must therefore prove exact target routing and access/ownership, not merely expose a generic tool.
+## How the layers apply
 
-Neither framework integration inspected here supplies a qualified controller for resuming arbitrary existing Codex or Claude sessions in their desktop/CLI owners. Replicated framework chat memory is not native conversation ownership. MCP exposes tools to a running agent; it does not by itself wake a dormant native session. Existing native approvals, account boundaries, controller fencing and explicit inference budgets remain separate. The router teaches agents how to discover and use the permitted connector, without substituting instructions for those controls.
+Identity and admission establish who signed a record. Peering transports it.
+Discovery describes available capabilities. Spaces hold work, leases and results.
+Capability services can propose votes, aggregate contributions or rank discovery
+results. Framework integrations expose those layers to particular JVM applications.
+Desktop consumes the Node binding instead of packaging every framework.
 
-The present desktop stays on its existing TypeScript/Node shell and upstream fabric. The JVM integrations are candidates for reuse when a backend connector is qualified; adopting both runtimes now would add packaging and qualification work without closing the native ownership gap. No upstream repository, deployment, dependency pin, or model execution was changed as part of this assessment.
+The new client changes the wire version from 2 to 3; old and new peers reject one
+another's frames. Package labels alone are insufficient: the selected TypeScript
+manifest still says `0.2.0`, while its runtime wire constant is 3. Both dependency
+hash and runtime wire version are shown in diagnostics. See [the v3 integration
+and migration guide](upstream-v3.md).
+
+The board remains one companion-owned, persisted AgentSpaces replica. Source-bound
+HTTP/MCP calls and the SSH bridge access that companion. They do not create a
+federation of independent Desktop replicas. Native room delivery remains separate
+from optional loopback fabric discovery and observations.
+
+Signed AgentCards are capability descriptions, not native thread bindings or wake
+permissions. Framework fleet tools can choose a matching task taker rather than
+the specific agent named by a card. Exact native recipients must continue through
+the supported native delivery adapters and their grants.
+
+## Implemented and deferred reuse
+
+Source integrates verified cached AgentCard discovery, actual seed-socket health,
+upstream robustness counters, bounded work-board Space activity and optional
+read-only usage/advisory/semantic observations. Observations require an explicitly
+configured loopback connection for a fixture project; no private native metadata
+is advertised. Semantic ranking is local hashing/cosine over verified cards and
+starts no model. Advisory votes never become owner approval or machine reservations.
+
+Active aggregate exchange, gossip-learning exchange, sealed-space decryption,
+ordered take/reduce and multi-companion federation are not enabled here. Keep the
+fair machine queue and actual host locks. The current TypeScript peer is dial-only:
+hearing about another member does not prove a route to that member. Peer reconnect
+also does not repair the separate SSH, HTTP or native-channel delivery paths.
+
+Use a JVM connector only for a concrete external worker or service requirement.
+Its admission, scopes, exact targeting, model budget and failure recovery require
+separate qualification. Replicated framework chat memory does not transfer native
+conversation ownership, and an MCP tool connection alone cannot wake a dormant
+native thread.
