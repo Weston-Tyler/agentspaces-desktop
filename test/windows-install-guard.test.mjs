@@ -8,7 +8,7 @@ import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 const exec=promisify(execFile);
 test('Windows setup refuses a live bundled companion without terminating it', {skip:process.platform!=='win32'},async t=>{
- const root=mkdtempSync(join(realpathSync(tmpdir()),"as-installer's-guard-"));let child;
+ const root=mkdtempSync(join(realpathSync(tmpdir()),"as-installer's guard-"));let child;
  t.after(async()=>{if(child?.exitCode===null){const exited=new Promise(resolve=>child.once('exit',resolve));child.kill();await exited;}rmSync(root,{recursive:true,force:true});});
  const runtime=join(root,'resources','runtime');mkdirSync(runtime,{recursive:true});
  const binary=join(runtime,'node.exe');copyFileSync(process.execPath,binary);
@@ -32,13 +32,7 @@ test('Windows setup refuses a live bundled companion without terminating it', {s
  writeFileSync(entry,"console.log('ready');setInterval(()=>{},1000)");
  child=spawn(process.execPath,[entry],{stdio:['ignore','pipe','ignore'],windowsHide:true});
  await new Promise((resolve,reject)=>{child.once('error',reject);child.stdout.once('data',resolve);});
- const externalResult=await check(root);
- let diagnostic='';
- if(externalResult!==10){
-  const observed=await exec(shell,['-NoProfile','-NonInteractive','-Command',"$p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$env:AGENTSPACES_FIXTURE_PID);$prefix=[IO.Path]::GetFullPath($env:AGENTSPACES_FIXTURE_ROOT).TrimEnd('\\')+'\\';[pscustomobject]@{name=$p.Name;knownCommand=!!$p.CommandLine;rootInCommand=($p.CommandLine -and $p.CommandLine.Replace('/','\\').IndexOf($prefix,[StringComparison]::OrdinalIgnoreCase) -ge 0);fixtureInCommand=($p.CommandLine -like '*fixture-headless.mjs*');processExists=!!$p;executable=[IO.Path]::GetFileName($p.ExecutablePath);fixtureCommand=$p.CommandLine;fixturePrefix=$prefix}|ConvertTo-Json -Compress"],{env:{...process.env,AGENTSPACES_FIXTURE_PID:String(child.pid),AGENTSPACES_FIXTURE_ROOT:root},timeout:20000,windowsHide:true});
-  diagnostic=observed.stdout.trim();
- }
- assert.equal(externalResult,10,'external Node using installed scripts also fences setup '+diagnostic);
+ assert.equal(await check(root),10,'external Node using installed scripts also fences setup');
  assert.equal(child.exitCode,null);
  child.kill();await new Promise(resolve=>child.once('exit',resolve));
 });
