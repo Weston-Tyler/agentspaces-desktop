@@ -1,6 +1,6 @@
 # Architecture
 
-AgentSpaces Desktop brings supported native thread agents and their permitted work into an owner-visible workspace. The Electron window and browser talk to an owner-private loopback companion. Native tools keep their authentication, permissions, conversation storage and execution controllers. The current host topology is local plus the configured SSH target `remote`; arbitrary-host onboarding is not implemented.
+AgentSpaces Desktop brings supported native thread agents and their permitted work into an owner-visible workspace. The Electron window and browser talk to an owner-private loopback companion. Native tools keep their authentication, permissions, conversation storage and execution controllers. The supported host topology is this device plus a configured SSH target. Saved host configuration remains private; arbitrary multi-host and multi-companion onboarding is not qualified.
 
 Built on [AgentSpaces](https://www.badmonkey.ai/agentspaces/) by [BadMonkey](https://www.badmonkey.ai/), this standalone desktop repository owns the companion and integration adapters. The upstream [framework](https://github.com/badmonkeyai/AgentSpaces), [TypeScript binding](https://github.com/badmonkeyai/agentspaces-typescript) and [model-wire](https://github.com/badmonkeyai/agentspaces-model-wire) retain their owning contracts and attribution. See [brand and attribution](brand-and-attribution.md).
 
@@ -16,10 +16,13 @@ flowchart TB
     Bridge <--> RemoteTools[remote source-neutral native tools]
     Route <--> Daemon[Owning remote Codex daemon]
     Route <--> Channel[Opted-in Claude native channel]
-    Service -. Owning participant / work / claim / lease / result contracts .-> Upstream[AgentSpaces authority]
+    Service --> Board[Embedded AgentSpaces replica / persisted signed work]
+    Board --> Activity[Bounded Space event observations]
+    Service -. Explicit fixture connection .-> Seed[Loopback AgentSpaces v3 seed]
+    Seed -. Signed cards / optional observations .-> Fleet[External capabilities]
 ```
 
-The work map and metadata catalog are derived views over existing sources. Conversation records and effect receipts are transport state. They do not replace AgentSpaces's participant, work, claim, lease, result or artifact contracts, and direct conversation delivery does not prove delegated-work completion. The work-board UI projects an embedded AgentSpaces replica; its claims and completion use the owning TypeScript contracts. It adds no independent claim algorithm or resource scheduler. See [work board](work-board.md) for the single-companion topology, durability and limits.
+The work map and metadata catalog are derived views over existing sources. Conversation records and effect receipts are transport state. They do not replace AgentSpaces's participant, work, claim, lease, result or artifact contracts, and direct conversation delivery does not prove delegated-work completion. The work-board UI projects an embedded AgentSpaces replica; its claims and completion use the owning TypeScript contracts. It adds no independent work-claim algorithm. The machine queue coordinates signed requests and reservations; actual host locks remain the execution boundary. See [work board](work-board.md) for the single-companion topology, durability and limits.
 
 ## Source identity and connection
 
@@ -39,6 +42,27 @@ An eligible source can create a group, join a self-registering room on first rea
 
 Selection searches cached metadata across the known catalog, then performs at most 200 current-identity/grant checks. Coverage reports the checked subset, omissions and stale/incomplete inventory. Rooms admit up to 200 participants, while source-bound creation and explicit broadcast delivery retain batches of up to 11 selected peers. Room capacity does not raise the existing per-exchange native delivery budgets. Before posting, durable receipts pin the recipient identities, batch/discussion IDs and message delivery IDs. A retry cannot acquire a newly matching recipient. See [agent addressing](agent-addressing.md) for syntax and limits.
 
+## Optional fabric integration
+
+The pinned TypeScript client speaks wire v3. Diagnostics derive the dependency
+revision from the installed manifest and report the actual runtime wire version,
+seed socket state and frame/reconnect counters. A disconnected seed cannot retain
+a healthy connection label. Upstream controls bounded reconnect attempts; its
+public API does not expose whether retries are currently pending or exhausted.
+This uncertainty is reported explicitly, separately from native delivery health.
+
+Signed discovery revalidates AgentCard bytes, issuer, group, lifetime and known
+revocations. A peer's advertised capability is not a native source identity or a
+wake route. Cached reachability is reported only with a current seed socket and
+still does not establish native delivery. No local native catalog is exported.
+
+Optional usage and advisory spaces and local semantic ranking are enabled only
+for an explicit fixture-project loopback connection. They are read-only bounded
+projections, with incomplete coverage visible. Runtime options reset on disconnect
+or restart. Observed token totals are separate from provider billing/native usage;
+advisory votes cannot approve execution; semantic queries are not sent remotely.
+See [upstream v3](upstream-v3.md) for contracts and deferred topology work.
+
 ## Native delivery and effect safety
 
 Delivery rechecks current source identity, grants, room policy and native eligibility. Loaded eligible remote Codex threads receive queued input through their owning daemon; cold bindings require effective native policy verification. Claude unsolicited delivery requires its supported opted-in channel and available controller. No worker is interrupted to install another controller.
@@ -51,8 +75,34 @@ The loopback service can outlive the Electron window. Settings, native metadata,
 
 Windows packaging provides a per-user installer, Start/search entry, desktop shortcut and Installed apps uninstaller. Linux provides an archive and per-user applications-menu installer. Packages contain a Node runtime and required notices; native provider binaries/accounts and SSH configuration remain existing user installations. Alpha packages are unsigned and automatic updates are not implemented. Source uses the owner-approved Apache 2.0 license. [Installation](installer.md) separates package construction from platform acceptance.
 
-## Collaboration defaults and remaining work
+## Work, decisions and machine scheduling
 
-The installed router ships lane/file ownership, isolated worktrees, written handoffs, one owning program record, the existing heavy-test gate, exact acceptance evidence, standing grant reuse and safe restart reconciliation. These guide agent behavior under repository/native authority; they do not enforce shared-work leases or a test queue. See [collaboration rules](agent-addressing.md#collaboration-rules).
+The shared work board, decision inbox and fair machine queue are implemented in
+source through the owning AgentSpaces records and scoped APIs. The owner answers
+decisions in the Desktop/browser inbox; no phone-specific UI is included. Owner
+receipts preserve request, target, scope and authentication evidence; native
+clients retain permission checks. Queue reservations do not substitute for actual
+host locks or execution fencing.
 
-The remaining product work includes a shared board through AgentSpaces's existing contracts, a fair machine-resource broker through its reservation/lease owner, a phone decision inbox, supported cross-product/cloud discovery and complete interrupted-lane recovery. Linux desktop/provider parity, macOS acceptance, arbitrary-host onboarding, signed distribution and production release qualification remain outstanding. See [release readiness](open-source-readiness.md) and [compatibility](compatibility.md) for evidence boundaries.
+The board projects a bounded activity feed from upstream `Space.watch`. Restored
+state establishes a silent baseline; events do not replay native effects or start
+work. The feed is process-local observation, not complete or persisted history.
+The board's effective-lease projection remains authoritative. The pinned upstream
+watcher can inspect the original lease during expiry; Desktop suppresses false
+expiry after renewal but cannot promise every later expiry event. Upstream also
+has no dispatcher disposal API: closed subscriptions are detached, but its unref'd
+sweep timer remains inert. One observer is reused for each open board.
+
+The installed router teaches lane/file ownership, isolated worktrees, written
+handoffs, one owning program record, existing test gates, exact acceptance evidence,
+standing grant reuse and safe restart reconciliation. These instructions operate
+under repository and native authority. See [collaboration rules](agent-addressing.md#collaboration-rules).
+
+## Remaining qualification
+
+Supported cross-product/cloud discovery, complete interrupted-lane recovery and
+multi-companion federation remain open. Linux desktop/provider parity, macOS
+acceptance, arbitrary-host onboarding, signed distribution and production release
+qualification remain outstanding. Source implementations and fixture passes are
+not installer or live deployment claims. See [release readiness](open-source-readiness.md),
+[compatibility](compatibility.md) and [upstream v3](upstream-v3.md).

@@ -54,6 +54,8 @@ turn that on inside an already running session. [Controlled updates](docs/mainte
 preflight a private copy of saved state and defer shutdown around active embedded
 work. All machine-specific configuration remains outside this public repository.
 
+Source now uses the upstream **wire-v3 client**. Setup shows the declared dependency pin, runtime wire version and connection counters. Optional loopback fleet observations expose signed capability cards, observed model usage and advisory votes; local semantic ranking makes no model calls. The work board shows bounded upstream activity without replaying work. See [the upstream integration guide](docs/upstream-v3.md) for opt-in setup, migration checks and compatibility limits.
+
 ## Get started
 
 Download the [v0.1.0-alpha.3 builds](https://github.com/Weston-Tyler/agentspaces-desktop/releases/tag/v0.1.0-alpha.3), then follow the [installation guide](docs/installer.md). Windows setup adds AgentSpaces Desktop to Start/search and Installed apps. The Linux archive includes a per-user applications-menu installer. Existing Codex/Claude tools and sign-in remain prerequisites; packaged builds include their own application Node runtime. [All releases](https://github.com/Weston-Tyler/agentspaces-desktop/releases) retain their version-specific artifacts and checksums.
@@ -146,7 +148,7 @@ flowchart LR
 
 The SSH bridge carries supported remote metadata, source-bound tools and native delivery. Native providers retain authentication and execution control. See [architecture](docs/architecture.md) for source binding, admission, persistence and effect recovery.
 
-[AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) remains the authority for its shared work, claims, leases and results. Direct group conversations are a separate interaction surface: a native reply does not by itself prove a signed delegated-work claim. The application consumes the [pinned TypeScript binding](https://github.com/badmonkeyai/agentspaces-typescript/tree/ab091a4fd9b325679ceca9dfa3d3042ff572696b) and preserves the [model-wire](https://github.com/badmonkeyai/agentspaces-model-wire) conversation record identity.
+[AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) remains the authority for its shared work, claims, leases and results. Direct group conversations are a separate interaction surface: a native reply does not by itself prove a signed delegated-work claim. The application consumes the [pinned TypeScript binding](https://github.com/badmonkeyai/agentspaces-typescript/tree/3996234b6d8323538ad806671bd55a4f76cd1e07) and preserves the [model-wire](https://github.com/badmonkeyai/agentspaces-model-wire) conversation record identity.
 
 Exact dependency versions are recorded in [package.json](package.json) and [package-lock.json](package-lock.json). Native version and capability checks are separate. Supported source hosts currently include this device and one configured SSH host; arbitrary-host onboarding is not implemented.
 

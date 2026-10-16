@@ -209,7 +209,7 @@ try {
         completionObserved: true,
         duplicateEffects: 0,
         nativeProviderCalls: 0,
-        upstreamBinding: "be025e7aba72e1837e0ccb3999bb76098d012fe0",
+        upstreamBinding: a.diagnostics().binding,
       },
       null,
       2,

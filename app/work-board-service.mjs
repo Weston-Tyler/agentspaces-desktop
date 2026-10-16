@@ -9,6 +9,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, openSync, closeSyn
 import { join } from 'node:path';
 import { TYPES } from './fabric.mjs';
 import { projectWorkBoard } from './work-board.mjs';
+import { WorkBoardActivity } from './work-board-activity.mjs';
 import { protectStateDirectory } from './state-security.mjs';
 
 const pathsOverlap = (left, right) => {
@@ -31,8 +32,10 @@ export class WorkBoard {
     this.root = join(engine.store.root, 'work-board');
     this.path = join(this.root, 'replica.cbor');
     this.peer = null; this.identity = null; this.agents = new Map(); this.tail = Promise.resolve();
+    this.activity = null; this.activityFailure = null; this.closed = false;
   }
   open() {
+    if (this.closed) throw new Error('Work board is closed');
     if (this.peer) return;
     protectStateDirectory(this.root, ['identity','agents','replica.cbor','replica.cbor.tmp','writer.lock']);
     this.identity = Identity.loadOrCreate(join(this.root, 'identity'));
@@ -50,8 +53,35 @@ export class WorkBoard {
         this.peer = null; throw new Error('Work-board snapshot verification failed; preserve the file for recovery');
       }
     } } catch (error) { this.peer = null; throw error; }
+    // Attach once per board, after verification. Only durable state reaches the
+    // observer; failed mutations cannot appear as successful work activity.
+    this.observeActivity();
+  }
+  observeActivity() {
+    if (this.activityFailure) return;
+    try {
+      const snapshot = this.peer.exportSnapshot();
+      if (!this.activity) this.activity = new WorkBoardActivity(this.identity, this.group, SPACE, this.engine.clock, snapshot);
+      else this.activity.observe(snapshot);
+    } catch {
+      // Observation is subordinate to the durable replica. In particular an
+      // observer failure after rename must not roll back or fail a saved write.
+      try { this.activity?.close(); } catch { /* preserve authoritative work */ }
+      this.activity = null;
+      this.activityFailure = { code: 'upstream_observation_failed', message: 'Work activity is unavailable until the companion restarts. Saved work and operation receipts remain available.' };
+    }
+  }
+  activityView() {
+    return this.activity?.view() ?? { available: false, source: 'upstream Space.watch',
+      persisted: false, completeHistory: false, events: [], totalObserved: 0,
+      truncated: false, error: this.activityFailure };
+  }
+  close() {
+    this.closed = true; this.activity?.close(); this.peer?.close();
+    this.peer = null; this.agents.clear();
   }
   access(binding, { create = false } = {}) {
+    if (this.closed) throw new Error('Work board is closed');
     const p = this.engine.workspace.index?.profile;
     if (!p?.active || p.policy !== 'local-retrieval') throw new Error('Connect an active local-retrieval workspace for the work board');
     const actor = binding ? this.engine.discussions.participant(binding) : null;
@@ -83,7 +113,7 @@ export class WorkBoard {
       const source = labels.get(item.holder);
       item.holderLabel = source === 'desktop-owner' ? 'Desktop owner' : this.engine.catalog.find(s => s.id === source)?.title ?? source ?? item.holder;
     }
-    return { ...result, scope: this.scope, mode: 'single-companion',
+    return { ...result, scope: this.scope, mode: 'single-companion', activity: this.activityView(),
       coverage: { ...result.coverage, synchronized: true, source: 'durable companion-owned AgentSpaces replica' },
       capabilities: { create: true, claim: true, update: true, complete: true, modelExecution: false } };
   }
@@ -198,6 +228,7 @@ export class WorkBoard {
       if (bytes.length > 32 * 1024 * 1024) throw new Error('Work board exceeds storage limit');
       const temporary = this.path + '.tmp';
       writeFileSync(temporary, bytes, { mode: 0o600 }); renameSync(temporary, this.path);
+      this.observeActivity();
       return result;
     } catch (error) {
       this.peer = new Peer(this.identity, this.group, this.engine.clock);

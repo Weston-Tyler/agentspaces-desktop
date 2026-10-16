@@ -1,3 +1,4 @@
+import { observedFleet } from './observed-fleet.mjs';
 import { UpdateGate } from './update-gate.mjs';
 import {nativeWakeReadiness,ensureNativeConnection} from './native-readiness.mjs';
 import {ContinuationWaker} from './work-continuation.mjs';
@@ -298,6 +299,7 @@ export async function startServer({
       if (
         connector &&
         ![
+          "/api/fabric/observations",
           "/api/providers/status",
           "/api/providers/availability",
           "/api/providers/handoff/preview",
@@ -695,11 +697,15 @@ export async function startServer({
             host: data.host,
           });
           break;
+        case "/api/fabric/observations":
+          result = observedFleet(engine, data, connector); break;
         case "/api/fabric/connect":
           result = await engine.connectFabric(data);
           break;
         case "/api/fabric/disconnect":
           fabric.close();
+          engine.fabricObservationOptions = undefined;
+          engine.fabricProject = null;
           store.audit("Fabric disconnected");
           result = fabric.diagnostics();
           break;
@@ -791,6 +797,7 @@ export async function startServer({
     for (const ws of sockets.clients) ws.terminate();
     sockets.close();
     for (const abort of activeAnswers.values()) abort.abort();
+    engine.workBoard.close?.();
     fabric.close();
     await new Promise((r) => server.close(r));
     if (existsSync(runtimePath)) {

@@ -70,7 +70,7 @@ The UI currently displays the first bounded page; filtering/pagination is pendin
 
 The upstream exact-selection/snapshot extension is merged in
 [AgentSpaces TypeScript PR #2](https://github.com/badmonkeyai/agentspaces-typescript/pull/2).
-Desktop pins its merge revision `ab091a4fd9b325679ceca9dfa3d3042ff572696b`.
+Desktop now pins `3996234b6d8323538ad806671bd55a4f76cd1e07`, which retains that extension and adds wire-v3 and Space events.
 This source integration does not imply an installed or released Desktop build.
 
 ## Agent lanes and report artifacts
@@ -107,3 +107,15 @@ current source/workspace/room access and its content hash. Revoked author sharin
 hides the report. A report remains untrusted source-authored evidence, not a reviewed
 result or owner instruction. Uploading never writes a native repository, wakes a
 thread, starts a model, or accepts the associated work.
+
+
+## Observed activity
+
+The board UI and `list_work_items` response include up to 100 process-local
+`Space.watch` observations: written, taken, completed, expired and reappeared.
+Opening a saved board establishes a silent baseline. Events never authorize,
+launch or repeat work; the signed current-state projection remains authoritative.
+The buffer resets on restart, and intermediate changes between reads may be absent.
+An observer failure disables this optional feed without invalidating saved work
+or retry receipts. See [upstream compatibility](upstream-v3.md) for known event
+lifecycle and renewed-lease limits.

@@ -12,7 +12,47 @@ export function mountProviderRouting(root,{api,notice}){
  const handoff=el('details'),form=el('form');handoff.className='card';handoff.append(el('summary','Propose a provider handoff'),el('p','The current work claim stays with its holder. Preview uses the latest progress and fresh indexed worktree; both native sources must use that same worktree. No job starts from this form.'),form);
  const work=field(form,'Existing brief',el('select')),target=field(form,'Target source',el('select')),tree=field(form,'Observed worktree',el('select')),previewButton=el('button','Preview exact handoff'),proposalView=el('pre'),request=el('button','Send proposal to decision inbox');
  previewButton.type='submit';previewButton.className='secondary';request.type='button';request.className='primary';request.disabled=true;form.append(previewButton);handoff.append(proposalView,request);
- root.append(intro,refresh,cards,report,handoff);
+ const fleet=el('details'),fleetForm=el('form'),fleetContent=el('div');fleet.className='card';
+ fleet.append(el('summary','Optional fleet observations'),el('p','Read signed observations from an explicitly connected fabric. Usage is separate from native sessions and cannot establish billing or remaining allowance. Advisory votes never grant approval. Search ranks cached capability cards locally and does not start work.'),fleetForm,fleetContent);
+ const fleetQuery=field(fleetForm,'Search cached fleet capabilities',el('input')),fleetRefresh=el('button','Read fleet observations');
+ fleetQuery.maxLength=500;fleetRefresh.type='submit';fleetRefresh.className='secondary';fleetForm.append(fleetRefresh);
+ fleetForm.addEventListener('submit',async event=>{
+  event.preventDefault();fleetRefresh.disabled=true;
+  try{
+   const observed=await api('fabric/observations',{query:fleetQuery.value,limit:100});if(!root.isConnected)return;
+   fleetContent.replaceChildren();
+   const {usage,advisory,semantic,discovery,health}=observed;
+   fleetContent.append(el('p',`Fabric: ${health.status}. Native chat delivery uses a separate connection.`));
+   fleetContent.append(el('h3','Signed capability cards'));
+   if(!discovery.cards.length)fleetContent.append(el('p','No matching verified cards are cached.'));
+   for(const card of discovery.cards)fleetContent.append(el('p',`${card.description||card.agentId} · ${card.reachable?'fabric route observed':'fabric reachability unknown'} · native identity and wake access unbound`));
+   if(discovery.truncated||observed.response?.truncated)fleetContent.append(el('p','This response is truncated; use a narrower query and inspect coverage.'));
+   fleetContent.append(el('p','Coverage: partial local observations. Missing publishers and expired records remain unknown.'));
+   if(!usage?.enabled)fleetContent.append(el('p','Fleet usage is off. Select a usage space when connecting the optional fabric.'));
+   else{
+    fleetContent.append(el('h3','Observed fleet usage'));
+    if(!usage.models.length)fleetContent.append(el('p','No eligible live signed usage records are cached.'));
+    for(const model of usage.models)fleetContent.append(el('p',`${model.model}: ${model.totalTokens===null?'unknown comparable total':model.totalTokens+' observed tokens'} · ${model.observedIssuers} observed issuers${model.reason?' · '+model.reason.replaceAll('_',' '):''}`));
+    if(usage.coverage.truncated)fleetContent.append(el('p','This read was bounded; totals are withheld.'));
+    const provenance=el('details');provenance.append(el('summary','Usage windows and signed issuers'),el('pre',JSON.stringify(usage.observations,null,2)));fleetContent.append(provenance);
+   }
+   if(!advisory?.enabled)fleetContent.append(el('p','Advisory votes are off. Select an advisory space when connecting the optional fabric.'));
+   else{
+    fleetContent.append(el('h3','Advisory votes — no approval authority'));
+    if(!advisory.proposals.length)fleetContent.append(el('p','No eligible live proposals are cached.'));
+    for(const proposal of advisory.proposals){const item=el('section');item.append(el('p',proposal.question),el('p',Object.entries(proposal.tally).map(([option,count])=>`${option}: ${count}`).join(' · ')),el('p',proposal.winner?`Observed advisory result: ${proposal.winner}`:'No unambiguous bounded result'));fleetContent.append(item);}
+   }
+   if(!semantic?.enabled)fleetContent.append(el('p','Local semantic discovery is off for this fabric connection.'));
+   else if(fleetQuery.value.trim()){
+    fleetContent.append(el('h3','Cached capability matches'));
+    if(!semantic.matches.length)fleetContent.append(el('p','No matching eligible cards are cached.'));
+    for(const match of semantic.matches)fleetContent.append(el('p',`${match.description||match.id} · similarity ${match.score.toFixed(2)} · native wake access unknown`));
+    if(semantic.coverage.truncated)fleetContent.append(el('p','Only a bounded portion of the advertisement cache was ranked.'));
+   }
+  }catch(error){fleetContent.replaceChildren(el('p','Fleet observations are unavailable. This optional surface requires an authorized fabric connection.'));notice(error.message,true);}
+  finally{fleetRefresh.disabled=false;}
+ });
+ root.append(intro,refresh,cards,report,handoff,fleet);
  let board=[],preview=null,payload=null,pendingRequest=null;
  const invalidate=()=>{preview=null;payload=null;pendingRequest=null;request.disabled=true;proposalView.textContent='';};
  for(const input of [work,target,tree])input.addEventListener('change',invalidate);

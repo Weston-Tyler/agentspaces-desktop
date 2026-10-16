@@ -8,13 +8,14 @@ const field = (form, key, label, multiline = false, required = true) => {
 export function mountWorkBoard(root, { api, notice }) {
   root.replaceChildren();
   const heading = element('p', 'Claims reserve coordination work for a limited time. They do not authorize native execution or approve publication.');
-  const refresh = element('button', 'Refresh board'), state = element('p'), cards = element('div'), lanes = element('section');
+  const refresh = element('button', 'Refresh board'), state = element('p'), cards = element('div'), lanes = element('section'), activity = element('details');
+  activity.className = 'card';
   lanes.className = 'card'; let refreshTimer;
   const create = element('details'), summary = element('summary', 'Create work item'), form = element('form');
   create.className = 'card work-board-create'; create.append(summary, form);
   for (const [key, label, multi] of [['title','Title'],['brief','Brief and acceptance checks',true],['repository','Repository'],['base','Exact base revision'],['allowedFiles','Allowed files or paths (one per line)',true]]) field(form,key,label,multi);
   const submit = element('button', 'Create work item'); submit.type = 'submit'; submit.className = 'primary'; form.append(submit);
-  root.append(heading, refresh, state, lanes, create, cards);
+  root.append(heading, refresh, state, lanes, create, activity, cards);
   async function change(payload, button) {
     button.disabled = true;
     // Retain the same delivery identity after uncertain transport outcomes.
@@ -45,6 +46,16 @@ export function mountWorkBoard(root, { api, notice }) {
       }
       lanes.append(table);if(laneView.truncated||Object.values(laneView.coverage).some(value=>value===true))lanes.append(element('p','Some source records are outside this bounded view.'));
   }
+  function renderActivity(view) {
+    activity.replaceChildren(element('summary', 'Observed work changes'));
+    if (!view || view.available === false) { activity.append(element('p', view?.error?.message ?? 'Activity is unavailable.')); return; }
+    activity.append(element('p', `Since ${new Date(view.startedAt).toLocaleString()} · Latest ${view.events.length} of ${view.totalObserved} observed events${view.truncated ? ' · Earlier observations omitted' : ''}.`),
+      element('p', 'This activity resets when the companion restarts. Saved work stays on the board. Observations can omit intermediate changes and do not authorize or start work.'));
+    if (!view.events.length) activity.append(element('p', 'No new work changes observed in this process.'));
+    const labels = { WRITTEN: 'Written', TAKEN: 'Claim observed', COMPLETED: 'Completed', EXPIRED: 'Write lease expired', REAPPEARED: 'Claim expired; available again' };
+    for (const event of [...view.events].reverse()) activity.append(element('p',
+      `${new Date(event.observedAt).toLocaleString()} · ${labels[event.kind] ?? event.kind} · ${event.recordType === 'result' ? 'Progress/result record' : 'Work item'} · ${event.workEntryId ?? event.entryId}`));
+  }
   async function refreshLanes() {
     if (!root.contains(state)) return;
     try { renderLanes(await api('lanes/list',{limit:200})); }
@@ -58,7 +69,7 @@ export function mountWorkBoard(root, { api, notice }) {
       const [board, laneView, reports, continuations] = await Promise.all([api('work-board/list', { limit: 200 }), api('lanes/list', {limit:200}), api('artifacts/list', {limit:200}), api('work-board/continuations', {}).catch(()=>null)]);
       if (!root.contains(state)) return;
       state.textContent = `${board.items.length} work items · Shared companion · Refreshed ${new Date(board.observedAt).toLocaleString()}${board.coverage.truncated ? ' · More items exist than this view can display' : ''}`;
-      renderLanes(laneView);
+      renderLanes(laneView); renderActivity(board.activity);
       cards.replaceChildren(); submit.disabled = false;
       if (!board.items.length) cards.append(element('p','No work items yet. Create the first brief above.'));
       for (const item of board.items) {
@@ -110,7 +121,7 @@ export function mountWorkBoard(root, { api, notice }) {
         }
         cards.append(card);
       }
-    } catch (e) { state.textContent = e.message; submit.disabled = true; }
+    } catch (e) { state.textContent = e.message; submit.disabled = true; activity.replaceChildren(element('p', 'Activity unavailable; refresh after access or connection recovers.')); }
     finally { if(root.contains(state))refreshTimer=setTimeout(refreshLanes,15000); }
   }
   load();
