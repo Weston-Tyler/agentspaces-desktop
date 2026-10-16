@@ -14,10 +14,12 @@ test('Windows setup refuses a live bundled companion without terminating it', {s
  const binary=join(runtime,'node.exe');copyFileSync(process.execPath,binary);
  const shell=join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe');
  const script=fileURLToPath(new URL('../assets/windows-install-guard.ps1',import.meta.url));
- const check=async(installRoot,installerPid=process.pid)=>{
-  try{await exec(shell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',script],{env:{...process.env,AGENTSPACES_INSTALL_ROOT:installRoot,AGENTSPACES_INSTALLER_PID:String(installerPid)},timeout:20000,windowsHide:true});return 0;}catch(error){return error.code;}
+ const check=async(installRoot,installerPid=process.pid,guardScript=script)=>{
+  try{await exec(shell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',guardScript],{env:{...process.env,AGENTSPACES_INSTALL_ROOT:installRoot,AGENTSPACES_INSTALLER_PID:String(installerPid)},timeout:20000,windowsHide:true});return 0;}catch(error){return error.code;}
  };
  assert.equal(await check(root),0);
+ const installedGuard=join(root,'installer-guard.ps1');copyFileSync(script,installedGuard);
+ assert.equal(await check(root,process.pid,installedGuard),0,'the inspection process does not block its own uninstall');
  child=spawn(binary,['-e',"console.log('ready');setInterval(()=>{},1000)"],{stdio:['ignore','pipe','ignore'],windowsHide:true});
  await new Promise((resolve,reject)=>{child.once('error',reject);child.stdout.once('data',resolve);});
  assert.equal(await check(root),10);assert.equal(child.exitCode,null);

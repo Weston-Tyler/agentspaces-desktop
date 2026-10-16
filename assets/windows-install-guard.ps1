@@ -9,7 +9,7 @@ try {
   # Detect the supported external-Node launch as well as bundled executables.
   # Command lines are inspected locally and are never logged or persisted.
   $running = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | Where-Object {
-    $_.ProcessId -ne $installerPid -and (
+    $_.ProcessId -ne $installerPid -and $_.ProcessId -ne $PID -and (
       ($_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) -or
       ($_.CommandLine -and (
         $_.CommandLine.Replace('/', '\').IndexOf($prefix, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
