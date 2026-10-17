@@ -48,7 +48,7 @@ function cli(binary, args, { acceptedFailure = false, timeout = 15000, cwd } = {
     if (!error) yes(stdout); else if (acceptedFailure) yes(null); else no(new Error('Native registration command unavailable'));
   }));
 }
-export function mergeClaudeHooks(settings, command, { previousCommand } = {}) {
+export function mergeClaudeHooks(settings, command, { previousCommand, inboxCommand, previousInboxCommand } = {}) {
   if (!settings || typeof settings !== 'object' || Array.isArray(settings) || settings.hooks && (typeof settings.hooks !== 'object' || Array.isArray(settings.hooks))) throw new Error('Existing native hook settings are invalid');
   const result = structuredClone(settings); result.hooks ??= {};
   for (const event of ['SessionStart', 'UserPromptSubmit', 'SessionEnd']) {
@@ -58,10 +58,16 @@ export function mergeClaudeHooks(settings, command, { previousCommand } = {}) {
     result.hooks[event] = existing;
     if (!existing.some(group => group.hooks?.some(hook => hook.type === 'command' && hook.command === command))) result.hooks[event] = [...existing, { hooks: [{ type: 'command', command, timeout: 15 }] }];
   }
+  if (inboxCommand || previousInboxCommand) {
+    const existing = result.hooks.Stop ?? [];
+    if (!Array.isArray(existing)) throw new Error('Existing native hook settings are invalid');
+    result.hooks.Stop = existing.map(group => ({ ...group, hooks: group.hooks?.filter(hook => hook.command !== previousInboxCommand && hook.command !== inboxCommand) })).filter(group => !Array.isArray(group.hooks) || group.hooks.length);
+    if (inboxCommand) result.hooks.Stop.push({ hooks: [{ type: 'command', command: inboxCommand, asyncRewake: true, timeout: 28800 }] });
+  }
   return result;
 }
 export async function installOnCurrentHost({ config, sources, versions, home = homedir(), nodeBinary = process.env.AGENTSPACES_NODE_BINARY ?? (process.versions.electron ? executable('node') : process.execPath), runCLI = cli, resolveExecutable = executable, installDependencies = true } = {}) {
-  if (config?.schemaVersion !== 1 || !['codex', 'claude'].includes(config.provider) || !/^[a-f0-9]{64}$/.test(config.token ?? '') || !sources?.bootstrap || !sources?.hook || !sources?.channel) throw new Error('Invalid automatic installation payload');
+  if (config?.schemaVersion !== 1 || !['codex', 'claude'].includes(config.provider) || !/^[a-f0-9]{64}$/.test(config.token ?? '') || !sources?.bootstrap || !sources?.hook || !sources?.channel || sources.inbox !== undefined && (typeof sources.inbox !== 'string' || !sources.inbox.length || sources.inbox.length > 1048576)) throw new Error('Invalid automatic installation payload');
   if (!versions || ['mcp', 'zod', 'claude','ws'].some(key => {
     const value = versions[key];
     return typeof value !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(value) || value.includes('-') && value.slice(value.indexOf('-') + 1).split('.').some(part => /^\d+$/.test(part) && part.length > 1 && part.startsWith('0'));
@@ -71,7 +77,7 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
   if (config.provider === 'claude') {
     noLinks(settingsPath);
     if (existsSync(settingsPath)) { try { settings = JSON.parse(readFileSync(settingsPath, 'utf8')); } catch { throw new Error('Existing native settings are invalid'); } }
-    mergeClaudeHooks(settings, 'preflight-only');
+    mergeClaudeHooks(settings, 'preflight-only', { inboxCommand: sources.inbox ? 'preflight-inbox' : undefined });
   }
   if (existsSync(base) && (!existsSync(join(base, 'OWNER')) || readFileSync(join(base, 'OWNER'), 'utf8') !== marker)) throw new Error('Unmanaged automatic runtime');
   mkdirSync(base, { recursive: true, mode: 0o700 }); savePrivate(join(base, 'OWNER'), marker);
@@ -80,8 +86,9 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
     if (!/^S-\d+(?:-\d+)+$/.test(sid)) throw new Error('Private native runtime owner unavailable');
     execFileSync('icacls.exe', [base, '/inheritance:r', '/grant:r', '*' + sid + ':(OI)(CI)F'], { windowsHide: true, stdio: 'pipe' });
   } else chmodSync(base, 0o700);
-  const runtime = join(base, 'runtime-' + digest(sources.bootstrap + sources.hook + sources.channel)); noLinks(runtime); mkdirSync(runtime, { recursive: true, mode: 0o700 });
+  const runtime = join(base, 'runtime-' + digest(sources.bootstrap + sources.hook + sources.channel + (sources.inbox ?? ''))); noLinks(runtime); mkdirSync(runtime, { recursive: true, mode: 0o700 });
   savePrivate(join(runtime, 'native-bootstrap-mcp.mjs'), sources.bootstrap); savePrivate(join(runtime, 'native-session-hook.mjs'), sources.hook);savePrivate(join(runtime,'native-bootstrap-channel.mjs'),sources.channel);
+  if (sources.inbox) savePrivate(join(runtime, 'native-inbox-hook.mjs'), sources.inbox);
   const manifest = { private: true, type: 'module', dependencies: { '@modelcontextprotocol/sdk': versions.mcp, zod: versions.zod, '@anthropic-ai/claude-agent-sdk': versions.claude,ws:versions.ws } };
   savePrivate(join(base, 'package.json'), JSON.stringify(manifest));
   const dependenciesPresent = () => Object.entries(manifest.dependencies).every(([name, version]) => {
@@ -101,6 +108,15 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
   }
   const launcher = config.provider === 'claude' ? claudeLauncher(home) : undefined;
   const binary = launcher ? realpathSync.native(launcher) : resolveExecutable(config.provider), folder = join(base, config.provider), configPath = join(folder, 'device.json');
+  let nativeVersion = null, hookWakeInstalled = false;
+  if (config.provider === 'claude' && sources.inbox) {
+    const versionOutput = await runCLI(binary, ['--version'], { acceptedFailure: true, timeout: 5000 });
+    nativeVersion = /\b\d+\.\d+\.\d+\b/.exec(String(versionOutput ?? ''))?.[0] ?? null;
+    const [major, minor, patch] = (nativeVersion ?? '').split('.').map(Number);
+    // Do not install a background-wake option on an unqualified native client:
+    // an older parser could otherwise run the long waiter synchronously.
+    hookWakeInstalled = major === 2 && (minor > 1 || minor === 1 && patch >= 283);
+  }
   const device = { ...config, ...(config.provider === 'claude' ? { nativeExecutable: binary } : {}) };
   delete device.nativeLauncher;
   if (launcher) device.nativeLauncher = launcher;
@@ -120,7 +136,8 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
   if (oldBootstrap) noLinks(oldBootstrap);
   const oldRuntime = oldBootstrap && dirname(oldBootstrap);
   const oldChannel=oldRuntime&&join(oldRuntime,'native-bootstrap-channel.mjs');if(oldChannel)noLinks(oldChannel);
-  const ownedOldRuntime = oldRuntime && dirname(oldRuntime) === base && /runtime-[a-f0-9]{64}$/.test(oldRuntime) && existsSync(oldBootstrap) && existsSync(join(oldRuntime, 'native-session-hook.mjs')) && oldRuntime.endsWith(digest(readFileSync(oldBootstrap, 'utf8') + readFileSync(join(oldRuntime, 'native-session-hook.mjs'), 'utf8') + (existsSync(oldChannel)?readFileSync(oldChannel,'utf8'):'')));
+  const oldInbox = oldRuntime && join(oldRuntime, 'native-inbox-hook.mjs'); if (oldInbox) noLinks(oldInbox);
+  const ownedOldRuntime = oldRuntime && dirname(oldRuntime) === base && /runtime-[a-f0-9]{64}$/.test(oldRuntime) && existsSync(oldBootstrap) && existsSync(join(oldRuntime, 'native-session-hook.mjs')) && oldRuntime.endsWith(digest(readFileSync(oldBootstrap, 'utf8') + readFileSync(join(oldRuntime, 'native-session-hook.mjs'), 'utf8') + (existsSync(oldChannel)?readFileSync(oldChannel,'utf8'):'') + (existsSync(oldInbox)?readFileSync(oldInbox,'utf8'):'')));
   if (existing && ((!transport?.args?.includes(bootstrap) && !ownedOldRuntime) || !transport?.args?.includes(configPath) || transport?.command !== nodeBinary)) throw new Error('Existing MCP name is not this managed installation');
   if (!existing || oldBootstrap !== bootstrap) {
     privateBackup(nativePath);
@@ -135,10 +152,12 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
     const quote = value => process.platform === 'win32' ? '"' + value.replaceAll('"', '') + '"' : "'" + value.replaceAll("'", "'\\''") + "'";
     const command = [nodeBinary, join(runtime, 'native-session-hook.mjs'), '--config', configPath].map(quote).join(' ');
     const previousCommand = ownedOldRuntime ? [nodeBinary, join(oldRuntime, 'native-session-hook.mjs'), '--config', configPath].map(quote).join(' ') : undefined;
-    const merged = mergeClaudeHooks(settings, command, { previousCommand });
+    const inboxCommand = hookWakeInstalled ? [nodeBinary, join(runtime, 'native-inbox-hook.mjs'), '--config', configPath].map(quote).join(' ') : undefined;
+    const previousInboxCommand = ownedOldRuntime && existsSync(oldInbox) ? [nodeBinary, oldInbox, '--config', configPath].map(quote).join(' ') : undefined;
+    const merged = mergeClaudeHooks(settings, command, { previousCommand, inboxCommand, previousInboxCommand });
     if (JSON.stringify(merged) !== JSON.stringify(settings)) { privateBackup(settingsPath); savePrivate(settingsPath, JSON.stringify(merged, null, 2)); }
   }
-  return { host: config.host, provider: config.provider, status: 'native-config-installed', configPath, bootstrapPath: bootstrap, activeSessionReloaded: false, inboundChannelConnected: false };
+  return { host: config.host, provider: config.provider, status: 'native-config-installed', configPath, bootstrapPath: bootstrap, hookWakeInstalled, nativeVersion, activeSessionReloaded: false, inboundChannelConnected: false };
 }
 
 export function remoteInstallScript(payload) {
@@ -192,13 +211,13 @@ export class NativeAutoInstaller {
     else { const issued = this.sourceBindings.issueDevice({ host, provider }); device = { schemaVersion: 1, ...issued, address: this.address, authority: new URL(this.address).host }; }
     device = { ...device, address: this.address, authority: new URL(this.address).host };
     if (host === REMOTE_HOST) { tunnel = await this.participantConnections.tunnel(); device = { ...device, address: 'http://127.0.0.1:' + tunnel.remotePort }; }
-    const sources = { bootstrap: readFileSync(new URL('./native-bootstrap-mcp.mjs', import.meta.url), 'utf8'), hook: readFileSync(new URL('./native-session-hook.mjs', import.meta.url), 'utf8'),channel:readFileSync(new URL('./native-bootstrap-channel.mjs',import.meta.url),'utf8') };
+    const sources = { bootstrap: readFileSync(new URL('./native-bootstrap-mcp.mjs', import.meta.url), 'utf8'), hook: readFileSync(new URL('./native-session-hook.mjs', import.meta.url), 'utf8'),channel:readFileSync(new URL('./native-bootstrap-channel.mjs',import.meta.url),'utf8'), inbox: readFileSync(new URL('./native-inbox-hook.mjs', import.meta.url), 'utf8') };
     try {
       const result = await (host === REMOTE_HOST ? this.installRemote : this.installLocal)({ config: device, sources, versions });
       this.sourceBindings.device(device.token); // Recheck after installation; never undo a revocation.
       const refresh = provider === 'codex' ? await this.refreshNative(host) : { status: 'new-session-load-required' };
       result.nativeRefresh = refresh.status;
-      records[key] = { device, status: result.status, nativeRefresh: result.nativeRefresh, activeSessionReloaded: false, inboundChannelConnected: false, at: new Date().toISOString(), configPath: result.configPath, bootstrapPath: result.bootstrapPath }; this.engine.store.save();
+      records[key] = { device, status: result.status, nativeRefresh: result.nativeRefresh, hookWakeInstalled: result.hookWakeInstalled === true, nativeVersion: result.nativeVersion ?? null, activeSessionReloaded: false, inboundChannelConnected: false, at: new Date().toISOString(), configPath: result.configPath, bootstrapPath: result.bootstrapPath }; this.engine.store.save();
       if (host === REMOTE_HOST) this.participantConnections.retain(tunnel);
       return result;
     } catch {

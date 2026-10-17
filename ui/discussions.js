@@ -6,7 +6,7 @@ function el(tag, text, cls) {
   return n;
 }
 function replyLabel(status) {
-  const labels = { "waiting-for-native-transport": "Waiting for channel reconnect", "channel-access-changed; not dispatched": "Access changed; message not sent", "connecting-native-agent": "Connecting…", "queued": "Queued in native chat", "conversation-budget-reached": "Automatic exchange paused", "awaiting-native-reply": "Waiting for reply", "native-agent-replied": "Replied", "needs-native-attention": "Needs attention in the native app", "native-reply-uncertain": "Reply status unknown", "native-reply-pending": "Reply pending; native work preserved", "native-agent-unavailable": "Agent unavailable", "delivered-to-native-transport": "Message delivered" };
+  const labels = { "waiting-for-native-transport": "Waiting for native wake connection", "channel-access-changed; not dispatched": "Access changed; message not sent", "connecting-native-agent": "Connecting…", "queued": "Queued in native chat", "conversation-budget-reached": "Automatic exchange paused", "awaiting-native-reply": "Waiting for reply", "native-agent-replied": "Replied", "needs-native-attention": "Needs attention in the native app", "native-reply-uncertain": "Reply status unknown", "native-reply-pending": "Reply pending; native work preserved", "native-agent-unavailable": "Agent unavailable", "delivered-to-native-transport": "Sent to native transport; awaiting response" };
   if (labels[status]) return labels[status];
   return /blocked|unavailable|access changed/.test(status ?? "") ? "Agent is not connected" : status;
 }
@@ -267,6 +267,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
         } catch {}
         content.append(selection);
       }
+      if (m.notice || m.routing?.status === 'no-addressed-targets') content.append(el('p', m.notice ?? 'Posted to room; no agent notified. Mention a recipient to request another turn.', 'reply-status'));
       for (const t of m.targets ?? [])
         content.append(
           el("div", "@" + t.alias + " · " + replyLabel(t.status), "reply-status"),
@@ -365,13 +366,14 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
       deliveryId ??= crypto.randomUUID();
       submit.disabled = true;
       try {
-        await api("discussions/post", {
+        const result = await api("discussions/post", {
           id: g.id,
           text: data.get("text"),
           targets: data.getAll("target"),
           fixtureDialogueTurns: Number(data.get("rounds") ?? 0),
           deliveryId,
         });
+        if (result.posting?.warning) notice(result.posting.warning, true);
         await load();
         render();
         root.querySelector(".discussion-messages").scrollTop = 1e9;

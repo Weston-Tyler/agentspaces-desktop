@@ -278,3 +278,41 @@ test("unaddressed status bursts stay readable without waking peers, including af
   for (const message of restored.messages) await routeConversation(restarted, f.transports, restored, message);
   assert.equal(f.deliveryCalls(), 0);
 });
+
+test('an unmentioned answer returns once to the requester without an acknowledgement loop', async () => {
+  const f=routingFixture();f.engine.discussions.setPolicy({id:f.group.id,agentInitiation:true});
+  const request=f.contribute(0,'@claude2 Please review this',null,'return-request');
+  await routeConversation(f.engine,f.transports,f.group,request);
+  const answer=f.contribute(1,'The review is complete',request.id,'return-answer');
+  await routeConversation(f.engine,f.transports,f.group,answer);
+  assert.deepEqual(answer.targets.map(t=>t.sessionId),[f.engine.catalog[0].id]);
+  assert.equal(answer.routing.kind,'reply-return');
+  const acknowledgement=f.contribute(0,'Received',answer.id,'return-acknowledgement');
+  await routeConversation(f.engine,f.transports,f.group,acknowledgement);
+  assert.equal(acknowledgement.targets.length,0);
+  assert.match(acknowledgement.notice,/Posted to room; no agent notified/);
+  const secondAnswer=f.contribute(1,'One more plain answer',request.id,'return-second');
+  await routeConversation(f.engine,f.transports,f.group,secondAnswer);
+  assert.equal(secondAnswer.targets.length,0,'one automatic answer notification per addressed request');
+  const unrelated=f.contribute(2,'Not an addressed respondent',request.id,'return-unrelated');
+  await routeConversation(f.engine,f.transports,f.group,unrelated);
+  assert.equal(unrelated.targets.length,0);
+});
+
+test('stored legacy plain replies are not newly forwarded after a routing upgrade',async()=>{
+ const f=routingFixture();f.engine.discussions.setPolicy({id:f.group.id,agentInitiation:true});
+ const root=f.contribute(0,'@claude2 An old addressed request',null,'legacy-return-root');await routeConversation(f.engine,f.transports,f.group,root);
+ const old=f.contribute(1,'Historical plain answer',root.id,'legacy-return-answer');delete old.replyNotificationVersion;
+ await routeConversation(f.engine,f.transports,f.group,old);assert.equal(old.targets.length,0);
+});
+
+test('a topic subscription does not turn a status post into a request for an answer', async () => {
+  const f = routingFixture(); f.engine.discussions.setPolicy({ id: f.group.id, agentInitiation: true });
+  f.group.subscriptions = [{ sessionId: f.engine.catalog[1].id, mode: 'wake', topics: ['checkpoint'], fromMessage: 0 }];
+  const status = f.contribute(0, 'Checkpoint is ready', null, 'subscribed-status');
+  await routeConversation(f.engine, f.transports, f.group, status);
+  assert.equal(status.targets.length, 1); assert.equal(status.targets[0].implicitSubscription, true);
+  const answer = f.contribute(1, 'Received the status', status.id, 'subscribed-status-answer');
+  await routeConversation(f.engine, f.transports, f.group, answer);
+  assert.equal(answer.targets.length, 0);
+});

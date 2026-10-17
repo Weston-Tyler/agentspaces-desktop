@@ -37,7 +37,7 @@ import { ChannelHub } from "./channel-hub.mjs";
 import { ensureDesktopDiscovery } from "./desktop-discovery.mjs";
 import { connectAllOwnedWork } from "./connect-all.mjs";
 import { CodexDiscussionHub } from "./codex-discussions.mjs";
-import { routeConversation } from "./conversation-routing.mjs";
+import { routeConversation, messageDelivery } from "./conversation-routing.mjs";
 import { ParticipantConnections } from "./participant-connection.mjs";
 import { SourceBindings } from './source-bindings.mjs';
 import { resolveNativeSourceMetadata } from './native-source-metadata.mjs';
@@ -498,12 +498,12 @@ export async function startServer({
           result = await participantConnections.prepare({ sessionId: data.sessionId });
           break;
         case "/api/native/channel/status":
-          result = { connected: channels.isConnected(data.sessionId), nativeIdentityVerified: false, mode: "native-interactive-channel" };
+          result = { connected: channels.isConnected(data.sessionId), nativeIdentityVerified: false, mode: channels.transportKind(data.sessionId) === 'async-hook' ? 'native-async-hook' : 'native-interactive-channel' };
           break;
         case "/api/native/channel/reply":
           if (!connector) throw new Error("Participant-bound native channel capability required");
           result = channels.reply(data, connector);
-          { const group = engine.discussions.group(data.discussionId); await routeConversation(engine, { codexAgents, channels }, group, group.messages.find(message => message.deliveryId === data.deliveryId)); }
+          { const group = engine.discussions.group(data.discussionId), message = group.messages.find(message => message.deliveryId === data.deliveryId); await routeConversation(engine, { codexAgents, channels }, group, message); result.posting = messageDelivery(message); }
           break;
         case "/api/ask/providers":
           result = await detectAnswerProviders({ host: data.host ?? "local" });
@@ -594,6 +594,7 @@ export async function startServer({
           const posted = await engine.discussions.postAddressed(data);
           await routeBatches(posted);
           store.save(); result = engine.discussions.view(engine.discussions.group(data.id));
+          result.posting = messageDelivery(engine.discussions.group(data.id).messages.find(message => message.deliveryId === data.deliveryId));
           if (posted.broadcast) result.addressing = posted.broadcast;
           break;
         }
@@ -611,7 +612,7 @@ export async function startServer({
             break;
           }
           result = engine.discussions.contribute(data, connector);
-          { const group = engine.discussions.group(data.id); await routeConversation(engine, { codexAgents, channels }, group, group.messages.find(message => message.deliveryId === data.deliveryId)); }
+          { const group = engine.discussions.group(data.id), message = group.messages.find(message => message.deliveryId === data.deliveryId); await routeConversation(engine, { codexAgents, channels }, group, message); result.posting = messageDelivery(message); }
           break;
         case "/api/sample":
           if (!allowDemo) throw new Error("Sample data is available only in a separate demo runtime");
@@ -739,13 +740,16 @@ export async function startServer({
     const deny = () => { socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); socket.destroy(); };
     if (closing || req.headers.host !== expected || (req.headers.origin && req.headers.origin !== "http://" + expected) || req.headers["sec-fetch-site"] === "cross-site") return deny();
     const path = new URL(req.url, "http://" + expected).pathname;
-    if (path === "/api/native/channel") {
+    if (path === "/api/native/channel" || path === '/api/native/hook') {
       try {
         const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
         const binding = engine.connector(token); channels.validate(binding);
-        if (channels.isConnected(binding.sessionId)) return deny();
+        const hook = path === '/api/native/hook';
+        if (channels.isConnected(binding.sessionId) && channels.transportKind(binding.sessionId) !== 'async-hook') {
+          socket.write('HTTP/1.1 409 Conflict\r\nConnection: close\r\n\r\n'); socket.destroy(); return;
+        }
         sockets.handleUpgrade(req, socket, head, ws => {
-          const connected = channels.connect(binding, params => new Promise((yes, no) => ws.send(JSON.stringify(params), error => error ? no(error) : yes())));
+          const connected = channels.connect(binding, params => new Promise((yes, no) => ws.send(JSON.stringify(params), error => error ? no(error) : yes())), { kind: hook ? 'async-hook' : 'channel', close: () => ws.close(4001, 'Replaced by newer native hook') });
           ws.on("close", connected.close); ws.on("error", connected.close);
         });
       } catch { deny(); }

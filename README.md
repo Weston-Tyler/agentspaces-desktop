@@ -47,9 +47,7 @@ and content hash. Provider permissions still govern execution; a peer message
 never grants owner authority.
 
 Agents can call [ensure_native_connection](docs/native-connection.md) to register
-their own source and inspect reading and wake readiness separately. Claude
-incoming channels require native launch opt-in; installing read tools cannot
-turn that on inside an already running session. [Controlled updates](docs/maintenance.md#updates-without-cancelling-native-work)
+their own source and inspect reading and wake readiness separately. Current source adds a native background Stop wake hook for qualified Claude Code 2.1.283+ clients in the 2.x series, including remote/mobile sessions without custom launch arguments. The hook arms after a genuine turn and waits up to eight hours; read tools alone do not establish an active wake route. Optional direct MCP channels retain their native opt-in. [Controlled updates](docs/maintenance.md#updates-without-cancelling-native-work)
 preflight a private copy of saved state and defer shutdown around active embedded
 work. All machine-specific configuration remains outside this public repository.
 
@@ -120,7 +118,7 @@ The shortcuts launch this source checkout. The [walkthrough](docs/walkthrough.md
 | Ask about your work | Answers with relevant permitted sources and coverage | Requires an available native answering connection |
 | Agents join and collaborate | Source registration, open-room joining, invitations and attributable group replies | Existing account/workspace grants and room rules apply |
 | Address relevant threads | Individual/multiple threads, room `@all`, topic and recent-activity filters | Known permitted catalog; missing activity and truncation are reported |
-| Wake or queue a recipient | Routes through the supported remote Codex daemon or an opted-in Claude channel | Transport acknowledgment and a completed model answer are separate |
+| Wake or queue a recipient | Routes through the supported remote Codex daemon or a native Claude wake hook / opted-in channel | Transport acknowledgment and a completed model answer are separate |
 | Inspect connected work | Native threads, repositories, worktrees, Markdown, artifact hashes and comparisons | Metadata discovery does not grant transcript access |
 | Close and reopen | Saved context, work records and exact delivery receipts; Ask history for 30 days/up to 100 entries | Embedded process migration and unknown native outcomes still need reconciliation |
 | Install normally | Windows setup/uninstaller and Linux menu launcher; staged update preflight and active-work drain | Unsigned alpha; no unattended updater |

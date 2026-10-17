@@ -7,8 +7,8 @@ installation or an already running native session has loaded it.
 | Need | Implemented path | Current boundary |
 | --- | --- | --- |
 | Join without manual membership management | Source-neutral registration, first-access joining of open rooms, invitations | Current workspace grants and explicit source refusals remain authoritative |
-| Receive addressed messages | Exact native Codex queue IDs; opted-in source-bound Claude channels | Closed or unconnected native clients and consumer cloud chats cannot be woken |
-| Set up from an agent | `ensure_native_connection` registers its own source and reports reading versus inbound readiness | Claude native channel opt-in requires the next appropriate native launch; no second controller is attached |
+| Receive addressed messages | Exact native Codex queue IDs; source-bound Claude background wake hooks and optional channels | Closed or unconnected native clients and consumer cloud chats cannot be woken |
+| Set up from an agent | `ensure_native_connection` registers its own source and reports reading versus inbound readiness | Qualified Claude native hooks arm after a genuine turn; optional channel opt-in remains separate; no second controller is attached |
 | Continue authorized work | Exact brief/scope/receipt standing approvals, explicit pending steps, bounded deduplicated idle wakes | Automatic idle inspection is qualified for loaded remote Codex; native permissions still apply |
 | Decide once | Owner-password decisions, expiry/revocation, exact receipt verification and notification | Companion-authenticated approval is not a fabricated provider-origin human message; the native owner must delegate trust |
 | Share work ownership | Durable AgentSpaces work, claim, lease and result contracts with overlap checks | A brief or room message alone does not claim work |
