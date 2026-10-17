@@ -289,3 +289,10 @@ test("Claude launcher configuration rejects invalid paths and keeps a running pi
   await runNativeSessionHook(event(), { configPath, ancestors: async () => [original], requestImpl: async (_, path) => path === "/api/native/register" ? { participantConfig } : [] });
   assert.equal((await resolveClaudeSource(configPath, { ancestors: async () => [original] })).nativeThreadId, UUID);
 });
+
+test('a genuine Stop event records its own lifecycle event rather than fabricating a prompt',async()=>{
+ const {root,configPath,participantConfig}=await setup();const observed=[];
+ const result=await runNativeSessionHook(event({hook_event_name:'Stop'}),{configPath,ancestors:async()=>[processRecord],requestImpl:async(_,path,body)=>{observed.push({path,body});return {participantConfig};}});
+ assert.equal(result.recorded,true);assert.equal(observed.length,1);assert.equal(observed[0].body.sourceProof.hookEvent,'Stop');
+ const record=await resolveClaudeSource(configPath,{ancestors:async()=>[processRecord]});assert.equal(record.hookEvent,'Stop');assert.equal(record.nativeThreadId,UUID);
+});

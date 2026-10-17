@@ -141,3 +141,32 @@ test("Claude setup falls back to PATH when the standard launcher is not an execu
   assert.equal(device.nativeExecutable, f.binary);
   assert.equal(device.nativeLauncher, undefined);
 });
+
+test('qualified Claude setup adds an asynchronous native Stop wake without launch flags',async()=>{
+ const f=fixture();const original=f.options.runCLI;
+ const options={...f.options,sources:{...f.options.sources,inbox:'// Synthetic native inbox hook'},runCLI:(binary,args,rest)=>args[0]==='--version'?'2.1.283 (Claude Code)':original(binary,args,rest)};
+ const result=await installOnCurrentHost(options);
+ const settings=JSON.parse(readFileSync(join(f.home,'.claude/settings.json'),'utf8'));
+ assert.deepEqual(settings.hooks.Stop[0],f.settings.hooks.Stop[0]);
+ const hooks=settings.hooks.Stop.flatMap(g=>g.hooks).filter(h=>h.command.includes('native-inbox-hook.mjs'));
+ assert.equal(hooks.length,1);assert.equal(hooks[0].asyncRewake,true);assert.equal(hooks[0].timeout,28800);
+ assert.equal(result.hookWakeInstalled,true);
+ await installOnCurrentHost(options);
+ assert.equal(JSON.parse(readFileSync(join(f.home,'.claude/settings.json'),'utf8')).hooks.Stop.length,2);
+ assert(!JSON.stringify(f.calls).includes('dangerously-load-development-channels'));
+});
+
+test('unknown or older native clients never receive a potentially blocking wake hook',async()=>{
+ for(const version of ['2.1.113 (Claude Code)','unavailable']){
+  const f=fixture();const original=f.options.runCLI;
+  const result=await installOnCurrentHost({...f.options,sources:{...f.options.sources,inbox:'// Synthetic inbox source'},runCLI:(binary,args,rest)=>args[0]==='--version'?version:original(binary,args,rest)});
+  assert.equal(result.hookWakeInstalled,false);
+  assert.deepEqual(JSON.parse(readFileSync(join(f.home,'.claude/settings.json'),'utf8')).hooks.Stop,f.settings.hooks.Stop);
+ }
+});
+test('invalid existing Stop hook settings refuse before registration or private setup writes',async()=>{
+ const f=fixture();writeFileSync(join(f.home,'.claude/settings.json'),JSON.stringify({hooks:{Stop:'invalid'}}));
+ const original=readFileSync(f.nativePath,'utf8');
+ await assert.rejects(installOnCurrentHost({...f.options,sources:{...f.options.sources,inbox:'// Synthetic inbox'}}),/Existing native hook settings/);
+ assert.equal(f.calls.length,0);assert.equal(readFileSync(f.nativePath,'utf8'),original);
+});

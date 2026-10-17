@@ -164,7 +164,7 @@ async function currentDiscussionContext(device, participant, requestImpl) {
 export async function runNativeSessionHook(input, { configPath = process.env.AGENTSPACES_DEVICE_CONFIG, ancestors = processAncestors, requestImpl = scopedRequest } = {}) {
   if (!configPath) throw fail("device_config_required");
   let event; try { event = typeof input === "string" ? JSON.parse(input) : input; } catch { throw fail("native_hook_invalid"); }
-  if (!event || typeof event.session_id !== "string" || !event.session_id || event.session_id.length > 200 || typeof event.cwd !== "string" || (!posix.isAbsolute(event.cwd) && !win32.isAbsolute(event.cwd)) || event.cwd.length > 2000 || !["SessionStart", "UserPromptSubmit", "SessionEnd"].includes(event.hook_event_name)) throw fail("native_hook_invalid");
+  if (!event || typeof event.session_id !== "string" || !event.session_id || event.session_id.length > 200 || typeof event.cwd !== "string" || (!posix.isAbsolute(event.cwd) && !win32.isAbsolute(event.cwd)) || event.cwd.length > 2000 || !["SessionStart", "UserPromptSubmit", "SessionEnd", "Stop"].includes(event.hook_event_name)) throw fail("native_hook_invalid");
   const config = await readDeviceConfig(configPath), chain = await ancestors(), matchesExecutable = await nativeExecutableMatcher(config, chain), native = chain.find(matchesExecutable);
   if (!native || !Number.isSafeInteger(native.pid) || typeof native.startedAt !== "string" || !native.startedAt) throw fail("native_process_not_identified");
   if (config.provider === "claude" && !nativeUuid.test(event.session_id)) throw fail("native_source_uuid_required");
@@ -196,7 +196,7 @@ export async function runNativeSessionHook(input, { configPath = process.env.AGE
   const participant = result.participantConfig;
   if (!participant || !nativeUuid.test(participant.nativeThreadId ?? "") || (config.provider === "claude" && participant.nativeThreadId !== event.session_id)) throw fail("registered_source_mismatch");
   await saveRecord({ ...baseRecord, nativeThreadId: participant.nativeThreadId, provisional: false });
-  const additionalContext = config.provider === "claude" ? await currentDiscussionContext(config, participant, requestImpl) : undefined;
+  const additionalContext = config.provider === "claude" && event.hook_event_name !== 'Stop' ? await currentDiscussionContext(config, participant, requestImpl) : undefined;
   return { nativeThreadId: participant.nativeThreadId, recorded: true, activeSessionReloaded: false, ...(additionalContext ? { additionalContext } : {}) };
 }
 export function bootstrapConfigPath(args = process.argv.slice(2)) {

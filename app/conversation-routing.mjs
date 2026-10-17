@@ -1,5 +1,12 @@
 import { implicitRoomWake } from "./room-subscriptions.mjs";
 import { createHash } from "node:crypto";
+export function messageDelivery(message) {
+  const targets = message?.targets ?? [];
+  return { messageId: message?.id, roomPosted: !!message, selectedRecipients: targets.length,
+    notificationStatus: !targets.length ? 'no-recipients' : 'see-recipient-receipts',
+    ...(targets.length ? {} : { warning: 'Posted to room; no agent notified. Mention a recipient to request another turn.' }),
+    nativeAnswerConfirmed: targets.some(target => ['native-agent-replied', 'native-participant-contributed'].includes(target.status)) };
+}
 // Bounded direct room delivery only; no work claims, scheduler or idle models.
 export async function routeConversation(engine, { codexAgents, channels }, group, message) {
   if (!message || engine.discussions.group(group.id) !== group || !group.messages.includes(message)) return;
@@ -22,6 +29,7 @@ export async function routeConversation(engine, { codexAgents, channels }, group
     message.routing ??= { status, allocated: true };
     message.routing.status = status;
     message.wire.metadata.routingStatus = status;
+    message.notice = messageDelivery(message).warning ?? null;
     for (const target of message.targets ?? []) if (!target.routingAttempted) {
       target.routingAttempted = true; target.status = status;
     }
@@ -43,7 +51,7 @@ export async function routeConversation(engine, { codexAgents, channels }, group
       .reduce((count, item) => count + (item.targets?.length ?? 0), 0);
     const remaining = Math.max(0, policy.maxDeliveries - used);
     const existing = message.targets ?? [];
-    let candidates = existing;
+    let candidates = existing, replyReturn = false;
     if (message.source && !existing.length) {
       const aliases = [...message.text.matchAll(/(?:^|\s)@([a-zA-Z0-9_-]+)/g)].map(match => match[1]);
       // Status posts remain in the room; waking every peer requires an explicit address.
@@ -51,13 +59,28 @@ export async function routeConversation(engine, { codexAgents, channels }, group
       candidates = group.members.filter(member => member.sessionId !== message.source.sessionId &&
         (broadcast || aliases.includes(member.alias) || !aliases.length && !message.replyTo && implicitRoomWake(group,member.sessionId,message.text,{peer:true,messageIndex:group.messages.indexOf(message)})) && permitted(member.sessionId))
         .map(member => ({ sessionId: member.sessionId, alias: member.alias, status: "connecting-native-agent", ...(!aliases.length ? {implicitSubscription:true} : {}) }));
+      // Return one answer to an explicitly addressed, single-recipient request.
+      // Answers to this return notification stay quiet, so acknowledgement turns
+      // cannot bounce forever. Broadcast/status posts keep explicit addressing.
+      if (message.replyNotificationVersion === 1 && !aliases.length && message.replyTo && !candidates.length) {
+        const parent = group.messages.find(item => item.id === message.replyTo);
+        const requester = parent?.source?.sessionId;
+        if (requester && requester !== message.source.sessionId && parent.targets?.length === 1 &&
+            parent.targets[0].sessionId === message.source.sessionId && !parent.targets[0].implicitSubscription && parent.routing?.kind !== 'reply-return' &&
+            !group.messages.some(item => item !== message && item.routing?.kind === 'reply-return' && item.replyTo === parent.id) && permitted(requester)) {
+          const member = group.members.find(item => item.sessionId === requester);
+          if (member) { candidates = [{ sessionId: requester, alias: member.alias, status: 'connecting-native-agent' }]; replyReturn = true; }
+        }
+      }
     }
     message.targets = candidates.slice(0, remaining);
     message.routing = { rootId: chain.root.id, depth: chain.depth, allocated: true,
+      kind: replyReturn ? 'reply-return' : 'addressed',
       status: candidates.length > remaining ? "target-budget-exhausted" : message.targets.length ? "targets-allocated" : "no-addressed-targets",
       maxForwardHops: policy.maxForwardHops, maxDeliveries: policy.maxDeliveries };
     message.wire.metadata.targets = JSON.stringify(message.targets.map(target => target.sessionId));
     message.wire.metadata.routingStatus = message.routing.status;
+    message.notice = messageDelivery(message).warning ?? null;
     if (message.source && message.targets.length) group.version++;
     engine.store.save();
   }

@@ -359,6 +359,7 @@ export class Discussions {
       targets,
       synthetic,
       deliveryId,
+      replyNotificationVersion: 1,
       text,
       wire: {
         role: member ? "assistant" : "user",

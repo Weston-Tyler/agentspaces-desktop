@@ -18,14 +18,17 @@ export class ChannelHub {
     if (discussionId) this.engine.discussions.context(discussionId, binding);
     return session;
   }
-  connect(binding, send) {
+  connect(binding, send, { kind = 'channel', close } = {}) {
     this.validate(binding);
     if (typeof send !== "function") throw fail("channel_transport_required");
-    const connection = { binding, send };
+    if (!['channel', 'async-hook'].includes(kind)) throw fail('native_transport_kind_invalid');
+    const previous = this.connections.get(binding.sessionId);
+    const connection = { binding, send, kind, close };
     this.connections.set(binding.sessionId, connection);
+    previous?.close?.();
     // Retain only a reference to an already admitted connector, never its token.
     const connectorKey = Object.entries(this.engine.store.data.connectors).find(([, value]) => value === binding)?.[0];
-    this.engine.store.data.channelTransports[binding.sessionId] = { connectorKey };
+    this.engine.store.data.channelTransports[binding.sessionId] = { connectorKey, kind };
     this.engine.store.save();
     void this.flush(binding.sessionId).catch(() => {});
     return { close: () => { if (this.connections.get(binding.sessionId) === connection) this.connections.delete(binding.sessionId); } };
@@ -36,8 +39,16 @@ export class ChannelHub {
     try { this.validate(connection.binding); return true; }
     catch { this.connections.delete(sessionId); return false; }
   }
+  transportKind(sessionId) {
+    return this.isConnected(sessionId) ? this.connections.get(sessionId).kind : null;
+  }
   knownBinding(sessionId) {
-    const key = this.engine.store.data.channelTransports[sessionId]?.connectorKey;
+    let key = this.engine.store.data.channelTransports[sessionId]?.connectorKey;
+    if (!key) {
+      const source = this.engine.session(sessionId);
+      if (this.engine.store.data.nativeAutomaticInstallations?.[source.host + ':claude']?.hookWakeInstalled === true)
+        key = Object.values(this.engine.store.data.nativeSourceBindings ?? {}).find(row => row.identity?.sessionId === sessionId)?.connectorKey;
+    }
     const binding = this.engine.store.data.connectors[key];
     if (!binding || binding.sessionId !== sessionId) throw fail('native_channel_not_connected');
     this.validate(binding); return binding;
@@ -106,6 +117,10 @@ export class ChannelHub {
       const session = this.validate(connection.binding, receipt.discussionId);
       if (digest(boundary(session)) !== digest(receipt.boundary) || (session.nativeThreadId ?? session.id) !== receipt.nativeThreadId || receipt.inputHash !== digest({ sessionId: receipt.sessionId, discussionId: receipt.discussionId, messageId: receipt.messageId, text: message.text })) throw fail('channel_message_content_mismatch');
     } catch { this.update(receipt, 'channel-access-changed; not dispatched'); return; }
+    // A native async wake hook exits after one notification. Consume it only
+    // after validation, before any asynchronous send can admit a second effect.
+    if (connection.kind === 'async-hook') this.connections.delete(receipt.sessionId);
+    receipt.transportKind = connection.kind;
     this.update(receipt, 'dispatch-allocated');
     try {
       await connection.send({ content: message.text, meta: { request_id: receipt.requestId, discussion_id: receipt.discussionId, message_id: receipt.messageId } });

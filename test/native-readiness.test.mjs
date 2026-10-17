@@ -3,3 +3,12 @@ import {nativeWakeReadiness,ensureNativeConnection} from '../app/native-readines
 function fixture(){const source={id:'fictional-source',provider:'claude',host:'remote'},grant={enrolled:true,retrieve:true,share:true};let connected=false;return {source,grant,channels:{isConnected:()=>connected,connect:()=>{throw Error('must not launch');}},engine:{session:()=>source,permissions:()=>grant,store:{data:{nativeSourceBindings:{synthetic:{identity:{sessionId:source.id}}}}},discussions:{participant:binding=>{assert.equal(binding,'exact-binding');return source;}}},connect:()=>{connected=true;}};}
 test('read tools and enrollment remain distinct from a live inbound transport',()=>{const f=fixture();let result=ensureNativeConnection(f.engine,f.channels,'exact-binding');assert.equal(result.readiness.readAccessGranted,true);assert.equal(result.readiness.transportConnected,false);assert.equal(result.ownerGrantsChanged,false);assert.equal(result.nativeProcessStarted,false);assert.deepEqual(result.readiness.nativeLaunchArgs,['--dangerously-load-development-channels','server:agentspaces-desktop']);f.connect();result=ensureNativeConnection(f.engine,f.channels,'exact-binding');assert.equal(result.readiness.transportConnected,true);assert.equal(result.readiness.nativeAcceptance,'not-attested');assert.equal(result.activeSessionReloaded,false);});
 test('self-service readiness cannot select peers or change grants and revoked read access stays denied',()=>{const f=fixture();assert.throws(()=>ensureNativeConnection(f.engine,f.channels,'exact-binding',{sourceId:'other-source'}),/no identity/);f.grant.retrieve=false;const result=nativeWakeReadiness(f.engine,f.channels,f.source.id);assert.equal(result.status,'source-grant-unavailable');assert.equal(result.transportConnected,false);});
+
+test('installed native hook and an armed hook are distinct readiness states without mandatory channel flags',()=>{
+ const f=fixture();f.engine.store.data.nativeAutomaticInstallations={['remote:claude']:{hookWakeInstalled:true}};
+ let state=ensureNativeConnection(f.engine,f.channels,'exact-binding').readiness;
+ assert.equal(state.status,'waiting-for-native-hook');assert.equal(state.transportConnected,false);assert.equal(state.nativeLaunchArgs,undefined);
+ f.channels.transportKind=()=> 'async-hook';f.connect();
+ state=ensureNativeConnection(f.engine,f.channels,'exact-binding').readiness;
+ assert.equal(state.status,'native-hook-armed');assert.equal(state.nativeAcceptance,'not-attested');
+});

@@ -171,3 +171,49 @@ test('update drain retains known-unsent channel message and resumes exactly once
   allowed=true; await f.hub.flush(f.ids[1]);await f.hub.flush(f.ids[1]);
   assert.equal(f.sent.length,1);assert.equal(f.sent[0].meta.request_id,f.args.requestId);
 });
+
+test('native wake hooks consume one queued effect while later messages wait for the next hook',async t=>{
+ const f=setup(t);f.connection.close();const received=[];
+ const connection=f.hub.connect(f.binding,async data=>{received.push(data);},{kind:'async-hook'});
+ assert.equal(f.hub.transportKind(f.ids[1]),'async-hook');
+ await f.hub.deliver(f.args);
+ assert.equal(received.length,1);assert.equal(f.hub.isConnected(f.ids[1]),false);
+ const group=f.engine.discussions.group(f.args.discussionId);
+ const posted=f.engine.discussions.post({id:group.id,text:'Another addressed request',deliveryId:'hook-second-request'});
+ const message=group.messages.at(-1);
+ const second={...f.args,requestId:'hook-second-effect',messageId:message.id,text:message.text};
+ assert.equal((await f.hub.deliver(second)).status,'waiting-for-native-transport');
+ assert.equal(received.length,1);
+ f.hub.connect(f.binding,async data=>{received.push(data);},{kind:'async-hook'});
+ await f.hub.flush(f.ids[1]);assert.equal(received.length,2);
+ await f.hub.deliver(f.args);assert.equal(received.length,2,'never replay an effect already written to a native hook');
+ connection.close();
+});
+
+test('a registered source can queue before its first genuine Stop hook, without issuing credentials',async t=>{
+ const f=setup(t);f.connection.close();delete f.engine.store.data.channelTransports[f.ids[1]];
+ const source=f.engine.session(f.ids[1]);
+ f.engine.store.data.nativeAutomaticInstallations={[source.host+':claude']:{hookWakeInstalled:true}};
+ const key=Object.entries(f.engine.store.data.connectors).find(([,binding])=>binding===f.binding)[0];
+ f.engine.store.data.nativeSourceBindings={fixture:{identity:{sessionId:f.ids[1]},connectorKey:key}};
+ const before=Object.keys(f.engine.store.data.connectors);
+ assert.equal(f.hub.canQueue(f.ids[1]),true);
+ assert.equal((await f.hub.deliver(f.args)).status,'waiting-for-native-transport');
+ assert.deepEqual(Object.keys(f.engine.store.data.connectors),before);
+ const received=[];f.hub.connect(f.binding,async message=>{received.push(message);},{kind:'async-hook'});
+ await f.hub.flush(f.ids[1]);assert.equal(received.length,1);
+});
+
+test('a refused queued message leaves the one-shot listener available for the next valid effect', async t => {
+  const f = setup(t); f.connection.close(); await f.hub.deliver(f.args);
+  const group = f.engine.discussions.group(f.args.discussionId);
+  group.messages[0].text = 'Changed after allocation';
+  f.engine.discussions.post({ id: group.id, text: 'Valid next message', deliveryId: 'hook-valid-followup' });
+  const message = group.messages.at(-1);
+  await f.hub.deliver({ ...f.args, requestId: 'hook-valid-followup', messageId: message.id, text: message.text });
+  const received = [];
+  f.hub.connect(f.binding, async data => { received.push(data); }, { kind: 'async-hook' });
+  await f.hub.flush(f.ids[1]);
+  assert.equal(f.engine.store.data.channelReceipts[f.args.requestId].status, 'channel-access-changed; not dispatched');
+  assert.equal(received.length, 1); assert.equal(received[0].content, 'Valid next message');
+});
