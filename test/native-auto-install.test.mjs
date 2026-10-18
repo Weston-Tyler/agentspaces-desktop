@@ -170,3 +170,20 @@ test('invalid existing Stop hook settings refuse before registration or private 
  await assert.rejects(installOnCurrentHost({...f.options,sources:{...f.options.sources,inbox:'// Synthetic inbox'}}),/Existing native hook settings/);
  assert.equal(f.calls.length,0);assert.equal(readFileSync(f.nativePath,'utf8'),original);
 });
+
+test('qualified Codex setup preserves hooks and installs discovery without trusting or enabling them',async()=>{
+ const f=fixture('codex'),original=f.options.runCLI,path=join(f.home,'.codex/hooks.json');
+ const preserved={description:'My existing hooks',hooks:{UserPromptSubmit:[{hooks:[{type:'command',command:'preserve-prompt'}]}],Stop:[{hooks:[{type:'command',command:'preserve-stop'}]}]}};writeFileSync(path,JSON.stringify(preserved));
+ const options={...f.options,runCLI:(binary,args,rest)=>args[0]==='--version'?'codex-cli 0.163.0':original(binary,args,rest)};
+ const result=await installOnCurrentHost(options),hooks=JSON.parse(readFileSync(path,'utf8'));
+ assert.equal(result.discoveryHooksInstalled,true);assert.equal(result.nativeHookTrustRequired,true);
+ assert.deepEqual(hooks.hooks.Stop,preserved.hooks.Stop);assert.deepEqual(hooks.hooks.UserPromptSubmit[0],preserved.hooks.UserPromptSubmit[0]);
+ assert.equal(hooks.hooks.UserPromptSubmit[1].hooks[0].timeout,15);
+ await installOnCurrentHost(options);assert.equal(JSON.parse(readFileSync(path,'utf8')).hooks.UserPromptSubmit.length,2);
+ assert(!JSON.stringify(f.calls).includes('bypass-hook-trust'));assert(!readFileSync(f.nativePath,'utf8').includes('hooks = true'));
+});
+
+test('malformed Codex hooks refuse before private writes or native MCP changes',async()=>{
+ const f=fixture('codex');writeFileSync(join(f.home,'.codex/hooks.json'),JSON.stringify({hooks:{UserPromptSubmit:'invalid'}}));
+ await assert.rejects(installOnCurrentHost(f.options),/Codex hook settings/);assert.equal(f.calls.length,0);
+});

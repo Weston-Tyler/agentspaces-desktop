@@ -283,3 +283,13 @@ test('Room read forwards bounded pagination without fetching extra pages automat
   assert(help.options.includes('cursor'));assert(help.options.includes('limit'));
   assert.match(help.notes.join(' '),/nextCursor/);
 });
+
+test('resume CLI uses its exact source, validates updates and provides offline schema help',async t=>{
+ const help=await runParticipantCli(['resume-update','--help'],{});assert(help.stdinSchema.required.includes('summary'));assert.equal(help.stdinSchema.additionalProperties,false);
+ const f=await setup(t);
+ await runParticipantCli(f.args('relevant','--query','sensor fusion','--limit','3'));
+ await runParticipantCli(f.args('resume-read'));
+ await runParticipantCli(f.args('resume-update'),{input:JSON.stringify({summary:'I help with calibration',skills:['sensor fusion'],deliveryId:'resume-cli-update'})});
+ assert.deepEqual(f.requests.map(r=>r.path),['/api/agent/relevant','/api/agent/resumes','/api/agent/resume/update']);
+ await assert.rejects(runParticipantCli(f.args('resume-update'),{input:JSON.stringify({summary:'Spoofed',sessionId:'peer',deliveryId:'resume-cli-spoofed'})}));assert.equal(f.requests.length,3);
+});

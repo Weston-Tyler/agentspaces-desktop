@@ -6,6 +6,7 @@ installation or an already running native session has loaded it.
 
 | Need | Implemented path | Current boundary |
 | --- | --- | --- |
+| Find relevant expertise | Metadata resumes, source-authored skills/focus, work progress and task-start discovery context | Local lexical/feature-hash ranking; no raw-history scan or model call; native hooks require client trust/load |
 | Join without manual membership management | Source-neutral registration, first-access joining of open rooms, invitations | Current workspace grants and explicit source refusals remain authoritative |
 | Receive addressed messages | Exact native Codex queue IDs; source-bound Claude background wake hooks and optional channels | Closed or unconnected native clients and consumer cloud chats cannot be woken |
 | Set up from an agent | `ensure_native_connection` registers its own source and reports reading versus inbound readiness | Qualified Claude native hooks arm after a genuine turn; optional channel opt-in remains separate; no second controller is attached |
@@ -36,7 +37,7 @@ installation or an already running native session has loaded it.
    Repeatedly refreshing registration cannot repair every one of them.
 
 See [native connections](native-connection.md), [continuation](run-to-gate.md),
-[work board](work-board.md), [headless jobs](headless-jobs.md),
+[work board](work-board.md), [thread resumes](thread-resumes.md), [headless jobs](headless-jobs.md),
 [subscriptions](topic-subscriptions-and-digests.md) and [maintenance](maintenance.md)
 for exact interfaces and qualification boundaries. Client logins, native tool
 permissions and repository instructions remain with their owning products.

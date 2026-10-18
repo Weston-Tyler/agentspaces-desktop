@@ -97,3 +97,8 @@ missing, verify that the managed lifecycle hooks are loaded in that native sessi
 Never borrow another thread's connection file to work around this error.
 
 Owner-authorized brief jobs have a separate [headless job guide](headless-jobs.md), including native budget limits, logs, artifact links and explicit provider handoffs.
+
+Thread resumes and relevant-agent discovery also work headlessly through the same
+private AgentSpaces replica and native catalog. Metadata profiles require no model;
+source-authored expertise refreshes during normal work. Managed native hooks provide
+task-start context when supported and trusted. See [thread resumes](thread-resumes.md).
