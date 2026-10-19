@@ -71,7 +71,7 @@ test("Claude rejects PID reuse, executable mismatch, ambiguous identities and en
 test("Codex hook registers native session ID for owning resolver rather than guessing thread UUID", async () => {
   const { configPath, participantConfig } = await setup("codex");
   let body;
-  const result = await runNativeSessionHook(event({ session_id: "opaque-native-session-id" }), { configPath, ancestors: async () => [{ ...processRecord, exe: "/native/codex" }], requestImpl: async (_, path, value) => { body = value; return { participantConfig }; } });
+  const result = await runNativeSessionHook(event({ session_id: "opaque-native-session-id" }), { configPath, ancestors: async () => [{ ...processRecord, exe: "/native/codex" }], requestImpl: async (_, path, value) => { if(path==="/api/native/register"){body = value; return { participantConfig };} return []; } });
   assert.equal(body.nativeSessionId, "opaque-native-session-id");
   assert.equal(body.nativeThreadId, undefined);
   assert.equal(result.nativeThreadId, UUID);
@@ -125,7 +125,7 @@ test("MCP protocol advertises source and group tools and preserves native reques
   const client = new Client({ name: "fixture-native-bootstrap-client", version: "1" }), [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   await bootstrap.server.connect(serverTransport); await client.connect(clientTransport);
   const advertised = (await client.listTools()).tools;
-  assert.equal(advertised.length, 40);
+  assert.equal(advertised.length, 44);
   assert.equal(advertised.find(tool=>tool.name==='read_fabric_observations').annotations.readOnlyHint, true);
   assert.equal(advertised.find(tool=>tool.name==='request_headless_job').annotations.readOnlyHint, false);
   const reply = await client.callTool({ name: "discover_group_discussions", arguments: {}, _meta: { threadId: UUID } });
@@ -295,4 +295,26 @@ test('a genuine Stop event records its own lifecycle event rather than fabricati
  const result=await runNativeSessionHook(event({hook_event_name:'Stop'}),{configPath,ancestors:async()=>[processRecord],requestImpl:async(_,path,body)=>{observed.push({path,body});return {participantConfig};}});
  assert.equal(result.recorded,true);assert.equal(observed.length,1);assert.equal(observed[0].body.sourceProof.hookEvent,'Stop');
  const record=await resolveClaudeSource(configPath,{ancestors:async()=>[processRecord]});assert.equal(record.hookEvent,'Stop');assert.equal(record.nativeThreadId,UUID);
+});
+
+test('genuine prompt hooks discover peers with scoped credentials and never persist the prompt or profiles',async()=>{
+ for(const provider of ['claude','codex']){
+  const {root,configPath,participantConfig}=await setup(provider),calls=[];
+  const prompt='Fictional sensor calibration request';
+  const result=await runNativeSessionHook(event({hook_event_name:'UserPromptSubmit',prompt}),{configPath,ancestors:async()=>[{...processRecord,exe:'/native/'+provider}],requestImpl:async(config,path,body)=>{
+   calls.push({config,path,body});if(path==='/api/native/register')return {participantConfig};
+   if(path==='/api/agent/collaboration')return {additionalContext:'Untrusted peer resume; discover_relevant_agents and update_thread_resume. '+scopedToken};
+   return [];
+  }});
+  const lookup=calls.find(c=>c.path==='/api/agent/collaboration');assert(lookup);assert.equal(lookup.config.token,scopedToken);assert.equal(lookup.body.query,prompt);
+  assert.match(result.additionalContext,/discover_relevant_agents/);assert(!result.additionalContext.includes(scopedToken));
+  for(const file of await readdir(join(root,'bindings'))){const bytes=await readFile(join(root,'bindings',file),'utf8');assert(!bytes.includes(prompt));assert(!bytes.includes('peer resume'));}
+ }
+});
+
+test('an ambiguous Codex lifecycle receives public discovery guidance without private peer data or invented identity',async()=>{
+ const {root,configPath}=await setup('codex');let calls=0;
+ const result=await runNativeSessionHook(event({hook_event_name:'UserPromptSubmit',prompt:'Private task text'}),{configPath,ancestors:async()=>[{...processRecord,exe:'/native/codex'}],requestImpl:async()=>{calls++;throw Object.assign(Error('ambiguous'),{code:'source_pending'});}});
+ assert.equal(result.recorded,false);assert.equal(result.nativeThreadId,null);assert.equal(calls,1);assert.match(result.additionalContext,/discover_relevant_agents/);assert(!result.additionalContext.includes('Private task text'));
+ await assert.rejects(readdir(join(root,'bindings')));
 });

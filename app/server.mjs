@@ -332,6 +332,11 @@ export async function startServer({
           "/api/discussions/invite",
           "/api/native/thread/create",
           "/api/agent/capabilities",
+          "/api/agent/resumes",
+          "/api/agent/resume/update",
+          "/api/agent/resume/withdraw",
+          "/api/agent/relevant",
+          "/api/agent/collaboration",
           "/api/native/connection/ensure",
           "/api/agent/message",
           "/api/agent/broadcast",
@@ -403,6 +408,20 @@ export async function startServer({
           result = headlessJobs.list(connector,data); break;
         case "/api/headless/log":
           result = headlessJobs.log(connector,data); break;
+        case '/api/agent/resumes':
+          result=engine.workBoard.resumes(connector,data);break;
+        case '/api/agent/resume/update':
+        case '/api/agent/resume/withdraw': {
+          if(!connector)throw Error('Bound native source required');
+          if(data.action!==undefined)throw Error('Resume action is fixed');
+          result=await engine.workBoard.mutate({...data,action:url.pathname.endsWith('/withdraw')?'resume_withdraw':'resume_update'},connector);break;
+        }
+        case '/api/agent/relevant':
+          if(!connector)throw Error('Bound native source required');
+          result=engine.workBoard.relevantAgents(connector,data);break;
+        case '/api/agent/collaboration':
+          if(!connector)throw Error('Bound native source required');
+          result=engine.workBoard.collaboration(connector,data);break;
         case "/api/lanes/list":
           result = engine.workBoard.lanes(connector, data); break;
         case "/api/artifacts/list":
@@ -452,7 +471,7 @@ export async function startServer({
           break;
         }
         case '/api/native/connection/ensure':
-          result=ensureNativeConnection(engine,channels,connector,data);break;
+          result=ensureNativeConnection(engine,channels,connector,data);try{result.collaboration=engine.workBoard.collaboration(connector,{});}catch{result.collaboration={available:false};}break;
         case '/api/agent/capabilities': {
           const caller = engine.discussions.participant(connector), profile = engine.workspace.index?.profile;
           const workspaceGranted = !!profile?.active && connector.scopeId === profile.id;
@@ -465,7 +484,8 @@ export async function startServer({
             ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
             unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
             headlessJobs: headlessJobs.capabilities(),
-            availableTools: ['read_provider_status','report_native_availability','preview_provider_handoff','request_provider_handoff','ensure_native_connection','request_headless_job','list_headless_jobs','read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            threadResumes:{read:true,sourceAuthoredUpdate:true,automaticMetadata:true,relevanceSearch:true,rawHistoryRead:false},
+            availableTools: ['read_thread_resume','update_thread_resume','withdraw_thread_resume','discover_relevant_agents','read_provider_status','report_native_availability','preview_provider_handoff','request_provider_handoff','ensure_native_connection','request_headless_job','list_headless_jobs','read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
           break;
         }
@@ -658,17 +678,22 @@ export async function startServer({
         case "/api/workspace/revoke":
           result = engine.workspace.revoke();
           break;
-        case "/api/discover":
+        case "/api/discover": {
+          const resumes=new Map();
+          if(connector?.scopeId)try{for(const row of engine.workBoard.resumes(connector,{query:data.query??'',limit:200}).items)resumes.set(row.sessionId,row);}catch{/* Metadata discovery remains available without resume-content grants. */}
           result = engine.discover(
             connector
               ? {
                   ...data,
                   project: connector.scopeId ? "all" : connector.project,
                   scopeId: connector.scopeId ?? null,
+                  searchText:source=>{const r=resumes.get(source.id);return r?[r.summary,r.focus,...r.skills,...r.topics,...r.canHelpWith,r.work?.summary].filter(Boolean).join(' '):'';},
                 }
               : data,
           );
+          result=result.map(source=>{const r=resumes.get(source.id);return r?{...source,resume:{summary:r.summary,focus:r.focus,skills:r.skills,freshness:r.freshness,provenance:r.provenance}}:source;});
           break;
+        }
         case "/api/grant":
           result = engine.grant(data.id, data.changes ?? {});
           break;

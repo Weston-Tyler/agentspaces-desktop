@@ -191,12 +191,24 @@ export async function runNativeSessionHook(input, { configPath = process.env.AGE
   try { result = await requestImpl({ ...config, requestTimeoutMs: 4000 }, "/api/native/register", { ...registration, cwd: event.cwd, observedProcess: native, sourceProof: { kind: config.provider === "claude" ? "claude-lifecycle" : "codex-lifecycle", hookEvent: event.hook_event_name } }); }
   catch (error) {
     if (config.provider === "claude") return { nativeThreadId: event.session_id, recorded: true, pending: true, activeSessionReloaded: false };
+    if(['SessionStart','UserPromptSubmit'].includes(event.hook_event_name))return {nativeThreadId:null,recorded:false,pending:true,activeSessionReloaded:false,additionalContext:'AgentSpaces: this hook could not bind an exact native thread. Use the source-bound MCP discover_relevant_agents with your task summary before duplicating work, and maintain your own resume with read_thread_resume / update_thread_resume once registered. Native request metadata identifies your exact source. Never guess identity, copy peer credentials or change owner grants. Discovery is read-only and wakes nobody.'};
     throw error;
   }
   const participant = result.participantConfig;
   if (!participant || !nativeUuid.test(participant.nativeThreadId ?? "") || (config.provider === "claude" && participant.nativeThreadId !== event.session_id)) throw fail("registered_source_mismatch");
   await saveRecord({ ...baseRecord, nativeThreadId: participant.nativeThreadId, provisional: false });
-  const additionalContext = config.provider === "claude" && event.hook_event_name !== 'Stop' ? await currentDiscussionContext(config, participant, requestImpl) : undefined;
+  let additionalContext;
+  if (event.hook_event_name !== 'Stop') {
+    const scoped = {...participant,address:config.address,authority:config.authority,requestTimeoutMs:1500};
+    let peers;
+    try {
+      const query=typeof event.prompt==='string'?event.prompt.slice(0,2000):undefined;
+      const result=await requestImpl(scoped,'/api/agent/collaboration',query===undefined?{}:{query});
+      if(typeof result?.additionalContext==='string')peers=result.additionalContext.slice(0,6000);
+    } catch { /* Optional discovery cannot block a genuine native turn. */ }
+    const roomContext=config.provider==='claude'?await currentDiscussionContext(config,participant,requestImpl):undefined;
+    if(peers||roomContext)additionalContext=[peers,roomContext].filter(Boolean).join('\n').slice(0,12000).replaceAll(config.token,'[redacted]').replaceAll(participant.token,'[redacted]');
+  }
   return { nativeThreadId: participant.nativeThreadId, recorded: true, activeSessionReloaded: false, ...(additionalContext ? { additionalContext } : {}) };
 }
 export function bootstrapConfigPath(args = process.argv.slice(2)) {

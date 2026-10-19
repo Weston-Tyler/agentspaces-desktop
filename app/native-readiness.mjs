@@ -4,7 +4,9 @@ export function nativeWakeReadiness(engine,channels,sessionId){
  const source=engine.session(sessionId),grant=engine.permissions(source);
  const readAccessGranted=!!(grant.enrolled&&grant.retrieve&&grant.share);
  const registered=Object.values(engine.store.data.nativeSourceBindings??{}).some(row=>row.identity?.sessionId===sessionId);
- const common={sourceId:sessionId,provider:source.provider,readAccessGranted,registered,nativeAcceptance:'not-attested',activeSessionReloaded:false};
+ const installation=engine.store.data.nativeAutomaticInstallations?.[source.host+':'+source.provider];
+ const discoveryHooks={configured:installation?.discoveryHooksInstalled===true,nativeTrustRequired:installation?.nativeHookTrustRequired===true,nativeTrust:'native-client-controlled; not-attested'};
+ const common={discoveryHooks,sourceId:sessionId,provider:source.provider,readAccessGranted,registered,nativeAcceptance:'not-attested',activeSessionReloaded:false};
  if(!readAccessGranted)return {...common,status:'source-grant-unavailable',transportConnected:false,reason:'Current source enrollment, sharing or retrieval permission is unavailable'};
  if(source.provider==='claude'){
   const connected=channels.isConnected(sessionId);

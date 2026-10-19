@@ -1,3 +1,4 @@
+import {resumeFields,resumeView,resumeChange,checkResumeReceipt,relevantAgents,collaborationContext} from './thread-resumes.mjs';
 import {progressContinuation,continuationView} from './work-continuation.mjs';
 import { artifactFields, artifactChange, artifactView, checkArtifactReceipt } from './work-artifacts.mjs';
 import { laneView } from './lane-status.mjs';
@@ -117,6 +118,9 @@ export class WorkBoard {
       coverage: { ...result.coverage, synchronized: true, source: 'durable companion-owned AgentSpaces replica' },
       capabilities: { create: true, claim: true, update: true, complete: true, modelExecution: false } };
   }
+  resumes(binding, options = {}) { return resumeView(this,binding,options); }
+  relevantAgents(binding, options = {}) { return relevantAgents(this,binding,options); }
+  collaboration(binding, options = {}) { return collaborationContext(this,binding,options); }
   continuations(binding, options = {}) { return continuationView(this,binding,options); }
   artifacts(binding, options = {}) { return artifactView(this, binding, options); }
   lanes(binding, options = {}) { return laneView(this, binding, options); }
@@ -148,10 +152,10 @@ export class WorkBoard {
   }
   async apply(input, binding, ownerProof) {
     const { action, deliveryId } = input;
-    if (!['create', 'claim', 'renew', 'update', 'complete', ...Object.keys(decisionFields), ...Object.keys(machineFields), ...Object.keys(artifactFields)].includes(action)) throw new Error('Unknown work-board action');
+    if (!['create', 'claim', 'renew', 'update', 'complete', ...Object.keys(decisionFields), ...Object.keys(machineFields), ...Object.keys(artifactFields), ...Object.keys(resumeFields)].includes(action)) throw new Error('Unknown work-board action');
     bounded(deliveryId, 100, 'deliveryId');
     if (!/^[A-Za-z0-9-]{8,100}$/.test(deliveryId)) throw new Error('Stable deliveryId required');
-    const allowed = ['action','deliveryId', ...(artifactFields[action] ?? decisionFields[action] ?? machineFields[action] ?? (action === 'create' ? ['title','brief','repository','base','allowedFiles'] : ['claim','renew'].includes(action) ? ['entryId','leaseMinutes'] : ['entryId','status','summary','branch','head','evidence','continuation']))];
+    const allowed = ['action','deliveryId', ...(resumeFields[action] ?? artifactFields[action] ?? decisionFields[action] ?? machineFields[action] ?? (action === 'create' ? ['title','brief','repository','base','allowedFiles'] : ['claim','renew'].includes(action) ? ['entryId','leaseMinutes'] : ['entryId','status','summary','branch','head','evidence','continuation']))];
     if (Object.keys(input).some(k => !allowed.includes(k))) throw new Error('Unknown work-board field');
     this.access(binding); this.open();
     const actor = this.access(binding), key = createHash('sha256').update(`${actor}:${deliveryId}`).digest('hex');
@@ -160,6 +164,7 @@ export class WorkBoard {
     if (prior) {
       if (prior.digest !== digest) throw new Error('deliveryId reused with different work');
       if (artifactFields[action]) checkArtifactReceipt(this,binding,prior.result.entryId);
+      if (resumeFields[action]) checkResumeReceipt(this,binding,prior.result.entryId);
       return { ...prior.result, duplicate: true };
     }
     if (Object.keys(this.receipts).length >= 10000 || this.peer.states.size >= 10000) throw new Error('Work-board capacity reached; archive through an explicit maintenance operation');
@@ -168,7 +173,9 @@ export class WorkBoard {
       this.access(binding, { create: true });
       const agent = this.agent(actor);
       let entryId = input.entryId, result;
-      if (artifactFields[action]) {
+      if (resumeFields[action]) {
+        result = await resumeChange(this,input,binding,actor,agent);
+      } else if (artifactFields[action]) {
         result = await artifactChange(this,input,binding,actor,agent);
       } else if (machineFields[action]) {
         result = await machineChange(this,input,binding,actor,agent);

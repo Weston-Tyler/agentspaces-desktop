@@ -139,6 +139,7 @@ export class Engine {
     project = "sample-research",
     scopeId = null,
     limit = 100,
+    searchText = null,
   } = {}) {
     const p = project === "all" ? null : this.project(project);
     const words = String(query).toLowerCase().split(/\s+/).filter(Boolean);
@@ -153,7 +154,7 @@ export class Engine {
           (status === "all" || s.status === status),
       )
       .map((s) => {
-        const text = [s.title, s.id, s.nativeThreadId, s.cwd, ...(s.topics ?? [])].filter(Boolean).join(" ").toLowerCase();
+        const text = [s.title, s.id, s.nativeThreadId, s.cwd, ...(s.topics ?? []), ...(typeof searchText==="function"?[searchText(s)]:[])].filter(Boolean).join(" ").toLowerCase();
         return {
           ...s,
           score: words.reduce((n, w) => n + (text.includes(w) ? 1 : 0), 0),

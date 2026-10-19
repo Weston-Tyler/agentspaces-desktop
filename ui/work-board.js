@@ -15,7 +15,22 @@ export function mountWorkBoard(root, { api, notice }) {
   create.className = 'card work-board-create'; create.append(summary, form);
   for (const [key, label, multi] of [['title','Title'],['brief','Brief and acceptance checks',true],['repository','Repository'],['base','Exact base revision'],['allowedFiles','Allowed files or paths (one per line)',true]]) field(form,key,label,multi);
   const submit = element('button', 'Create work item'); submit.type = 'submit'; submit.className = 'primary'; form.append(submit);
-  root.append(heading, refresh, state, lanes, create, activity, cards);
+  const resumes=element('details');resumes.className='card';
+  resumes.append(element('summary','Thread resumes: find an agent'),element('p','Search what threads know and are working on. Descriptions are source-reported; freshness and native availability are separate.'));
+  const resumeForm=element('form'),query=element('input'),search=element('button','Find relevant threads'),resumeResults=element('div');
+  query.name='query';query.placeholder='For example: tracking latency or deployment tests';query.maxLength=2000;query.setAttribute('aria-label','Search thread resumes');search.type='submit';resumeForm.append(query,search);resumes.append(resumeForm,resumeResults);
+  async function loadResumes(){
+    search.disabled=true;
+    try{const view=await api('agent/resumes',{query:query.value,limit:50});resumeResults.replaceChildren(element('p',`${view.items.length} of ${view.total} matching threads${view.truncated?' · Partial view':''}`));
+      for(const row of view.items){const card=element('section');card.className='work-board-item';card.append(element('h3',row.title??row.sessionId),element('p',row.summary),element('p',`Focus: ${row.focus||'Not reported'}`),element('p',`Skills: ${row.skills.join(', ')||'Not reported'}`),element('p',`Can help with: ${row.canHelpWith.join('; ')||'Not reported'}`),element('p',`${row.freshness} · Native availability: ${row.availability}${row.updatedAt?' · Updated '+new Date(row.updatedAt).toLocaleString():''}`),element('p',`Source: ${row.sessionId}`));
+        if(row.work)card.append(element('p',`Reported work: ${row.work.reportedStatus} · ${row.work.branch} @ ${row.work.head}`));
+        for(const evidence of row.evidence)card.append(element('p',`${evidence.label}: ${evidence.reference}`));
+        resumeResults.append(card);
+      }
+    }catch(error){resumeResults.replaceChildren(element('p',error.message));}finally{search.disabled=false;}
+  }
+  resumeForm.addEventListener('submit',event=>{event.preventDefault();void loadResumes();});resumes.addEventListener('toggle',()=>{if(resumes.open&&!resumeResults.childNodes.length)void loadResumes();});
+  root.append(heading, refresh, state, lanes, resumes, create, activity, cards);
   async function change(payload, button) {
     button.disabled = true;
     // Retain the same delivery identity after uncertain transport outcomes.

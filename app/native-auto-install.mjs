@@ -66,6 +66,16 @@ export function mergeClaudeHooks(settings, command, { previousCommand, inboxComm
   }
   return result;
 }
+export function mergeCodexDiscoveryHooks(settings,command,{previousCommand}={}) {
+ if(!settings||typeof settings!=='object'||Array.isArray(settings)||settings.hooks&&(typeof settings.hooks!=='object'||Array.isArray(settings.hooks)))throw Error('Existing Codex hook settings are invalid');
+ const result=structuredClone(settings);result.hooks??={};
+ for(const event of ['SessionStart','UserPromptSubmit']){
+  const existing=result.hooks[event]??[];if(!Array.isArray(existing))throw Error('Existing Codex hook settings are invalid');
+  result.hooks[event]=existing.map(group=>({...group,hooks:group.hooks?.filter(h=>h.command!==previousCommand&&h.command!==command)})).filter(group=>!Array.isArray(group.hooks)||group.hooks.length);
+  if(command)result.hooks[event].push({hooks:[{type:'command',command,timeout:15,additionalContextLimit:2500}]});
+ }
+ return result;
+}
 export async function installOnCurrentHost({ config, sources, versions, home = homedir(), nodeBinary = process.env.AGENTSPACES_NODE_BINARY ?? (process.versions.electron ? executable('node') : process.execPath), runCLI = cli, resolveExecutable = executable, installDependencies = true } = {}) {
   if (config?.schemaVersion !== 1 || !['codex', 'claude'].includes(config.provider) || !/^[a-f0-9]{64}$/.test(config.token ?? '') || !sources?.bootstrap || !sources?.hook || !sources?.channel || sources.inbox !== undefined && (typeof sources.inbox !== 'string' || !sources.inbox.length || sources.inbox.length > 1048576)) throw new Error('Invalid automatic installation payload');
   if (!versions || ['mcp', 'zod', 'claude','ws'].some(key => {
@@ -79,6 +89,8 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
     if (existsSync(settingsPath)) { try { settings = JSON.parse(readFileSync(settingsPath, 'utf8')); } catch { throw new Error('Existing native settings are invalid'); } }
     mergeClaudeHooks(settings, 'preflight-only', { inboxCommand: sources.inbox ? 'preflight-inbox' : undefined });
   }
+  const codexHooksPath=join(home,'.codex','hooks.json');let codexHooks={};
+  if(config.provider==='codex'){noLinks(codexHooksPath);if(existsSync(codexHooksPath)){try{codexHooks=JSON.parse(readFileSync(codexHooksPath,'utf8'));}catch{throw Error('Existing Codex hook settings are invalid');}}mergeCodexDiscoveryHooks(codexHooks,'preflight-only');}
   if (existsSync(base) && (!existsSync(join(base, 'OWNER')) || readFileSync(join(base, 'OWNER'), 'utf8') !== marker)) throw new Error('Unmanaged automatic runtime');
   mkdirSync(base, { recursive: true, mode: 0o700 }); savePrivate(join(base, 'OWNER'), marker);
   if (process.platform === 'win32') {
@@ -108,14 +120,15 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
   }
   const launcher = config.provider === 'claude' ? claudeLauncher(home) : undefined;
   const binary = launcher ? realpathSync.native(launcher) : resolveExecutable(config.provider), folder = join(base, config.provider), configPath = join(folder, 'device.json');
-  let nativeVersion = null, hookWakeInstalled = false;
-  if (config.provider === 'claude' && sources.inbox) {
+  let nativeVersion = null, hookWakeInstalled = false, discoveryHooksInstalled=config.provider==='claude';
+  if (config.provider === 'codex' || config.provider === 'claude' && sources.inbox) {
     const versionOutput = await runCLI(binary, ['--version'], { acceptedFailure: true, timeout: 5000 });
     nativeVersion = /\b\d+\.\d+\.\d+\b/.exec(String(versionOutput ?? ''))?.[0] ?? null;
     const [major, minor, patch] = (nativeVersion ?? '').split('.').map(Number);
     // Do not install a background-wake option on an unqualified native client:
     // an older parser could otherwise run the long waiter synchronously.
-    hookWakeInstalled = major === 2 && (minor > 1 || minor === 1 && patch >= 283);
+    hookWakeInstalled = config.provider==='claude' && major === 2 && (minor > 1 || minor === 1 && patch >= 283);
+    if(config.provider==='codex')discoveryHooksInstalled=major===0&&minor>=163;
   }
   const device = { ...config, ...(config.provider === 'claude' ? { nativeExecutable: binary } : {}) };
   delete device.nativeLauncher;
@@ -157,7 +170,13 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
     const merged = mergeClaudeHooks(settings, command, { previousCommand, inboxCommand, previousInboxCommand });
     if (JSON.stringify(merged) !== JSON.stringify(settings)) { privateBackup(settingsPath); savePrivate(settingsPath, JSON.stringify(merged, null, 2)); }
   }
-  return { host: config.host, provider: config.provider, status: 'native-config-installed', configPath, bootstrapPath: bootstrap, hookWakeInstalled, nativeVersion, activeSessionReloaded: false, inboundChannelConnected: false };
+  if(config.provider==='codex'){
+    const quote=value=>process.platform==='win32'?'"'+value.replaceAll('"','')+'"':"'"+value.replaceAll("'","'\\''")+"'";
+    const command=discoveryHooksInstalled?[nodeBinary,join(runtime,'native-session-hook.mjs'),'--config',configPath].map(quote).join(' '):undefined;
+    const previousCommand=ownedOldRuntime?[nodeBinary,join(oldRuntime,'native-session-hook.mjs'),'--config',configPath].map(quote).join(' '):undefined;
+    if(command||previousCommand){const merged=mergeCodexDiscoveryHooks(codexHooks,command,{previousCommand});if(JSON.stringify(merged)!==JSON.stringify(codexHooks)){privateBackup(codexHooksPath);savePrivate(codexHooksPath,JSON.stringify(merged,null,2));}}
+  }
+  return { host: config.host, provider: config.provider, status: 'native-config-installed', configPath, bootstrapPath: bootstrap, hookWakeInstalled, nativeVersion, discoveryHooksInstalled, nativeHookTrustRequired:config.provider==='codex'&&discoveryHooksInstalled, activeSessionReloaded: false, inboundChannelConnected: false };
 }
 
 export function remoteInstallScript(payload) {
@@ -217,7 +236,7 @@ export class NativeAutoInstaller {
       this.sourceBindings.device(device.token); // Recheck after installation; never undo a revocation.
       const refresh = provider === 'codex' ? await this.refreshNative(host) : { status: 'new-session-load-required' };
       result.nativeRefresh = refresh.status;
-      records[key] = { device, status: result.status, nativeRefresh: result.nativeRefresh, hookWakeInstalled: result.hookWakeInstalled === true, nativeVersion: result.nativeVersion ?? null, activeSessionReloaded: false, inboundChannelConnected: false, at: new Date().toISOString(), configPath: result.configPath, bootstrapPath: result.bootstrapPath }; this.engine.store.save();
+      records[key] = { device, status: result.status, nativeRefresh: result.nativeRefresh, hookWakeInstalled: result.hookWakeInstalled === true, nativeVersion: result.nativeVersion ?? null, discoveryHooksInstalled:result.discoveryHooksInstalled===true,nativeHookTrustRequired:result.nativeHookTrustRequired===true, activeSessionReloaded: false, inboundChannelConnected: false, at: new Date().toISOString(), configPath: result.configPath, bootstrapPath: result.bootstrapPath }; this.engine.store.save();
       if (host === REMOTE_HOST) this.participantConnections.retain(tunnel);
       return result;
     } catch {

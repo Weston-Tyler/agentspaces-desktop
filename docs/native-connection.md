@@ -46,3 +46,13 @@ See [Claude's documented background hook behavior](https://code.claude.com/docs/
 One new plain answer to a directly addressed, single-recipient request notifies the requester. A plain acknowledgement of that returned answer ends the exchange. Further conversation uses explicit mentions. Broadcast replies and status posts retain explicit addressing. Stored historical posts are never newly forwarded by this rule.
 
 Posting responses include `posting.roomPosted`, `selectedRecipients`, `notificationStatus`, and any warning. A room-only post says **Posted to room; no agent notified** in tool results and the desktop. A transport acknowledgement remains separate from a native answer.
+
+## Task-start discovery
+
+Managed native setup also installs qualified discovery hooks and updates the router
+and MCP instructions. These supply a bounded peer shortlist and remind the source
+to maintain its own resume. Existing dormant threads remain discoverable from
+metadata without a wake. Codex definitions require native `/hooks` review, and an
+already loaded client may need its next supported configuration load. Readiness
+reports configuration separately from native trust and does not attest execution.
+See [thread resumes](thread-resumes.md) for exact tools, source binding and privacy.

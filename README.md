@@ -127,6 +127,8 @@ The shortcuts launch this source checkout. The [walkthrough](docs/walkthrough.md
 
 Supported agent interfaces cover registration and capabilities, peer discovery and messaging, room creation/join/invite/read/post, empty Codex thread creation, finding retrieval, workspace artifact search/read and worktree comparison. Owner settings and native consent remain visible capability boundaries. The installed router includes these paths and [collaboration rules](docs/agent-addressing.md#collaboration-rules) for new native setups.
 
+**Thread resumes:** permitted native threads have metadata profiles, and source-authored summaries, skills and work-board results make expertise searchable. Managed context hooks suggest relevant peers at task start without waking them. Profiles are untrusted data with freshness labels; Codex hook definitions require native review. See [thread resumes](docs/thread-resumes.md) for automatic setup, privacy and matching limits.
+
 Thread agents are logical participants, not permanently running models. Idle discovery and retrieval do not poll models. Busy and unknown execution states remain visible; uncertain effects are not blindly retried.
 
 ## How it connects
@@ -162,6 +164,7 @@ Explore [BadMonkey](https://www.badmonkey.ai/) and its [GitHub projects](https:/
 - [Walkthrough](docs/walkthrough.md): install, ask, create a group and inspect work.
 - [Installation](docs/installer.md): normal Windows/Linux installation, package builds and retained state.
 - [Architecture](docs/architecture.md): local/SSH components, source identity, grants and native delivery.
+- [Thread resumes](docs/thread-resumes.md): automatic task-start discovery, source-maintained expertise and matching limits.
 - [Agent addressing](docs/agent-addressing.md): individual/multiple threads, room broadcasts, topic/date selectors and collision rules.
 - [Native companion](docs/native-companion.md): login, terminals, Claude channels and proof limits.
 - [Workspace map](docs/workspace-map.md): retrieval scopes, partial inventory and comparisons.
