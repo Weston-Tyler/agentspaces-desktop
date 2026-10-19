@@ -68,6 +68,13 @@ Headless operation still needs the companion service, the supported native tools
 
 ## Recovering a message connection
 
+A saved runtime record can survive a computer restart while its process ID is
+reused by an unrelated application. The desktop first verifies the authenticated
+companion identity. Recovery requires a closed loopback port and either a missing
+recorded process or a proven process birth after the runtime file was written.
+Unknown/hung owners, occupied ports and explicitly selected runtimes are preserved.
+Recovery never kills the unrelated process or resumes native provider sessions.
+
 The companion reconnects its previously configured reverse SSH bridge on the same
 port, with backoff from one second to thirty seconds. It restores only the owned
 transport: no source grants, native login or provider sessions are replaced. The
