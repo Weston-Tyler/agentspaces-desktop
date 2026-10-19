@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, session, shell } from "electron";
 import { startServer } from "./server.mjs";
+import { resolveSavedCompanion } from "./companion-runtime.mjs";
 import { join, isAbsolute } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -38,22 +39,9 @@ else {
       const sourceRuntime = process.env.AGENTSPACES_STATE || savedRoot || app.isPackaged ? join(ownedRoot, "runtime.json") : fileURLToPath(new URL("../.local/runtime.json", import.meta.url));
       const sharedRuntime = process.env.AGENTSPACES_DESKTOP_RUNTIME ?? (!process.env.AGENTSPACES_DESKTOP_STATE && existsSync(sourceRuntime) ? sourceRuntime : null);
       if (sharedRuntime) {
-        let runtime;
-        try {
-          runtime = JSON.parse(readFileSync(sharedRuntime, "utf8"));
-          if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(runtime.address)) throw new Error("Invalid companion address");
-          const response = await fetch(runtime.address + "/api/health", { headers: { Authorization: "Bearer " + runtime.admin }, signal: AbortSignal.timeout(3000) });
-          const health = await response.json();
-          if (!response.ok || health.instance !== runtime.instance || health.pid !== runtime.pid) throw new Error("Companion runtime identity mismatch");
-          // An attached desktop window does not own the background process.
-          companion = { address: runtime.address, close: async () => {} };
-        } catch (error) {
-          // A saved runtime can outlive its service after a computer restart.
-          // Do not replace a live process or an explicitly selected runtime.
-          let live = false;
-          if (Number.isInteger(runtime?.pid) && runtime.pid > 0) try { process.kill(runtime.pid, 0); live = true; } catch {}
-          if (live || process.env.AGENTSPACES_DESKTOP_RUNTIME) throw error;
-        }
+        const saved=await resolveSavedCompanion(sharedRuntime,{explicit:!!process.env.AGENTSPACES_DESKTOP_RUNTIME});
+        // An attached window does not own the headless background process.
+        if(saved.status==='attached')companion={address:saved.address,close:async()=>{}};
       }
       if (!companion) companion = await startServer({
         root: ownedRoot,
