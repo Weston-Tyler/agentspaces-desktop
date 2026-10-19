@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,writeFileSync,statSync,rmSync} from 'node:fs';
+import {mkdtempSync,writeFileSync,statSync,rmSync,utimesSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {createServer} from 'node:http';
 import {resolveSavedCompanion,processStartedAt} from '../app/companion-runtime.mjs';
 
 function fixture(t){
@@ -39,4 +40,19 @@ test('malformed or nonloopback runtime records never send credentials or start r
 test('process birth observation is bounded and reads only the requested process start time',async()=>{
  const observed=await processStartedAt(process.pid),expected=Date.now()-process.uptime()*1000;
  assert.equal(typeof observed,'number');assert(Math.abs(observed-expected)<3000);
+});
+
+test('real closed-port recovery proves PID reuse using the native process birth observation',async t=>{
+ const f=fixture(t),server=createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const port=server.address().port;await new Promise(resolve=>server.close(resolve));
+ writeFileSync(f.path,JSON.stringify({...f.record,address:'http://127.0.0.1:'+port,pid:process.pid}));
+ const past=new Date(Date.now()-process.uptime()*1000-10000);utimesSync(f.path,past,past);
+ assert.deepEqual(await resolveSavedCompanion(f.path),{status:'stale',reason:'pid-reused'});
+});
+test('a real listener with a different identity is preserved despite a provably stale PID record',async t=>{
+ const f=fixture(t),server=createServer((req,res)=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({instance:'another-owner',pid:process.pid}));});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+ writeFileSync(f.path,JSON.stringify({...f.record,address:'http://127.0.0.1:'+server.address().port,pid:process.pid}));
+ const past=new Date(Date.now()-process.uptime()*1000-10000);utimesSync(f.path,past,past);
+ await assert.rejects(resolveSavedCompanion(f.path),/port is occupied or unavailable/);
 });
