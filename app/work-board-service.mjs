@@ -1,9 +1,10 @@
+import { loadOrCreateIdentity, agentKeys } from "./agentspaces-node.mjs";
 import {progressContinuation,continuationView} from './work-continuation.mjs';
 import { artifactFields, artifactChange, artifactView, checkArtifactReceipt } from './work-artifacts.mjs';
 import { laneView } from './lane-status.mjs';
 import { machineFields, machineChange, machineView } from './machine-queue.mjs';
 import { decisionFields, decisionChange, decisionView, approvalCheck } from './coordination-records.mjs';
-import { Identity, Peer, cbor, spaceIdLocal } from '@agentspaces/client';
+import { Peer, cbor, spaceIdLocal } from '@agentspaces/client';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, renameSync, openSync, closeSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -38,7 +39,7 @@ export class WorkBoard {
     if (this.closed) throw new Error('Work board is closed');
     if (this.peer) return;
     protectStateDirectory(this.root, ['identity','agents','replica.cbor','replica.cbor.tmp','writer.lock']);
-    this.identity = Identity.loadOrCreate(join(this.root, 'identity'));
+    this.identity = loadOrCreateIdentity(join(this.root, 'identity'));
     this.group = spaceIdLocal(`desktop-work-board/${this.identity.peerId}`);
     this.peer = new Peer(this.identity, this.group, this.engine.clock);
     this.receipts = {}; this.scope = null;
@@ -94,7 +95,7 @@ export class WorkBoard {
   agent(id) {
     if (!this.agents.has(id)) {
       const name = createHash('sha256').update(id).digest('hex').slice(0, 60);
-      const key = Identity.agentKeys(join(this.root, 'agents'), this.identity.peerId, name);
+      const key = agentKeys(join(this.root, 'agents'), this.identity.peerId, name);
       this.agents.set(id, this.identity.renewingSubordinate(name, 'PT24H', key, this.engine.clock));
     }
     return this.agents.get(id);
