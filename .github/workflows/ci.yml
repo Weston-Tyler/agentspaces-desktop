@@ -73,7 +73,8 @@ jobs:
               paths += [str(upstream/module/'target/classes')]
           classpath = os.pathsep.join(dict.fromkeys(paths))
           java = pathlib.Path(os.environ['JAVA_HOME'])/'bin'
-          subprocess.run([str(java/'javac'),'-cp',classpath,'-d',str(classes),'test/java/LoopbackSeed.java','test/java/TransportSeed.java'],check=True)
+          subprocess.run([str(java/'javac'),'-cp',classpath,'-d',str(classes),'test/java/LoopbackSeed.java','test/java/TransportSeed.java','scripts/java/NativeTransportRelay.java','test/java/NativeRelayContract.java'],check=True)
+          subprocess.run([str(java/'java'),'-cp',classpath,'NativeRelayContract'],check=True)
           env = dict(os.environ, AGENTSPACES_TEST_JAVA=str(java/'java'), AGENTSPACES_TEST_CLASSPATH=classpath)
           for proof in ['fabric-v3-proof.mjs','fabric-transports-proof.mjs']:
               subprocess.run(['node','scripts/'+proof],env=env,check=True)

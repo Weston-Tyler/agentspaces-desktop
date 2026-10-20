@@ -53,7 +53,7 @@ work. All machine-specific configuration remains outside this public repository.
 
 Current source uses the upstream **0.4.0 client (wire v3)**. The alpha.4 download remains version-specific; source updates are separately installed. Setup shows the declared dependency pin, runtime wire version and connection counters. Optional loopback fleet observations expose signed capability cards, observed model usage and advisory votes; local semantic ranking makes no model calls. The work board shows bounded upstream activity without replaying work. See [the upstream integration guide](docs/upstream-v3.md) for opt-in setup, migration checks and compatibility limits.
 
-The [0.4.0 transport guide](docs/upstream-040.md) explains compatibility and optional Java DTLS/QUIC gateway links. Native thread delivery retains its existing SSH/channel routes. No JVM or UDP listener is started by Desktop.
+The [0.4.0 transport guide](docs/upstream-040.md) explains compatibility and optional Java DTLS/QUIC gateway links. Native thread delivery retains its existing SSH/channel routes, with an optional [QUIC carrier for actual native chats and context](docs/native-quic.md). No JVM or UDP listener is started by Desktop.
 
 ## Get started
 
