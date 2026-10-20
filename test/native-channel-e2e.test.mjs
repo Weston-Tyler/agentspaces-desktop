@@ -10,6 +10,7 @@ import { z } from "zod";
 import { Store } from "../app/store.mjs";
 import { Engine } from "../app/engine.mjs";
 import { startServer } from "../app/server.mjs";
+import {messageReference} from '../app/agent-message.mjs';
 
 // Real app HTTP/WebSocket and MCP stdio transports, synthetic source metadata
 // and a tool-speaking test actor. No native CLI or model is launched.
@@ -88,6 +89,10 @@ for (const aliasProxy of [false, true]) test("Native channel stdio actor roundtr
   assert.equal(posted.messages[0].targets[0].status, "delivered-to-native-transport");
   const read = await client.callTool({ name: "read_group_discussion", arguments: { id: group.id } });
   assert.equal(JSON.parse(read.content[0].text).messages[0].text, message.text);
+  assert(contextTool.inputSchema.properties.messageId);assert(contextTool.inputSchema.properties.sha256);
+  const ref=messageReference(group,group.messages[0]);
+  const exact=await client.callTool({name:'read_group_discussion',arguments:ref});
+  assert.deepEqual(JSON.parse(exact.content[0].text).reference,ref);assert.equal(JSON.parse(exact.content[0].text).messages.length,1);
   const replyArgs = { requestId: event.meta.request_id, discussionId: group.id, text: "Synthetic actor reply: reconcile the original operation before retrying.", deliveryId: "fixture-channel-reply-0001", nativeTurnId: "synthetic-self-reported-turn" };
   const reply = await client.callTool({ name: "reply", arguments: replyArgs });
   assert(!reply.isError);

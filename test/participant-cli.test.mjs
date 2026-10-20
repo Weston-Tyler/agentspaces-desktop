@@ -56,6 +56,12 @@ test("Participant CLI uses original Host over different-port alias and maps read
   assert.deepEqual(requests[2].body, { query: "retry" });
   assert.deepEqual(requests[3].body, { sourceId: "codex@local:fixture-source" });
 });
+test('CLI exact message references preserve hashes and reject mixed pagination before network access',async t=>{
+ const {args,requests}=await setup(t),hash='b'.repeat(64);
+ await runParticipantCli(args('read','--discussion',GROUP,'--message',SOURCE,'--sha256',hash));assert.deepEqual(requests[0].body,{id:GROUP,messageId:SOURCE,sha256:hash});
+ for(const options of [['--message',SOURCE,'--limit','1'],['--sha256',hash],['--message',SOURCE,'--sha256','invalid']])await assert.rejects(runParticipantCli(args('read','--discussion',GROUP,...options)),/discussion_page_invalid/);
+ assert.equal(requests.length,1);
+});
 test("Contribution text arrives only through bounded stdin JSON and retains exact identifiers", async (t) => {
   const { args, requests } = await setup(t);
   const options = args("contribute", "--discussion", GROUP, "--turn", "self-reported-fixture-turn", "--delivery", "fixture-delivery-0001", "--reply-to", GROUP);

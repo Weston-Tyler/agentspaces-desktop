@@ -4,6 +4,7 @@ import { mountCoordination } from "./coordination.js";
 import { mountWorkBoard } from "./work-board.js";
 import { nativeControls } from "./native-controls.js";
 import { mountDiscussions } from "./discussions.js";
+import { discussionLocation } from './discussion-link.js';
 import { mountAsk } from "./ask.js";
 import { mountNativeChat } from "./native-chat.js";
 import { mountHomeChat } from "./home-chat.js";
@@ -15,7 +16,7 @@ import {
   workspaceFilter,
 } from "./workspace.js";
 let state,
-  page =
+  page = discussionLocation(location.href)?'discussions':
     new URL(location.href).searchParams.get("view") === "advanced"
       ? "advanced"
       : new URL(location.href).searchParams.get("view") === "native" ? "native" : "home",

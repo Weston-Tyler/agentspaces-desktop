@@ -124,7 +124,7 @@ export class ChannelHub {
     receipt.transportKind = connection.kind;
     this.update(receipt, 'dispatch-allocated');
     try {
-      await connection.send({ content: formatAgentMessage({group:this.engine.discussions.group(receipt.discussionId),message,requestId:receipt.requestId,replyMode:'channel',maxLength:8000}), meta: { request_id: receipt.requestId, discussion_id: receipt.discussionId, message_id: receipt.messageId } });
+      await connection.send({ content: formatAgentMessage({group:this.engine.discussions.group(receipt.discussionId),message,requestId:receipt.requestId,replyMode:'channel',maxLength:8000,origin:this.engine.companionAddress}), meta: { request_id: receipt.requestId, discussion_id: receipt.discussionId, message_id: receipt.messageId } });
       this.update(receipt, 'delivered-to-native-transport');
     } catch {
       this.update(receipt, 'uncertain-native-transport');

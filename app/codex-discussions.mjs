@@ -162,7 +162,7 @@ export class CodexDiscussionHub {
       if(effect.deliveryIntent==='steer'&&typeof connected.adapter.steer==='function'){
         effect.deliveryMode='steer';effect.nativeThreadId=connected.nativeThreadId;
         this.engine.store.save();answerAttempted=true;
-        const steered=await connected.adapter.steer({threadId:connected.nativeThreadId,clientId:effect.requestId,question:formatAgentMessage({group,message,requestId:effect.requestId,replyMode:'discussion'}),grant:true,signal,dispatchFence:fence});
+        const steered=await connected.adapter.steer({threadId:connected.nativeThreadId,clientId:effect.requestId,question:formatAgentMessage({group,message,requestId:effect.requestId,replyMode:'discussion',origin:this.engine.companionAddress}),grant:true,signal,dispatchFence:fence});
         if(steered.supported){effect.nativeTurnId=steered.nativeTurnId;effect.replyMode='explicit-discussion-contribution';if(!effect.replyMessageId)update('steered-awaiting-reply');return {...effect};}
         effect.deliveryFallback=steered.reason;
       }
@@ -170,13 +170,13 @@ export class CodexDiscussionHub {
       effect.deliveryMode='queue';this.engine.store.save();
       if(typeof connected.adapter.queueMessage==='function'){
         answerAttempted=true;effect.replyMode='explicit-discussion-contribution';this.engine.store.save();
-        await connected.adapter.queueMessage({threadId:connected.nativeThreadId,clientId:effect.requestId,question:formatAgentMessage({group,message,requestId:effect.requestId,replyMode:'discussion'}),grant:true,signal,dispatchFence:fence});
+        await connected.adapter.queueMessage({threadId:connected.nativeThreadId,clientId:effect.requestId,question:formatAgentMessage({group,message,requestId:effect.requestId,replyMode:'discussion',origin:this.engine.companionAddress}),grant:true,signal,dispatchFence:fence});
         if(!effect.replyMessageId)update('queued-awaiting-reply');return {...effect};
       }
       const attention = () => { effect.attentionRequired = true; update('needs-native-attention'); }; connected.adapter.events?.on('native-attention', attention);
       const queued = event => { if (event.clientId === effect.requestId && event.threadId === connected.nativeThreadId) update('queued'); }; connected.adapter.events?.on('queued', queued);
       try { answerAttempted = true; answer = await connected.adapter.answer({ threadId: connected.nativeThreadId, clientId: effect.requestId,
-        question: formatAgentMessage({group,message,requestId:effect.requestId,replyMode:'final'}),
+        question: formatAgentMessage({group,message,requestId:effect.requestId,replyMode:'final',origin:this.engine.companionAddress}),
         grant: true, budget, signal, dispatchFence: () => {
           if (connected.allowExistingNativePolicy && this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true) throw new Error('Existing native policy grant changed');
           const current = this.validate(effect.sessionId, effect.discussionId, effect.messageId);

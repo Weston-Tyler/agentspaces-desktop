@@ -7,6 +7,7 @@ import { Store } from '../app/store.mjs';
 import { Engine } from '../app/engine.mjs';
 import { FabricAdapter } from '../app/fabric.mjs';
 import { startServer } from '../app/server.mjs';
+import {messageReference} from '../app/agent-message.mjs';
 
 function fixture(t, count = 310) {
   const root = mkdtempSync(join(tmpdir(), 'as-history-'));
@@ -23,6 +24,16 @@ function fixture(t, count = 310) {
   g.version=count;
   return {root,engine,g,id,binding:{sessionId:ids[0]},ids};
 }
+test('an exact source reference reads only its message beyond the latest page, with current grants and hash',async t=>{
+ const {root,engine,g,id,binding,ids}=fixture(t),message=g.messages[0],ref=messageReference(g,message);
+ const exact=engine.discussions.readPage(ref,binding);assert.equal(exact.messages.length,1);assert.equal(exact.messages[0].id,message.id);assert.deepEqual(exact.reference,ref);assert.equal(exact.members,undefined);assert.equal(exact.messages[0].wire,undefined);assert.equal(exact.messages[0].text,message.text);
+ assert.throws(()=>engine.discussions.readPage({...ref,sha256:'0'.repeat(64)},binding),/hash differs/);
+ for(const extra of [{limit:1},{cursor:'cursor'}])assert.throws(()=>engine.discussions.readPage({...ref,...extra},binding),/discussion_page_invalid/);
+ const app=await startServer({root,port:0,engine});t.after(()=>app.close());const token=engine.issueConnector(ids[0]).token;
+ const read=await fetch(app.address+'/api/discussions/context',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(ref)});assert.equal(read.status,200);assert.equal((await read.json()).messages[0].id,message.id);
+ message.text+=' changed';assert.throws(()=>engine.discussions.readPage(ref,binding),/hash differs/);
+ engine.grant(ids[0],{retrieve:false});assert.throws(()=>engine.discussions.readPage(ref,binding),/retrieval/);assert.equal(engine.modelCalls,0);
+});
 test('large-room HTTP reads fit the connector budget and retain the full stored history', async t => {
   const {root,engine,g,id,ids}=fixture(t);
   assert(Buffer.byteLength(JSON.stringify(g))>1048576);

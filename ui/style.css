@@ -1220,3 +1220,4 @@ pre {
 .work-board-item { margin: 16px 0; overflow-wrap: anywhere; }
 .work-board-item .pill { display: inline-block; margin-bottom: 12px; }
 .work-board-item form { margin-top: 16px; }
+ .discussion-message.linked-message { outline: 2px solid currentColor; outline-offset: 3px; }

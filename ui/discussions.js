@@ -1,3 +1,4 @@
+import {discussionLocation,discussionHref} from './discussion-link.js';
 let activeId = null;
 function el(tag, text, cls) {
   const n = document.createElement(tag);
@@ -35,6 +36,8 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
   };
   await load();
   if (!root.isConnected || root.dataset.discussionMount !== mountId) return;
+  const linked=discussionLocation(location.href);
+  if(linked){activeId=linked.id;if(!groups.some(g=>g.id===activeId&&g.available))notice('The linked conversation is unavailable under current access.',true);}
   function render() {
     root.replaceChildren();
     const layout = el("div", null, "discussion-layout"),
@@ -228,7 +231,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
         ),
         content = el("div");
       content.append(
-        el("b", m.author),
+        el("b", m.source?.title||m.author),
         el(
           "small",
           " · " +
@@ -237,6 +240,9 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
         ),
         el("p", m.text, "message-text"),
       );
+      row.id='message-'+m.id;
+      const permalink=el('a','Link to message','fineprint');permalink.href=discussionHref(g.id,m.id);content.append(permalink);
+      if(linked?.id===g.id&&linked.messageId===m.id)row.classList.add('linked-message');
       if (m.source) {
         const provenance = el("details");
         provenance.append(el("summary", "Source details"),
@@ -384,6 +390,10 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
     main.append(header, messages, form);
   }
   render();
+  if(linked?.messageId){
+    const row=root.querySelector('#message-'+linked.messageId);
+    if(row)row.scrollIntoView({block:'center'});else notice('The linked message is unavailable; no newer message was substituted.',true);
+  }
   const timer = setInterval(async () => {
     if (!root.isConnected || root.dataset.discussionMount !== mountId)
       return clearInterval(timer);
