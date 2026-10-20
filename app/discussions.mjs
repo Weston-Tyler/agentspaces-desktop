@@ -3,6 +3,7 @@ import { REMOTE_HOST } from "./remote-host.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { AgentBroadcast } from "./agent-broadcast.mjs";
 import { parseAgentSelectors } from "./agent-selection.mjs";
+import { messageReference } from './agent-message.mjs';
 
 // Owning portable model-wire record identity is preserved. This is conversation
 // content, never a task registry, queue, lease implementation or native history.
@@ -184,14 +185,26 @@ export class Discussions {
     return this.context(id, binding);
   }
   readPage(args, binding) {
-    const { id, limit = 50, cursor } = args;
-    if (Object.keys(args).some(key => !['id', 'limit', 'cursor'].includes(key)) ||
+    const { id, limit = 50, cursor, messageId, sha256 } = args;
+    if (Object.keys(args).some(key => !['id', 'limit', 'cursor', 'messageId', 'sha256'].includes(key)) ||
         !Number.isInteger(limit) || limit < 1 || limit > 100 ||
+        messageId !== undefined && (typeof messageId !== 'string' || !messageId.length || messageId.length > 100 || cursor !== undefined || args.limit !== undefined) ||
+        sha256 !== undefined && (messageId === undefined || !/^[a-f0-9]{64}$/.test(sha256)) ||
         cursor !== undefined && (typeof cursor !== 'string' || !cursor.length || cursor.length > 512))
       throw denied('discussion_page_invalid', 'discussion_page_invalid: limit must be 1–100 and cursor must be the returned nextCursor');
     // Keep full context for internal authorization/delivery. Only the external
     // read projection is paged; no stored message or wire record is rewritten.
     const context = this.contextOrJoin(id, binding), messages = context.messages;
+    if(messageId!==undefined){
+      const message=messages.find(m=>m.id===messageId);
+      if(!message)throw denied('discussion_message_unavailable','Exact message is unavailable under current access');
+      const reference=messageReference({id},message);
+      if(sha256!==undefined&&sha256!==reference.sha256)throw denied('discussion_message_changed','Exact message hash differs; do not substitute another message');
+      const {at,author,source,turnId,replyTo,text,deliveryId,synthetic}=message;
+      const result={id:context.id,title:context.title,available:context.available,version:context.version,messages:[{id:message.id,at,author,source,turnId,replyTo,text,deliveryId,synthetic}],reference};
+      if(Buffer.byteLength(JSON.stringify(result))>512*1024)throw denied('discussion_page_record_too_large','Exact message exceeds the read budget');
+      return result;
+    }
     let snapshot = messages.length, end = snapshot;
     if (cursor !== undefined) {
       let value;
@@ -477,6 +490,7 @@ export class Discussions {
       deliveryId,
       targets: targetStates,
     });
+    user.deliveryClass=implicit?'broadcast':'addressed';
     user.inputHash = inputHash;
     user.requestHash = requestHash;
     // Explicit fixture responses have no native side effects and no model calls.

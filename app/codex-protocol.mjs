@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve, basename } from "node:path";
 import { createHash } from "node:crypto";
 const names = ["ThreadReadParams", "ThreadReadResponse", "ThreadListParams", "ThreadListResponse", "ThreadQueueAddParams", "ThreadQueueAddResponse", "ThreadQueueListParams", "ThreadQueueListResponse", "ThreadQueueDeleteParams", "ThreadQueueDeleteResponse", "ThreadTurnsListParams", "ThreadTurnsListResponse", "ThreadResumeParams", "ThreadResumeResponse"];
+const steeringNames=["TurnSteerParams","TurnSteerResponse"];
 const fail = reason => Object.assign(new Error(reason), { reason });
 const cache = new Map(), pending = new Map();
 const MAX = 2097152;
@@ -113,6 +114,21 @@ function verify(schemas) {
   for (const field of ["mcp_elicitations", "rules", "sandbox_approval"]) typed("ThreadResumeResponse", "approvalPolicy.granular." + field, "boolean");
   return createHash("sha256").update(JSON.stringify({ contract: "desktop-codex-read-queue-v1", requests, names, checks, allowedPolicies, textInputFields: ["type", "text", "text_elements"] })).digest("hex");
 }
+function steeringContract(schemas){
+ try{
+  const request=schemas.TurnSteerParams,response=schemas.TurnSteerResponse;if(!request||!response)throw Error();
+  requestFields(request,['threadId','expectedTurnId','clientUserMessageId','input']);
+  for(const name of ['threadId','expectedTurnId'])checkType(request,name,'string');
+  checkType(request,'clientUserMessageId','string',{required:false,nullable:true});
+  checkType(request,'input','array');checkType(request,'input.[].@text.text','string');
+  checkType(request,'input.[].@text.type','string',{enums:['text']});
+  for(const node of at(request,'input.[].@text'))if((node.required??[]).some(key=>!['type','text','text_elements'].includes(key)))throw Error();
+  checkType(response,'turnId','string');
+  checkType(schemas.ThreadTurnsListResponse,'data.[].status','string',{enums:['inProgress']});
+  checkType(schemas.ThreadTurnsListParams,'sortDirection','string',{required:false,nullable:true,enums:['desc']});
+  return {compatible:true,contractHash:createHash('sha256').update('desktop-codex-steer-v1:threadId,expectedTurnId,clientUserMessageId,input:text;response:turnId;turns:desc,inProgress').digest('hex')};
+ }catch{return {compatible:false,reason:'optional_steering_contract_unavailable',contractHash:null};}
+}
 async function cleanup(folder) {
   const absolute = resolve(folder);
   if (dirname(absolute) !== resolve(tmpdir()) || !/^agentspaces-protocol-[A-Za-z0-9_-]+$/.test(basename(absolute))) throw fail("protocol_probe_unavailable");
@@ -134,14 +150,14 @@ function run(spawnProcess, command, args, input = "", capture = false) {
 }
 async function collect({ host, spawnProcess }) {
   if (host === REMOTE_HOST) {
-    const script = "import{spawn}from'node:child_process';import{mkdtemp,readFile,rm}from'node:fs/promises';import{tmpdir}from'node:os';import{join,resolve,dirname,basename}from'node:path';const root=await mkdtemp(join(tmpdir(),'agentspaces-protocol-'));try{await new Promise((yes,no)=>{const c=spawn('codex',['app-server','generate-json-schema','--experimental','--out',root],{stdio:['ignore','ignore','ignore']});const t=setTimeout(()=>{c.kill();no(new Error())},18000);c.on('error',()=>{clearTimeout(t);no(new Error())});c.on('close',n=>{clearTimeout(t);n===0?yes():no(new Error())})});const names=" + JSON.stringify(names) + ";const schemas={};for(const n of names)schemas[n]=JSON.parse(await readFile(join(root,'v2',n+'.json'),'utf8'));const text=JSON.stringify(schemas);if(Buffer.byteLength(text)>2097152)throw new Error();process.stdout.write(text)}finally{if(dirname(resolve(root))!==resolve(tmpdir())||!/^agentspaces-protocol-[A-Za-z0-9_-]+$/.test(basename(root)))throw new Error();await rm(root,{recursive:true,force:true})}";
+    const script = "import{spawn}from'node:child_process';import{mkdtemp,readFile,rm}from'node:fs/promises';import{tmpdir}from'node:os';import{join,resolve,dirname,basename}from'node:path';const root=await mkdtemp(join(tmpdir(),'agentspaces-protocol-'));try{await new Promise((yes,no)=>{const c=spawn('codex',['app-server','generate-json-schema','--experimental','--out',root],{stdio:['ignore','ignore','ignore']});const t=setTimeout(()=>{c.kill();no(new Error())},18000);c.on('error',()=>{clearTimeout(t);no(new Error())});c.on('close',n=>{clearTimeout(t);n===0?yes():no(new Error())})});const names=" + JSON.stringify([...names,...steeringNames]) + ";const schemas={};for(const n of names){try{schemas[n]=JSON.parse(await readFile(join(root,'v2',n+'.json'),'utf8'))}catch{if(!['TurnSteerParams','TurnSteerResponse'].includes(n))throw new Error()}};const text=JSON.stringify(schemas);if(Buffer.byteLength(text)>2097152)throw new Error();process.stdout.write(text)}finally{if(dirname(resolve(root))!==resolve(tmpdir())||!/^agentspaces-protocol-[A-Za-z0-9_-]+$/.test(basename(root)))throw new Error();await rm(root,{recursive:true,force:true})}";
     try { return JSON.parse(await run(spawnProcess, "ssh", [SSH_ALIAS, "node --input-type=module -"], script, true)); } catch { throw fail("protocol_probe_unavailable"); }
   }
   const folder = await mkdtemp(join(tmpdir(), "agentspaces-protocol-"));
   try {
     await run(spawnProcess, "codex", ["app-server", "generate-json-schema", "--experimental", "--out", folder]);
     const schemas = {};
-    for (const name of names) { const text = await readFile(join(folder, "v2", name + ".json"), "utf8"); if (Buffer.byteLength(text) > MAX) throw fail("protocol_probe_unavailable"); schemas[name] = JSON.parse(text); }
+    for (const name of [...names,...steeringNames]) { try{const text = await readFile(join(folder, "v2", name + ".json"), "utf8"); if (Buffer.byteLength(text) > MAX) throw fail("protocol_probe_unavailable"); schemas[name] = JSON.parse(text);}catch(error){if(!steeringNames.includes(name))throw error;} }
     return schemas;
   } catch { throw fail("protocol_probe_unavailable"); }
   finally { await cleanup(folder); }
@@ -157,7 +173,7 @@ export async function checkCodexProtocol(host, { version, spawnProcess = spawn, 
     try {
       const schemas = await collectSchemas({ host, version: safeVersion, spawnProcess });
       const contractHash = verify(schemas);
-      verdict = { compatible: true, status: "protocol-compatible", version: safeVersion, reason: "contract_subset_verified", contractHash, checkedAt: new Date().toISOString() };
+      verdict = { compatible: true, status: "protocol-compatible", version: safeVersion, reason: "contract_subset_verified", contractHash, steering:steeringContract(schemas), checkedAt: new Date().toISOString() };
     } catch (error) {
       const reason = ["missing_schema", "required_field_changed", "type_changed", "unknown_request_requirement", "method_contract_changed"].includes(error.reason) ? error.reason : "protocol_probe_unavailable";
       verdict = { compatible: false, status: reason === "protocol_probe_unavailable" ? "protocol-probe-unavailable" : "protocol-incompatible", version: safeVersion, reason, contractHash: null, checkedAt: new Date().toISOString() };

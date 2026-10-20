@@ -62,6 +62,8 @@ Download the [v0.1.0-alpha.4 builds](https://github.com/Weston-Tyler/agentspaces
 3. Choose **Connect work on this device**. SSH is optional; select another computer only after configuring its connection.
 4. Ask about existing work, or open a group and address the relevant threads.
 
+New native messages lead with the sender and actual message text. Addressed messages can steer into a verified active Codex turn; routine broadcasts stay queued. Native work is never cancelled. See [message delivery](docs/message-delivery.md) for fallback behavior and provider limits.
+
 For example, ask an agent: “Find the Codex thread about retry handling and ask it for its results.” In a group, send `@all Please report your branch, tests and blockers.` To reach topical peers, use `@recent(30d) @topic("chillit recipe") Please update the recipe table.` See [agent addressing](docs/agent-addressing.md) for exact semantics and connected-source limits.
 
 ## See the experience

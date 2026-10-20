@@ -1,3 +1,4 @@
+import {discussionLocation,discussionHref} from './discussion-link.js';
 let activeId = null;
 function el(tag, text, cls) {
   const n = document.createElement(tag);
@@ -6,7 +7,7 @@ function el(tag, text, cls) {
   return n;
 }
 function replyLabel(status) {
-  const labels = { "waiting-for-native-transport": "Waiting for native wake connection", "channel-access-changed; not dispatched": "Access changed; message not sent", "connecting-native-agent": "Connecting…", "queued": "Queued in native chat", "conversation-budget-reached": "Automatic exchange paused", "awaiting-native-reply": "Waiting for reply", "native-agent-replied": "Replied", "needs-native-attention": "Needs attention in the native app", "native-reply-uncertain": "Reply status unknown", "native-reply-pending": "Reply pending; native work preserved", "native-agent-unavailable": "Agent unavailable", "delivered-to-native-transport": "Sent to native transport; awaiting response" };
+  const labels = { 'queued-awaiting-reply': 'Queued in native chat · reply pending', 'steered-awaiting-reply': 'Steered into active turn · reply pending', 'native-participant-contributed': 'Replied from native thread', "waiting-for-native-transport": "Waiting for native wake connection", "channel-access-changed; not dispatched": "Access changed; message not sent", "connecting-native-agent": "Connecting…", "queued": "Queued in native chat", "conversation-budget-reached": "Automatic exchange paused", "awaiting-native-reply": "Waiting for reply", "native-agent-replied": "Replied", "needs-native-attention": "Needs attention in the native app", "native-reply-uncertain": "Reply status unknown", "native-reply-pending": "Reply pending; native work preserved", "native-agent-unavailable": "Agent unavailable", "delivered-to-native-transport": "Sent to native transport; awaiting response" };
   if (labels[status]) return labels[status];
   return /blocked|unavailable|access changed/.test(status ?? "") ? "Agent is not connected" : status;
 }
@@ -35,6 +36,8 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
   };
   await load();
   if (!root.isConnected || root.dataset.discussionMount !== mountId) return;
+  const linked=discussionLocation(location.href);
+  if(linked){activeId=linked.id;if(!groups.some(g=>g.id===activeId&&g.available))notice('The linked conversation is unavailable under current access.',true);}
   function render() {
     root.replaceChildren();
     const layout = el("div", null, "discussion-layout"),
@@ -228,7 +231,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
         ),
         content = el("div");
       content.append(
-        el("b", m.author),
+        el("b", m.source?.title||m.author),
         el(
           "small",
           " · " +
@@ -237,6 +240,9 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
         ),
         el("p", m.text, "message-text"),
       );
+      row.id='message-'+m.id;
+      const permalink=el('a','Link to message','fineprint');permalink.href=discussionHref(g.id,m.id);content.append(permalink);
+      if(linked?.id===g.id&&linked.messageId===m.id)row.classList.add('linked-message');
       if (m.source) {
         const provenance = el("details");
         provenance.append(el("summary", "Source details"),
@@ -270,7 +276,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
       if (m.notice || m.routing?.status === 'no-addressed-targets') content.append(el('p', m.notice ?? 'Posted to room; no agent notified. Mention a recipient to request another turn.', 'reply-status'));
       for (const t of m.targets ?? [])
         content.append(
-          el("div", "@" + t.alias + " · " + replyLabel(t.status), "reply-status"),
+          el("div", "@" + t.alias + " · " + replyLabel(t.status) + (t.deliveryMode?" · "+({steer:"Steer",queue:"Queue"}[t.deliveryMode]??t.deliveryMode):"") + (t.deliveryFallback?" · native steering unavailable; queued":""), "reply-status"),
         );
       row.append(avatar, content);
       messages.append(row);
@@ -384,6 +390,10 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
     main.append(header, messages, form);
   }
   render();
+  if(linked?.messageId){
+    const row=root.querySelector('#message-'+linked.messageId);
+    if(row)row.scrollIntoView({block:'center'});else notice('The linked message is unavailable; no newer message was substituted.',true);
+  }
   const timer = setInterval(async () => {
     if (!root.isConnected || root.dataset.discussionMount !== mountId)
       return clearInterval(timer);

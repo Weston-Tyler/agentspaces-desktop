@@ -1,3 +1,4 @@
+import {broadcastClass} from './agent-message.mjs';
 import { createHash } from "node:crypto";
 import { parseAgentSelectors, selectAgents, selectAgentsForOwner } from "./agent-selection.mjs";
 
@@ -131,6 +132,7 @@ export class AgentBroadcast {
       this.engine.discussions.post({ id: group.id, text: request.text, targets: batch.targetSessionIds, deliveryId: batch.messageDeliveryId }, { exactTargets: true });
       const message = group.messages.find(item => item.deliveryId === batch.messageDeliveryId);
       if (!message.routing) {
+        message.deliveryClass=broadcastClass(request);
         message.wire.metadata.originalSelectorText = request.originalText;
         message.wire.metadata.agentSelection = JSON.stringify(batch.targetSessionIds);
         message.wire.metadata.agentSelectionCoverage = JSON.stringify({ selectedCount: receipt.selected.length, batchCount: receipt.batches.filter(item => item.targetSessionIds.length).length, coverage: receipt.coverage, omitted: receipt.omitted });
@@ -194,6 +196,7 @@ export class AgentBroadcast {
       this.engine.discussions.contribute({ id: group.id, text: request.text, nativeTurnId: request.nativeTurnId, deliveryId: batch.messageDeliveryId }, binding);
       const message = group.messages.find(item => item.deliveryId === batch.messageDeliveryId);
       if (!message.routing) {
+        message.deliveryClass=broadcastClass(request);
         message.targets = batch.targetSessionIds.map(id => ({ sessionId: id, alias: group.members.find(member => member.sessionId === id).alias, status: "pending native eligibility check; no wake dispatched" }));
         message.wire.metadata.targets = JSON.stringify(batch.targetSessionIds);
         message.wire.metadata.originalSelectorText = request.originalText;

@@ -30,10 +30,11 @@ export class CodexQueueAdapter {
     loadPermissionProof = async () => null,
     pollIntervalMs = 2000,
     queueWaitTimeoutMs = 1800000,
+    steeringSupported = false,
   } = {}) {
     if (host !== REMOTE_HOST) throw fail("shared_daemon_host_not_qualified");
     if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 20 || pollIntervalMs > 5000 || !Number.isInteger(queueWaitTimeoutMs) || queueWaitTimeoutMs < 20 || queueWaitTimeoutMs > 1800000) throw fail("invalid_native_delivery_poll_bound");
-    Object.assign(this, { host, spawnProcess, persistReceipt, loadReceipt, persistPermissionProof, loadPermissionProof });
+    Object.assign(this, { host, spawnProcess, persistReceipt, loadReceipt, persistPermissionProof, loadPermissionProof, steeringSupported });
     this.events = new EventEmitter();
     this.pending = new Map();
     this.proofs = new Map();
@@ -357,6 +358,51 @@ export class CodexQueueAdapter {
       retryAllowed: false,
     };
   }
+  async steer(args={}) {
+    return this.deliverMessage(args,'steer');
+  }
+  async queueMessage(args={}) {
+    return this.deliverMessage(args,'queue');
+  }
+  async deliverMessage(args,mode) {
+    if(this.inflight.has(args.clientId))throw fail('request_already_inflight');
+    this.inflight.add(args.clientId);
+    try{return await this.executeMessage(args,mode);}finally{this.inflight.delete(args.clientId);}
+  }
+  async executeMessage({threadId,clientId,question,grant,dispatchFence,signal}={},mode){
+    if(grant!==true||typeof this.persistReceipt!=='function')throw fail('execution_grant_and_durable_receipt_required');
+    if(typeof question!=='string'||!question.trim()||question.length>12000||typeof clientId!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(clientId)||dispatchFence!==undefined&&typeof dispatchFence!=='function')throw fail('invalid_steering_request');
+    if(signal?.aborted)throw fail('cancelled');
+    const existing=await this.loadReceipt(clientId);if(existing)throw fail('receipt_exists_reconcile_without_retry',true,existing);
+    if(mode==='steer'&&!this.steeringSupported)return {supported:false,reason:'native_steering_unqualified'};
+    const eligible=await this.eligible(threadId);if(!eligible.eligible)throw fail(eligible.reason);
+    let turn;
+    if(mode==='steer'){
+      if(eligible.permissionProof.source!=='loaded-native-input-target'||eligible.status!=='active')return {supported:false,reason:'native_target_not_active'};
+      const turns=await this.request('thread/turns/list',{threadId,limit:1,itemsView:'summary',sortDirection:'desc'});turn=turns.data?.[0];
+      if(turn?.status!=='inProgress'||typeof turn.id!=='string'||!turn.id||turn.id.length>200)return {supported:false,reason:'native_active_turn_unknown'};
+    }
+    const receipt={clientId,nativeThreadId:threadId,nativeTurnId:turn?.id??null,host:this.host,deliveryMode:mode,expectExplicitReply:true,status:'prepared',retryAllowed:false,preparedAt:new Date().toISOString(),permissionProof:structuredClone(eligible.permissionProof)};
+    await this.persistReceipt({...receipt});
+    const checkFence=async()=>{
+      let permitted=!signal?.aborted;
+      if(dispatchFence)try{permitted=permitted&&(await dispatchFence())!==false;}catch{permitted=false;}
+      if(!permitted){receipt.status='not-dispatched';receipt.undispatched=true;await this.persistReceipt({...receipt});throw fail('native_dispatch_grant_revoked',false,receipt);}
+    };
+    await checkFence();receipt.status='dispatching';await this.persistReceipt({...receipt});await checkFence();
+    try{
+      const response=await this.request(mode==='steer'?'turn/steer':'thread/queue/add',{threadId,...(turn?{expectedTurnId:turn.id}:{}),clientUserMessageId:clientId,input:[{type:'text',text:question}]});
+      if(mode==='steer'&&response?.turnId!==turn.id||mode==='queue'&&(typeof response?.queuedSubmission?.id!=='string'||!response.queuedSubmission.id||response.queuedSubmission.clientUserMessageId!==clientId))throw fail('native_message_ack_identity_mismatch',true);
+      if(mode==='queue')receipt.queuedSubmissionId=response.queuedSubmission.id;
+      receipt.status=mode==='steer'?'steered':'queued';receipt.acceptedAt=new Date().toISOString();await this.persistReceipt({...receipt});
+      // The active turn belongs to the native owner. Its output, usage and
+      // approvals are never collected or forwarded as this message's answer.
+      return {supported:true,nativeThreadId:threadId,nativeTurnId:turn?.id??null,receipt:{...receipt},replyMode:'explicit-discussion-contribution'};
+    }catch{
+      receipt.status='uncertain';receipt.nativeCancellationRequested=false;await this.persistReceipt({...receipt}).catch(()=>{});
+      throw fail(mode==='steer'?'native_steer_ack_uncertain':'native_queue_ack_uncertain',true,receipt);
+    }
+  }
   async answer(args = {}) {
     if (this.inflight.has(args.clientId))
       throw fail("request_already_inflight");
@@ -411,6 +457,8 @@ export class CodexQueueAdapter {
     } else { const eligible = await this.eligible(threadId); if (!eligible.eligible) throw fail(eligible.reason); }
     const turn = await this.findOwnSummary(threadId, clientId);
     if (turn) {
+      const users=(turn.items??[]).filter(item=>item.type==='userMessage');
+      if(users.length!==1||users[0].clientId!==clientId)return {status:'explicit-reply-required',nativeThreadId:threadId,nativeTurnId:turn.id,clientId,retryAllowed:false};
       if (turn.status === "completed") {
         let text;
         try { text = await this.ownFinalText(threadId, turn); } catch (error) { if (error.code === "native_answer_output_limit") return { status: "uncertain", reason: "output_limit", nativeThreadId: threadId, nativeTurnId: turn.id, clientId, retryAllowed: false }; throw error; }
@@ -467,6 +515,7 @@ export class CodexQueueAdapter {
       nativeThreadId: threadId,
       host: this.host,
       status: "prepared",
+      deliveryMode:'queue',
       queuedSubmissionId: null,
       nativeTurnId: null,
       retryAllowed: false,

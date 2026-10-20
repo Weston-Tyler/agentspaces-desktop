@@ -5,8 +5,8 @@ import { pathToFileURL } from "node:url";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = (code, details) => Object.assign(new Error(code), { code, ...(details ? { details } : {}) });
-const publicPageErrors = new Set(["discussion_page_invalid", "discussion_cursor_invalid", "discussion_cursor_stale", "discussion_page_record_too_large"]);
-const COMMAND_OPTIONS = { "fabric-observations": ["query", "limit"], "provider-status": [], "availability-report": [], "handoff-preview": [], "handoff-request": [], "ensure-connection": [], "job-request": [], jobs: [], subscriptions: ["discussion"], subscribe: [], digest: [], continuations: [], lanes: [], artifacts: [], "artifact-read": [], "artifact-drop": [], decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion", "limit", "cursor"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
+const publicPageErrors = new Set(["discussion_page_invalid", "discussion_cursor_invalid", "discussion_cursor_stale", "discussion_page_record_too_large", "discussion_message_unavailable", "discussion_message_changed"]);
+const COMMAND_OPTIONS = { "fabric-observations": ["query", "limit"], "provider-status": [], "availability-report": [], "handoff-preview": [], "handoff-request": [], "ensure-connection": [], "job-request": [], jobs: [], subscriptions: ["discussion"], subscribe: [], digest: [], continuations: [], lanes: [], artifacts: [], "artifact-read": [], "artifact-drop": [], decisions: [], "decision-change": [], "verify-approval": [], machines: [], "machine-change": [], board: [], "board-change": [], info: [], capabilities: [], discover: ["query"], joinable: ["query"], join: ["discussion"], invite: ["discussion", "source-id"], create: [], "new-thread": [], message: [], broadcast: [], read: ["discussion", "message", "sha256", "limit", "cursor"], work: ["query"], finding: ["source-id"], contribute: ["discussion", "turn", "delivery", "reply-to"] };
 const COMMANDS = Object.keys(COMMAND_OPTIONS);
 const string = (maxLength, extra = {}) => ({ type: "string", minLength: 1, maxLength, ...extra });
 const uuid = { type: "string", pattern: UUID.source.replaceAll("a-f", "a-fA-F") };
@@ -37,7 +37,7 @@ function helpFor(command) {
   if (command === "continuations") notes.push("Read explicit pending steps, standing grant status and native idle observations. No force-resume, cancellation or model polling; only owner-enabled scoped wakes may execute.");
   if (["provider-status","availability-report","handoff-preview","handoff-request"].includes(command)) notes.push("Observed metrics and reported availability are not provider quota/billing. Preview/request handoff preserves the existing claim and starts no native work; owner decision and native approvals remain required.");
   if (["subscribe","subscriptions","digest"].includes(command)) notes.push("Delivery preferences do not authorize work. Explicit mentions remain honored; plain replies stay quiet. Digests are bounded persisted evidence; since is inclusive ISO time and discussionId filters only messages.");
-  if (command === "read") notes.push("Returns the latest 50 messages by default (limit 1–100), bounded to 512 KiB. Pass result.page.nextCursor as --cursor for older pages. Each page is chronological; prepend older pages. Cursors freeze the message-count snapshot; start without a cursor to see new arrivals. Grants are rechecked; no history is deleted.");
+  if (command === "read") notes.push("Use --message UUID with optional --sha256 HASH to read one exact message; do not combine with --limit/--cursor. Reuse matching content already in current context. Returns the latest 50 messages by default (limit 1–100), bounded to 512 KiB. Pass result.page.nextCursor as --cursor for older pages. Each page is chronological; prepend older pages. Cursors freeze the message-count snapshot; start without a cursor to see new arrivals. Grants are rechecked; no history is deleted.");
   if (command === "verify-approval") notes.push("Verifies the exact receipt against current expiry, revocation and authenticated target source; records an audit receipt. Native owner delegation and client permissions remain authoritative.");
   return { command, usage: `participant-cli.mjs --config PATH --source UUID ${command}${COMMAND_OPTIONS[command].map(key => ` [--${key} VALUE]`).join("")}`, options: COMMAND_OPTIONS[command], ...(STDIN_SCHEMAS[command] ? { stdinSchema: STDIN_SCHEMAS[command] } : {}), notes };
 }
@@ -71,7 +71,7 @@ function argumentsOf(args) {
     const value = args[i];
     if (value === "--help" || value === "-h") { help = true; continue; }
     if (COMMANDS.includes(value) && !command) { command = value; continue; }
-    if (!/^--(config|source|query|discussion|source-id|turn|delivery|reply-to|limit|cursor)$/.test(value) || i + 1 >= args.length || args[i + 1].startsWith("--")) throw fail("invalid_arguments");
+    if (!/^--(config|source|query|discussion|message|sha256|source-id|turn|delivery|reply-to|limit|cursor)$/.test(value) || i + 1 >= args.length || args[i + 1].startsWith("--")) throw fail("invalid_arguments");
     const key = value.slice(2);
     if (key in options) throw fail("duplicate_argument");
     options[key] = args[++i];
@@ -208,6 +208,8 @@ export async function runParticipantCli(args, { input, requestImpl = request, re
     if (!UUID.test(options.discussion ?? "")) throw fail("discussion_uuid_required");
     path = command === "read" ? "/api/discussions/context" : command === "join" ? "/api/discussions/join" : command === 'invite' ? '/api/discussions/invite' : "/api/discussions/contribute"; body = { id: options.discussion };
     if (command === 'read') {
+      if(options.message!==undefined){if(!UUID.test(options.message)||options.limit!==undefined||options.cursor!==undefined)throw fail('discussion_page_invalid');body.messageId=options.message;}
+      if(options.sha256!==undefined){if(!options.message||!/^[a-f0-9]{64}$/.test(options.sha256))throw fail('discussion_page_invalid');body.sha256=options.sha256;}
       if (options.limit !== undefined) {
         if (!/^[0-9]+$/.test(options.limit) || Number(options.limit) < 1 || Number(options.limit) > 100) throw fail('discussion_page_invalid');
         body.limit = Number(options.limit);

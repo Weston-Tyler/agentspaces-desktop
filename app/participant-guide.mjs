@@ -53,7 +53,7 @@ export function participantGuide(input) {
     "| new-thread | Stdin JSON: title, stable deliveryId, optional host/cwd; create an empty persistent Codex chat |",
     "| message | Stdin JSON: exact sessionId OR nativeThreadId, text, self-reported nativeTurnId, stable deliveryId |",
     "| broadcast | Stdin JSON: text, nativeTurnId, deliveryId, optional discussionId/sessionIds/nativeThreadIds/query/activeWithinDays |",
-    "| read --discussion DISCUSSION_UUID | Retrieve permitted room context |",
+    "| read --discussion DISCUSSION_UUID | Retrieve permitted room context; add --message MESSAGE_UUID --sha256 HASH for one exact source |",
     "| work [--query TEXT] | Find permitted native peer metadata and exact source IDs |",
     "| finding --source-id SOURCE_ID | Retrieve a permitted source finding |",
     "| contribute --discussion DISCUSSION_UUID --turn TURN_REFERENCE --delivery DELIVERY_ID [--reply-to MESSAGE_UUID] | Stdin JSON with text only; post as this source |", "",

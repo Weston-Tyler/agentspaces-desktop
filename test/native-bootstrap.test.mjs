@@ -126,6 +126,7 @@ test("MCP protocol advertises source and group tools and preserves native reques
   await bootstrap.server.connect(serverTransport); await client.connect(clientTransport);
   const advertised = (await client.listTools()).tools;
   assert.equal(advertised.length, 40);
+  const readTool=advertised.find(tool=>tool.name==='read_group_discussion');assert(readTool.inputSchema.properties.messageId);assert(readTool.inputSchema.properties.sha256);
   assert.equal(advertised.find(tool=>tool.name==='read_fabric_observations').annotations.readOnlyHint, true);
   assert.equal(advertised.find(tool=>tool.name==='request_headless_job').annotations.readOnlyHint, false);
   const reply = await client.callTool({ name: "discover_group_discussions", arguments: {}, _meta: { threadId: UUID } });
@@ -153,6 +154,8 @@ test("Claude prompt hook automatically retrieves recent shared messages with bou
   assert.match(result.additionalContext, /native turn fixture-self-reported-turn \(self-reported\)/);
   assert.match(result.additionalContext, /PRIVATE-SYNTHETIC-CONTEXT-7/);
   assert(!result.additionalContext.includes("PRIVATE-SYNTHETIC-CONTEXT-0"));
+  assert(!result.additionalContext.includes('x'.repeat(300)));assert.match(result.additionalContext,/fetch needed text/);assert.match(result.additionalContext,/read this exact message|fetch this exact message/);
+  assert(calls.filter(c=>c.path==='/api/discussions/context').every(c=>c.body.limit===6));
   assert(!result.additionalContext.includes(deviceToken)); assert(!result.additionalContext.includes(scopedToken));
   assert(calls.filter(c => c.path === "/api/discussions/context").length <= 4);
   assert.equal(calls.filter(c => c.path.includes("contribute")).length, 0);

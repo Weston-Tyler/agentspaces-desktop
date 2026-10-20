@@ -10,6 +10,7 @@ import { z } from "zod";
 import { Store } from "../app/store.mjs";
 import { Engine } from "../app/engine.mjs";
 import { startServer } from "../app/server.mjs";
+import {messageReference} from '../app/agent-message.mjs';
 
 // Real app HTTP/WebSocket and MCP stdio transports, synthetic source metadata
 // and a tool-speaking test actor. No native CLI or model is launched.
@@ -81,12 +82,17 @@ for (const aliasProxy of [false, true]) test("Native channel stdio actor roundtr
   const posted = await call("discussions/post", message);
   let timer;
   const event = await Promise.race([eventReady, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Targeted MCP channel notification did not arrive")), 4000); })]).finally(() => clearTimeout(timer));
-  assert.equal(event.content, message.text);
+  assert(event.content.startsWith('Owner: '+message.text));
+  assert.match(event.content,/reply_native_channel/);
   assert.equal(event.meta.discussion_id, group.id);
   assert.equal(event.meta.message_id, posted.messages[0].id);
   assert.equal(posted.messages[0].targets[0].status, "delivered-to-native-transport");
   const read = await client.callTool({ name: "read_group_discussion", arguments: { id: group.id } });
   assert.equal(JSON.parse(read.content[0].text).messages[0].text, message.text);
+  assert(contextTool.inputSchema.properties.messageId);assert(contextTool.inputSchema.properties.sha256);
+  const ref=messageReference(group,group.messages[0]);
+  const exact=await client.callTool({name:'read_group_discussion',arguments:ref});
+  assert.deepEqual(JSON.parse(exact.content[0].text).reference,ref);assert.equal(JSON.parse(exact.content[0].text).messages.length,1);
   const replyArgs = { requestId: event.meta.request_id, discussionId: group.id, text: "Synthetic actor reply: reconcile the original operation before retrying.", deliveryId: "fixture-channel-reply-0001", nativeTurnId: "synthetic-self-reported-turn" };
   const reply = await client.callTool({ name: "reply", arguments: replyArgs });
   assert(!reply.isError);
@@ -114,7 +120,7 @@ for (const aliasProxy of [false, true]) test("Native channel stdio actor roundtr
     assert.equal(queued.messages.at(-1).targets[0].status, 'waiting-for-native-transport');
     const recoveredBy = Date.now() + 4000;
     while (events.length < 2 && Date.now() < recoveredBy) await new Promise(resolve => setTimeout(resolve, 20));
-    assert.equal(events.length, 2); assert.equal(events[1].content, 'Synthetic message during outage');
+    assert.equal(events.length, 2); assert(events[1].content.startsWith('Owner: Synthetic message during outage\n'));assert.match(events[1].content,/reply_native_channel/);
     assert.ok((await client.listTools()).tools.length, 'The original native MCP client stays connected');
     const health = await fetch(app.address + '/api/state', { headers: { Authorization: 'Bearer ' + app.admin } }).then(response => response.json());
     assert.equal(health.transportHealth.channels.waiting, 0);

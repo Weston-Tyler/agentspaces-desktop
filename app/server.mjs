@@ -54,6 +54,7 @@ const staticFiles = {
   "/coordination.js": "coordination.js",
   "/workspace.js": "workspace.js",
   "/discussions.js": "discussions.js",
+  "/discussion-link.js": "discussion-link.js",
   "/ask.js": "ask.js",
   "/native-chat.js": "native-chat.js",
   "/home-chat.js": "home-chat.js",
@@ -774,6 +775,7 @@ export async function startServer({
     server.listen(port, "127.0.0.1", yes);
   });
   const address = `http://127.0.0.1:${server.address().port}`;
+  engine.companionAddress=address;
   connections = new NativeConnections(engine, { root, address, remoteInstall });
   participantConnections = new ParticipantConnections(engine, { root, address, installRemote: participantInstallRemote, tunnelFactory: participantTunnelFactory });
   sourceBindings = new SourceBindings(engine, { root, address, resolveMetadata: sourceMetadataResolver });

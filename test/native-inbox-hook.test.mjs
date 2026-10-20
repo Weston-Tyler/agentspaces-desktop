@@ -94,7 +94,7 @@ test('real HTTP/WebSocket inbox requests one native wake and retains the next qu
     assert.equal(response.status, 200); return response.json();
   };
   await post('Synthetic first message', 'native-hook-first-post');
-  const wake = await waiting; assert.equal(wake.exitCode, 2); assert.match(wake.stderr, /Synthetic first message/);
+  const wake = await waiting; assert.equal(wake.exitCode, 2); assert(wake.stderr.startsWith('Owner: Synthetic first message\n'));
   const queued = await post('Synthetic second message', 'native-hook-second-post');
   assert.equal(queued.messages.at(-1).targets[0].status, 'waiting-for-native-transport');
   const next = await runNativeInboxHook(event, hookOptions);
