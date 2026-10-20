@@ -10,6 +10,7 @@ export function messageDelivery(message) {
 // Bounded direct room delivery only; no work claims, scheduler or idle models.
 export async function routeConversation(engine, { codexAgents, channels }, group, message) {
   if (!message || engine.discussions.group(group.id) !== group || !group.messages.includes(message)) return;
+  codexAgents.observeContribution?.(group,message);
   const policy = engine.discussions.policy(group);
   const permitted = sessionId => {
     try { engine.discussions.context(group.id, { sessionId }); return true; }

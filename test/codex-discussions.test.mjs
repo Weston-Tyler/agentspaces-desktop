@@ -355,3 +355,45 @@ test('update drain blocks reconciliation before adapter allocation and after eac
     } finally { await f.hub.close(); }
   });
 });
+
+function steeringHub(){
+ const f=setup();f.engine.store.data.desktopPreferences={allowNativeFullAccess:true};let steerCalls=0;
+ const factory=f.hub.adapterFactory;f.hub.adapterFactory=options=>{const a=factory(options);a.bindLoadedThread=async()=>({nativeThreadId:THREAD});a.steer=async args=>{steerCalls++;a.steerArgs=args;await options.persistReceipt({clientId:args.clientId,nativeThreadId:THREAD,nativeTurnId:TURN,deliveryMode:'steer',status:'steered',expectExplicitReply:true});return {supported:true,nativeThreadId:THREAD,nativeTurnId:TURN};};return a;};
+ const group=f.engine.discussions.group(f.args.discussionId),message=group.messages[0];message.deliveryClass='addressed';for(const target of message.targets)delete target.implicitSubscription;
+ return {...f,group,steerCalls:()=>steerCalls};
+}
+test('steered discussion waits for an exact explicit contribution and never publishes the owner task final',async t=>{
+ const f=steeringHub();t.after(()=>f.hub.close());f.hub.dispatch(f.args);let effect=await f.hub.wait(f.args.requestId);
+ assert.equal(f.steerCalls(),1);assert.equal(f.counters.answer,0);assert.equal(effect.status,'steered-awaiting-reply');assert.match(f.adapters[0].steerArgs.question,/^Owner: Explain the topic/);assert.match(f.adapters[0].steerArgs.question,/Do not publish your main task/);
+ f.adapters[0].events.emit('notification',{method:'turn/completed',params:{threadId:THREAD,turn:{id:TURN,status:'completed',items:[{type:'agentMessage',text:'Private owner task final'}]}}});assert.equal(f.group.messages.length,1);
+ const binding=f.engine.connector(f.engine.issueConnector(f.source.id).token);f.engine.discussions.contribute({id:f.group.id,text:'Exact peer reply',nativeTurnId:'unreported',deliveryId:'steered-peer-reply-01',replyTo:f.args.messageId},binding);
+ const reply=f.group.messages.at(-1);assert.equal(f.hub.observeContribution(f.group,reply),true);effect=f.engine.store.data.codexDiscussionDeliveries[f.args.requestId];assert.equal(effect.status,'native-participant-contributed');assert.equal(effect.replyMessageId,reply.id);assert.equal(f.group.messages.length,2);
+ assert.equal(f.hub.observeContribution(f.group,reply),false);assert(!f.group.messages.some(m=>m.text.includes('Private owner')));
+});
+test('routine broadcast queues and keeps an understandable native preview',async t=>{
+ const f=steeringHub();t.after(()=>f.hub.close());let queuedArgs;const factory=f.hub.adapterFactory;
+ f.hub.adapterFactory=options=>{const a=factory(options);a.queueMessage=async args=>{queuedArgs=args;await options.persistReceipt({clientId:args.clientId,nativeThreadId:THREAD,queuedSubmissionId:'synthetic-queued',deliveryMode:'queue',expectExplicitReply:true,status:'queued'});return {supported:true};};return a;};
+ f.group.messages[0].deliveryClass='broadcast';f.hub.dispatch(f.args);const effect=await f.hub.wait(f.args.requestId);assert.equal(f.steerCalls(),0);assert.equal(f.counters.answer,0);assert.equal(effect.status,'queued-awaiting-reply');assert.match(queuedArgs.question,/^Owner: Explain the topic/);assert.match(queuedArgs.question,/contribute_to_discussion/);
+ assert.deepEqual((await f.hub.reconcileSubmitted()).reconciled,[]);assert.equal(f.group.messages.length,1);
+ const binding=f.engine.connector(f.engine.issueConnector(f.source.id).token);f.engine.discussions.contribute({id:f.group.id,text:'Explicit broadcast reply',nativeTurnId:'unreported',deliveryId:'queued-explicit-reply-001',replyTo:f.args.messageId},binding);assert.equal(f.hub.observeContribution(f.group,f.group.messages.at(-1)),true);
+});
+test('native steering fallback queues only before an effect was dispatched',async t=>{
+ const f=steeringHub();t.after(()=>f.hub.close());let queues=0;const factory=f.hub.adapterFactory;
+ f.hub.adapterFactory=options=>{const a=factory(options);a.steer=async()=>({supported:false,reason:'native_target_not_active'});a.queueMessage=async args=>{queues++;await options.persistReceipt({clientId:args.clientId,nativeThreadId:THREAD,deliveryMode:'queue',status:'queued',expectExplicitReply:true});return {supported:true};};return a;};
+ f.hub.dispatch(f.args);const effect=await f.hub.wait(f.args.requestId);assert.equal(effect.status,'queued-awaiting-reply');assert.equal(effect.deliveryFallback,'native_target_not_active');assert.equal(effect.deliveryMode,'queue');assert.equal(queues,1);
+});
+test('an explicit reply racing the native acknowledgement is not overwritten as pending',async t=>{
+ const f=steeringHub();t.after(()=>f.hub.close());const factory=f.hub.adapterFactory;
+ f.hub.adapterFactory=options=>{const a=factory(options),steer=a.steer;a.steer=async args=>{const result=await steer(args),binding=f.engine.connector(f.engine.issueConnector(f.source.id).token);f.engine.discussions.contribute({id:f.group.id,text:'Fast exact reply',nativeTurnId:'unreported',deliveryId:'racing-steered-reply-01',replyTo:f.args.messageId},binding);f.hub.observeContribution(f.group,f.group.messages.at(-1));return result;};return a;};
+ f.hub.dispatch(f.args);assert.equal((await f.hub.wait(f.args.requestId)).status,'native-participant-contributed');
+});
+test('a peer cannot settle another thread steered request and revocation still hides replies',async t=>{
+ const f=steeringHub();t.after(()=>f.hub.close());f.hub.dispatch(f.args);await f.hub.wait(f.args.requestId);
+ const binding=f.engine.connector(f.engine.issueConnector('sample-claude-new').token);f.engine.discussions.contribute({id:f.group.id,text:'Wrong author',nativeTurnId:'unreported',deliveryId:'steered-peer-wrong-01',replyTo:f.args.messageId},binding);assert.equal(f.hub.observeContribution(f.group,f.group.messages.at(-1)),false);
+ f.engine.grant(f.source.id,{share:false});assert.equal(f.hub.observeContribution(f.group,{...f.group.messages.at(-1),source:{...f.group.members.find(m=>m.sessionId===f.source.id)}}),false);
+});
+test('a changed working directory cannot settle an earlier explicit reply request',async t=>{
+ const f=steeringHub();t.after(()=>f.hub.close());f.hub.dispatch(f.args);await f.hub.wait(f.args.requestId);f.source.cwd='/tmp/agentspaces-different-fixture';
+ const binding=f.engine.connector(f.engine.issueConnector(f.source.id).token);f.engine.discussions.contribute({id:f.group.id,text:'Reply after identity changed',nativeTurnId:'unreported',deliveryId:'changed-source-reply-01',replyTo:f.args.messageId},binding);
+ assert.equal(f.hub.observeContribution(f.group,f.group.messages.at(-1)),false);assert.equal(f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].status,'steered-awaiting-reply');
+});

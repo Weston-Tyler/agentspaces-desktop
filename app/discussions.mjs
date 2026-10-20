@@ -477,6 +477,7 @@ export class Discussions {
       deliveryId,
       targets: targetStates,
     });
+    user.deliveryClass=implicit?'broadcast':'addressed';
     user.inputHash = inputHash;
     user.requestHash = requestHash;
     // Explicit fixture responses have no native side effects and no model calls.

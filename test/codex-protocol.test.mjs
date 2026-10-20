@@ -123,3 +123,16 @@ test("Successful verdict expires after ten minutes and cache retains at most six
     await checkCodexProtocol("local", { version: "fixture-capacity-0", collectSchemas }); assert.equal(calls, before + 1);
   } finally { Date.now = originalNow; }
 });
+
+function steeringFixture(){
+ const s=fixture(),input=structuredClone(s.ThreadQueueAddParams.properties.input);
+ s.TurnSteerParams=object({threadId:string(),expectedTurnId:string(),clientUserMessageId:{type:['string','null']},input},['threadId','expectedTurnId','input']);s.TurnSteerParams.definitions=structuredClone(s.ThreadQueueAddParams.definitions);
+ s.TurnSteerResponse=object({turnId:string()});
+ s.ThreadTurnsListParams.properties.sortDirection={anyOf:[enumeration('asc','desc'),{type:'null'}]};return s;
+}
+test('steering is independently qualified with exact turn and stable client identity',async()=>{
+ const v=await probe('fixture-steer-qualified',steeringFixture());assert.equal(v.compatible,true);assert.equal(v.steering.compatible,true);assert.match(v.steering.contractHash,/^[a-f0-9]{64}$/);
+ for(const [version,change] of [['missing',s=>delete s.TurnSteerParams],['client',s=>delete s.TurnSteerParams.properties.clientUserMessageId],['turn',s=>s.TurnSteerResponse.properties.turnId={type:'integer'}],['required',s=>s.TurnSteerParams.required.push('sandboxPolicy')]]){
+  const s=steeringFixture();change(s);const r=await probe('fixture-steer-'+version,s);assert.equal(r.compatible,true);assert.equal(r.steering.compatible,false);
+ }
+});

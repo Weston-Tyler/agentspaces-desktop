@@ -132,7 +132,7 @@ test('disconnected known channel durably queues exact unsent message and sends o
   const recovered = new ChannelHub(f.engine);
   recovered.connect(binding, async data => f.sent.push(data));
   await recovered.flush(f.ids[1]);
-  assert.equal(f.sent.length, 1); assert.equal(f.sent[0].content, f.args.text);
+  assert.equal(f.sent.length, 1); assert(f.sent[0].content.startsWith('Owner: '+f.args.text));assert.match(f.sent[0].content,/reply_native_channel/);
   await recovered.flush(f.ids[1]); assert.equal(f.sent.length, 1);
 });
 test('queued messages recheck sender grants and refuse changed content at reconnect', async t => {
@@ -215,5 +215,5 @@ test('a refused queued message leaves the one-shot listener available for the ne
   f.hub.connect(f.binding, async data => { received.push(data); }, { kind: 'async-hook' });
   await f.hub.flush(f.ids[1]);
   assert.equal(f.engine.store.data.channelReceipts[f.args.requestId].status, 'channel-access-changed; not dispatched');
-  assert.equal(received.length, 1); assert.equal(received[0].content, 'Valid next message');
+  assert.equal(received.length, 1); assert(received[0].content.startsWith('Owner: Valid next message'));
 });

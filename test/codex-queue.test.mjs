@@ -351,3 +351,49 @@ test('native transport refuses turn interruption before writing any RPC',async()
  await assert.rejects(adapter.request('turn/interrupt',{threadId,turnId:'some-turn'}),{code:'native_turn_cancellation_disabled'});
  assert.equal(sent,false);
 });
+
+function steeringAdapter({status='active',qualified=true,reject=false,wrongAck=false,persistFails=false}={}){
+ const calls=[],saved=new Map(),adapter=new CodexQueueAdapter({steeringSupported:qualified,persistReceipt:async r=>{if(persistFails)throw Error('fixture persistence');saved.set(r.clientId,structuredClone(r));},loadReceipt:async id=>saved.get(id)});
+ adapter.proofs.set(threadId,{source:'loaded-native-input-target',nativeThreadId:threadId,host:'remote',cwd,policyKnown:false,allowExistingNativePolicy:true});
+ adapter.request=async(method,params)=>{calls.push({method,params});if(method==='thread/read')return {thread:{id:threadId,cwd,status:{type:status},canAcceptDirectInput:true}};if(method==='thread/turns/list')return {data:[{id:'owner-active-turn',status:'inProgress',items:[]}]};if(method==='turn/steer'){assert.equal(saved.get(params.clientUserMessageId).status,'dispatching');if(reject)throw Error('unknown acceptance');return {turnId:wrongAck?'foreign-turn':'owner-active-turn'};}throw Error('Unexpected native method');};
+ return {adapter,calls,saved,args:{threadId,clientId:'steer-request-001',question:'Fixture peer information',grant:true,dispatchFence:()=>true}};
+}
+test('addressed input steers the exact active turn without starting, queueing or cancelling a turn',async()=>{
+ const f=steeringAdapter(),r=await f.adapter.steer(f.args);assert.equal(r.supported,true);assert.equal(r.receipt.status,'steered');assert.equal(r.receipt.expectExplicitReply,true);
+ const write=f.calls.find(c=>c.method==='turn/steer');assert.equal(write.params.expectedTurnId,'owner-active-turn');assert.equal(write.params.clientUserMessageId,f.args.clientId);assert.deepEqual(Object.keys(write.params).sort(),['clientUserMessageId','expectedTurnId','input','threadId']);
+ assert(!f.calls.some(c=>/queue\/|turn\/(start|interrupt)/.test(c.method)));assert.equal(f.adapter.activeOwnedTurns.size,0);
+});
+test('idle or unqualified targets fall back before allocating any steering effect',async()=>{
+ for(const options of [{status:'idle'},{qualified:false}]){const f=steeringAdapter(options),r=await f.adapter.steer(f.args);assert.equal(r.supported,false);assert.equal(f.saved.size,0);assert(!f.calls.some(c=>c.method==='turn/steer'));}
+});
+test('steering refuses duplicate receipts, revoked dispatch and missing durable persistence',async()=>{
+ const f=steeringAdapter();await f.adapter.steer(f.args);await assert.rejects(f.adapter.steer(f.args),/receipt_exists/);assert.equal(f.calls.filter(c=>c.method==='turn/steer').length,1);
+ const g=steeringAdapter();await assert.rejects(g.adapter.steer({...g.args,dispatchFence:()=>false}),/grant_revoked/);assert(!g.calls.some(c=>c.method==='turn/steer'));
+ const h=steeringAdapter({persistFails:true});await assert.rejects(h.adapter.steer(h.args));assert(!h.calls.some(c=>c.method==='turn/steer'));
+});
+test('lost or mismatched steering acknowledgements retain uncertain receipts and never queue a duplicate',async()=>{
+ for(const options of [{reject:true},{wrongAck:true}]){const f=steeringAdapter(options);await assert.rejects(f.adapter.steer(f.args),/steer_ack_uncertain/);assert.equal(f.saved.get(f.args.clientId).status,'uncertain');await assert.rejects(f.adapter.steer(f.args),/receipt_exists/);assert.equal(f.calls.filter(c=>c.method==='turn/steer').length,1);assert(!f.calls.some(c=>c.method.startsWith('thread/queue/')));}
+});
+test('grant revocation after dispatch receipt persistence still prevents steering',async()=>{
+ const f=steeringAdapter();let dispatching=false;const persist=f.adapter.persistReceipt;
+ f.adapter.persistReceipt=async receipt=>{await persist(receipt);if(receipt.status==='dispatching')dispatching=true;};
+ await assert.rejects(f.adapter.steer({...f.args,dispatchFence:()=>!dispatching}),/grant_revoked/);
+ assert.equal(f.saved.get(f.args.clientId).status,'not-dispatched');assert(!f.calls.some(c=>c.method==='turn/steer'));
+});
+test('queued messages use explicit replies so manual Steer or Send now cannot capture the owner final',async()=>{
+ const f=steeringAdapter(),request=f.adapter.request;
+ f.adapter.request=async(method,params)=>{if(method!=='thread/queue/add')return request(method,params);f.calls.push({method,params});assert.equal(f.saved.get(params.clientUserMessageId).status,'dispatching');return {queuedSubmission:{id:'fictional-queue-id',clientUserMessageId:params.clientUserMessageId}};};
+ const result=await f.adapter.queueMessage(f.args);assert.equal(result.receipt.expectExplicitReply,true);assert.equal(result.receipt.status,'queued');assert.equal(result.receipt.queuedSubmissionId,'fictional-queue-id');
+ f.adapter.events.emit('notification',{method:'turn/completed',params:{threadId,turn:{id:'owner-active-turn',status:'completed',items:[{type:'agentMessage',text:'Owner-private final'}]}}});
+ assert.equal(result.text,undefined);assert.equal(f.adapter.activeOwnedTurns.size,0);assert.equal(f.adapter.events.listenerCount('notification'),0);assert(!f.calls.some(c=>/turn\/(start|steer|interrupt)/.test(c.method)));
+ await assert.rejects(f.adapter.queueMessage(f.args),/receipt_exists/);assert.equal(f.calls.filter(c=>c.method==='thread/queue/add').length,1);
+});
+test('uncertain queue insertion is never retried or promoted into an active turn',async()=>{
+ const f=steeringAdapter(),request=f.adapter.request;f.adapter.request=async(method,params)=>{if(method!=='thread/queue/add')return request(method,params);f.calls.push({method,params});throw Error('Synthetic connection loss');};
+ await assert.rejects(f.adapter.queueMessage(f.args),/queue_ack_uncertain/);assert.equal(f.saved.get(f.args.clientId).status,'uncertain');await assert.rejects(f.adapter.queueMessage(f.args),/receipt_exists/);assert.equal(f.calls.filter(c=>c.method==='thread/queue/add').length,1);
+});
+test('legacy queued reconciliation refuses a shared native turn before reading its final',async()=>{
+ const f=steeringAdapter(),request=f.adapter.request;
+ f.adapter.request=async(method,params)=>method==='thread/turns/list'?{data:[{id:'shared-owner-turn',status:'completed',items:[{type:'userMessage',clientId:'owner-input'},{type:'userMessage',clientId:f.args.clientId},{type:'agentMessage',phase:'final_answer',text:'Private owner answer'}]}]}:request(method,params);
+ const result=await f.adapter.reconcileAnswer({threadId,clientId:f.args.clientId,grant:true});assert.equal(result.status,'explicit-reply-required');assert.equal(result.text,undefined);assert(!f.calls.some(c=>c.method==='thread/items/list'));
+});

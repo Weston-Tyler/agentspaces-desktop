@@ -81,7 +81,8 @@ for (const aliasProxy of [false, true]) test("Native channel stdio actor roundtr
   const posted = await call("discussions/post", message);
   let timer;
   const event = await Promise.race([eventReady, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Targeted MCP channel notification did not arrive")), 4000); })]).finally(() => clearTimeout(timer));
-  assert.equal(event.content, message.text);
+  assert(event.content.startsWith('Owner: '+message.text));
+  assert.match(event.content,/reply_native_channel/);
   assert.equal(event.meta.discussion_id, group.id);
   assert.equal(event.meta.message_id, posted.messages[0].id);
   assert.equal(posted.messages[0].targets[0].status, "delivered-to-native-transport");
@@ -114,7 +115,7 @@ for (const aliasProxy of [false, true]) test("Native channel stdio actor roundtr
     assert.equal(queued.messages.at(-1).targets[0].status, 'waiting-for-native-transport');
     const recoveredBy = Date.now() + 4000;
     while (events.length < 2 && Date.now() < recoveredBy) await new Promise(resolve => setTimeout(resolve, 20));
-    assert.equal(events.length, 2); assert.equal(events[1].content, 'Synthetic message during outage');
+    assert.equal(events.length, 2); assert(events[1].content.startsWith('Owner: Synthetic message during outage\n'));assert.match(events[1].content,/reply_native_channel/);
     assert.ok((await client.listTools()).tools.length, 'The original native MCP client stays connected');
     const health = await fetch(app.address + '/api/state', { headers: { Authorization: 'Bearer ' + app.admin } }).then(response => response.json());
     assert.equal(health.transportHealth.channels.waiting, 0);
