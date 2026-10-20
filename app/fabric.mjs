@@ -1,5 +1,5 @@
+import { loadOrCreateIdentity, agentKeys } from "./agentspaces-node.mjs";
 import {
-  Identity,
   Peer,
   cbor,
   spaceIdLocal,
@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { discoverFabricCards } from "./fabric-discovery.mjs";
 import { protectStateDirectory } from "./state-security.mjs";
 const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const bindingVersion = JSON.parse(readFileSync(new URL(import.meta.resolve('@agentspaces/client/package.json')), 'utf8')).version;
 const declaredBinding = /#([a-f0-9]{40})$/.exec(manifest.dependencies?.["@agentspaces/client"] ?? "")?.[1] ?? "unknown";
 const counter = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 function ignoredKindCounters(kinds) {
@@ -48,7 +49,9 @@ export class FabricAdapter {
     return this._status;
   }
   set status(value) { this._status = value; }
-  async connect({ host, port, groupId }) {
+  async connect({ host, port, groupId, scheme = 'tcp' }) {
+    if (scheme !== 'tcp')
+      throw new Error('Desktop qualifies loopback TCP to an upstream gateway. DTLS/QUIC belong on the Java gateway links; they are not direct TypeScript dialers.');
     if (!["127.0.0.1", "::1"].includes(host))
       throw new Error("This alpha qualifies literal-loopback seeds only.");
     if (
@@ -61,7 +64,7 @@ export class FabricAdapter {
       throw new Error("Invalid seed configuration.");
     protectStateDirectory(this.stateRoot);
     this.close();
-    const identity = Identity.loadOrCreate(`${this.stateRoot}/fabric-keys`);
+    const identity = loadOrCreateIdentity(`${this.stateRoot}/fabric-keys`);
     this.peer = new Peer(identity, groupId, this.clock);
     this.status = "connecting";
     try {
@@ -96,7 +99,7 @@ export class FabricAdapter {
       .digest("hex")
       .slice(0, 60);
     if (!this.agents.has(sessionId)) {
-      const key = Identity.agentKeys(
+      const key = agentKeys(
         `${this.stateRoot}/agent-keys`,
         this.peer.identity.peerId,
         name,
@@ -157,8 +160,12 @@ export class FabricAdapter {
       status: this.status,
       reason: disconnected ? "Seed socket disconnected; upstream manages bounded reconnect attempts, but exposes no in-progress/exhausted signal" : this.reason,
       binding: declaredBinding,
+      bindingVersion,
       bindingSource: "package.json declared dependency pin",
       wireVersion: wire.WIRE_VERSION,
+      transport: { desktop: 'loopback-tcp', gatewaySchemes: ['dtls', 'quic'],
+        gatewayManagedBy: 'upstream Java PeerNode', gatewayConnected: null,
+        nativeDelivery: 'separate native channel / SSH routes' },
       recovery: { managedBy: "upstream Peer", inProgress: disconnected ? null : false, reconnectWindowMillis: counter(this.peer?.reconnectWindowMs) },
       counters: {
         reconnects: counter(this.peer?.reconnects ?? 0),

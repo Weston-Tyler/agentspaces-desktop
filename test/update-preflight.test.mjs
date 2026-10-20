@@ -39,5 +39,5 @@ test('private-copy preflight verifies work claims and receipts and refuses silen
  const corrupt=cbor.loads(before);corrupt.replica.claims[item.entryId].claim.holder='forged/worker';
  writeFileSync(engine.workBoard.path,cbor.dumps(corrupt));
  await assert.rejects(preflightUpdate({stateRoot:root}),/preflight_replica_claim_not_retained/);
- assert.deepEqual(readFileSync(engine.workBoard.path),cbor.dumps(corrupt));
+ assert.deepEqual(readFileSync(engine.workBoard.path),Buffer.from(cbor.dumps(corrupt)));
 });

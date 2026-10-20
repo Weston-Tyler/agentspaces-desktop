@@ -1,7 +1,7 @@
 # Adapter and dependency boundaries
 
 The native version observations below are historical evidence, not claims about
-current installations. The AgentSpaces rows were requalified on 2026-10-16 for
+current installations. The AgentSpaces rows were requalified on 2026-10-20 for
 the source upgrade; installer/deployment acceptance remains separate. See
 [upstream v3](upstream-v3.md) for upgrade sequencing and limitations.
 
@@ -12,8 +12,8 @@ the source upgrade; installer/deployment acceptance remains separate. See
 | Windows Claude Code    | 2.1.113                                  | Native MCP/sign-in entry point; SDK catalog/content adapter        | Version probe and SDK contract fixtures                                                  |
 | remote Claude Code     | 2.1.283                                  | Existing SSH authentication; pinned SDK read helper                | Remote empty-fixture SDK read passed                                                     |
 | Claude SDK             | 0.3.293                                  | listSessions, getSessionInfo, getSessionMessages only              | Read schemas inspected; no query/resume/mutation calls                                   |
-| AgentSpaces core       | c47758ac6c253bcb2ad31c264291bee5ed16c7cf | Upstream Java 21 wire-v3 TCP/group/replicated-space runtime                   | Java-v3 / TypeScript-v3 loopback signed entry, discovery, claim and completion proof                                                       |
-| AgentSpaces TypeScript | 3996234b6d8323538ad806671bd55a4f76cd1e07 | Upstream wire-v3 Peer/Identity/signed discovery/targeted claims/Space events                   | Pinned Java loopback proof, synthetic v2 state migration and mixed-version refusal contracts                                                      |
+| AgentSpaces core       | b43a02291852cafb4b45671b1df422f707ef73e2 | Upstream Java 21 wire-v3 TCP/group/replicated-space runtime                   | Java-v3 / TypeScript-v3 loopback signed entry, discovery, claim and completion proof                                                       |
+| AgentSpaces TypeScript | fa20e215a002a7085f9f8f526be1af6bb8b82304 | Upstream wire-v3 Peer/Identity/signed discovery/targeted claims/Space events                   | Pinned Java loopback proof, synthetic v2 state migration and mixed-version refusal contracts                                                      |
 | MCP SDK                | 1.32.1                                   | Official stdio SDK, scoped context/discussion/work/decision and coordination tools          | SDK client/server retrieval, discussion discover/read/contribute and revocation fixtures |
 | Electron               | 44.7.0                                   | Sandboxed local renderer, tray, single app instance                | Native Windows render captured; installation/release not qualified                       |
 | Model-wire projection | Conversation shape baseline `f55a89eb974cea30fdc295238a071239b462f1eb`; usage contract `8546c3c4ca3dd323d5b29a296db8b406aa13b752` | Owning ConversationSnapshot/WireMessage namespace and optional ModelUsageTotal observation | Shape and signed usage fixtures; no distributed native chat or provider billing qualification |
@@ -28,10 +28,12 @@ Version matches are admission checks plus fixture evidence, not blanket native f
 
 Fresh Codex exec questions were exercised through the Windows-hosted browser/API and remote native binary0.161: one general answer and one two-source cited answer. The two source findings were synthetic. A shared-daemon WebSocket adapter exercised three actual turns on two owned read-only native threads, including continuity on the original A UUID. ws8.22.0 is pinned for standard transport. The native queue proof does not qualify arbitrary existing thread permissions or wire broad broadcast into the UI. Local Codex0.162 availability/authentication/flags were checked without an extra live question. Claude API-mode process contracts pass, but local/remote API environment credentials are absent and live Claude answering was not tested. See native-questions.md and the exact local E2E handoff for snapshot recovery/unknown-usage boundaries.
 
-## Wire-v3 source qualification, 2026-10-16
+## Wire-v3 / 0.4.0 source qualification, 2026-10-20
 
-The TypeScript dependency is pinned by commit because its package metadata still
-reports `0.2.0` while the implementation speaks wire v3. A v2 seed and v3 client
+The TypeScript dependency is pinned by commit and reports `0.4.0` while retaining
+wire v3. The previous Desktop pin also spoke v3. Node-only key loading,
+TCP registration and the owning Node crypto port are now selected explicitly;
+CBOR comparisons accept portable `Uint8Array` bytes. A v2 seed and v3 client
 reject one another's frames. Upgrade configured peers as an explicitly qualified
 tuple. Snapshot-schema compatibility is a separate check from network compatibility.
 
@@ -45,7 +47,8 @@ The board remains a single companion-owned replica, not multi-companion federati
 Known upstream limitations include effective-lease expiry events and an inert,
 unref'd Space sweep timer after subscriptions close. Activity is bounded observation,
 not complete history. Active aggregate exchange and bundled JVM frameworks are not
-included. See [ecosystem reuse](ecosystem-reuse.md) and [upstream v3](upstream-v3.md).
+included. See [ecosystem reuse](ecosystem-reuse.md), [upstream v3](upstream-v3.md) and
+[0.4.0 transport qualification](upstream-040.md).
 
 ## Official references
 

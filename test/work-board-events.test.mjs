@@ -1,3 +1,4 @@
+import { loadOrCreateIdentity } from "@agentspaces/client/node";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
@@ -108,7 +109,7 @@ test('upstream original-write lease sweep cannot misreport a verified renewed le
   const { Identity, Peer, spaceIdLocal } = await import('@agentspaces/client');
   const { WorkBoardActivity } = await import('../app/work-board-activity.mjs');
   const { TYPES } = await import('../app/fabric.mjs');
-  const f = fixture(t), identity = Identity.loadOrCreate(join(f.root, 'event-peer'));
+  const f = fixture(t), identity = loadOrCreateIdentity(join(f.root, 'event-peer'));
   const peer = new Peer(identity, spaceIdLocal('synthetic-event-group'), f.engine.clock);
   const observer = new WorkBoardActivity(identity, peer.group, 'work', f.engine.clock, peer.exportSnapshot());
   t.after(() => observer.close());

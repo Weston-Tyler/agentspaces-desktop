@@ -1,15 +1,18 @@
 # Upstream wire v3 integration
 
-This guide describes the 2026-10-16 source integration. It does not claim that a
-published installer or an existing companion has been upgraded.
+This guide describes the wire-v3 integration, updated for the 2026-10-20
+AgentSpaces 0.4.0 source pin. Published installers and individual companion
+installations remain separately qualified. See [0.4.0 migration and transports](upstream-040.md).
 
 ## Exact compatibility tuple
 
-- TypeScript binding: [`3996234b6d8323538ad806671bd55a4f76cd1e07`](https://github.com/badmonkeyai/agentspaces-typescript/tree/3996234b6d8323538ad806671bd55a4f76cd1e07).
-- Java interoperability reference: [`c47758ac6c253bcb2ad31c264291bee5ed16c7cf`](https://github.com/badmonkeyai/AgentSpaces/tree/c47758ac6c253bcb2ad31c264291bee5ed16c7cf).
+- TypeScript binding: [`fa20e215a002a7085f9f8f526be1af6bb8b82304`](https://github.com/badmonkeyai/agentspaces-typescript/tree/fa20e215a002a7085f9f8f526be1af6bb8b82304).
+- Java interoperability reference: [`b43a02291852cafb4b45671b1df422f707ef73e2`](https://github.com/badmonkeyai/AgentSpaces/tree/b43a02291852cafb4b45671b1df422f707ef73e2).
 - Model-wire contract reference: [`8546c3c4ca3dd323d5b29a296db8b406aa13b752`](https://github.com/badmonkeyai/agentspaces-model-wire/tree/8546c3c4ca3dd323d5b29a296db8b406aa13b752).
 
-Both selected peer implementations use wire version 3. The previous Desktop pin
+Both selected 0.4.0 peer implementations use wire version 3. The previous
+Desktop pin `3996234b6d8323538ad806671bd55a4f76cd1e07` also speaks v3;
+0.4.0 requires a TypeScript API migration, not another wire-version change. The older Desktop pin
 `ab091a4fd9b325679ceca9dfa3d3042ff572696b` uses version 2. Their frame decoders reject
 one another's versions. A v2 seed is not compatible with this client; coordinate
 an upgrade of any configured seed before relying on that fabric connection.
@@ -144,7 +147,7 @@ These are prerequisites for future work, not capabilities delivered by this chan
 5. Connect a separately managed JVM/Python/Clojure worker only for an explicit
    service requirement, with budgets and effect limits. Desktop does not bundle
    Spring AI, LangChain4j, Micronaut or Groovy runtimes.
-6. Qualify fleet-wide coordination before enabling it. Ordered take/reduce,
-   fleet-wide leased/ordered joins and sealed-space decryption are not supplied
-   by the selected TypeScript integration. Keep actual machine locks and owner
-   decision authentication independent of advisory capability results.
+6. Qualify fleet-wide coordination before enabling it. Upstream 0.4.0 supplies
+   additional service/ordered packages; Desktop has not integrated or qualified
+   fleet-wide ordered coordination or sealed-space decryption. Keep actual machine
+   locks and owner decision authentication independent of advisory capability results.

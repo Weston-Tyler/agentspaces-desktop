@@ -27,3 +27,54 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+  upstream-transports:
+    name: Upstream 0.4 DTLS and QUIC (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: badmonkeyai/AgentSpaces
+          ref: b43a02291852cafb4b45671b1df422f707ef73e2
+          path: .upstream-java-fixture
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: npm ci
+      - name: Build the owning pinned Java runtime
+        env:
+          MAVEN_OPTS: -Xmx768m -XX:ActiveProcessorCount=2
+        run: mvn -B -ntp -f .upstream-java-fixture/pom.xml -pl agentspaces-transport-dtls,agentspaces-transport-quic,agentspaces-space -am -DskipTests install
+      - name: Upstream loss recovery, attestation and fallback contracts
+        env:
+          MAVEN_OPTS: -Xmx768m -XX:ActiveProcessorCount=2
+        run: mvn -B -ntp -f .upstream-java-fixture/pom.xml -pl agentspaces-transport-dtls,agentspaces-transport-quic -am -Dtest=RecoveryTest,DtlsTransportTest,DtlsHardeningTest,DtlsMixedFleetTest,DtlsCaModeTransportTest,QuicTransportTest,QuicCaModeTransportTest,QuicListenerTest -Dsurefire.failIfNoSpecifiedTests=false test
+      - name: Prepare upstream classpaths
+        run: |
+          mvn -B -ntp -f .upstream-java-fixture/pom.xml -pl agentspaces-transport-dtls dependency:build-classpath -Dmdep.outputFile=target/desktop-classpath.txt
+          mvn -B -ntp -f .upstream-java-fixture/pom.xml -pl agentspaces-transport-quic dependency:build-classpath -Dmdep.outputFile=target/desktop-classpath.txt
+      - name: Desktop signed work across real TCP, DTLS and QUIC peers
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess, tempfile
+          upstream = pathlib.Path('.upstream-java-fixture').resolve()
+          assert subprocess.check_output(['git','-C',str(upstream),'rev-parse','HEAD'],text=True).strip() == 'b43a02291852cafb4b45671b1df422f707ef73e2'
+          classes = pathlib.Path(tempfile.mkdtemp(prefix='desktop-transport-proof-'))
+          paths = [str(classes)]
+          for module in ['agentspaces-transport-dtls','agentspaces-transport-quic']:
+              paths += (upstream/module/'target/desktop-classpath.txt').read_text().strip().split(os.pathsep)
+              paths += [str(upstream/module/'target/classes')]
+          classpath = os.pathsep.join(dict.fromkeys(paths))
+          java = pathlib.Path(os.environ['JAVA_HOME'])/'bin'
+          subprocess.run([str(java/'javac'),'-cp',classpath,'-d',str(classes),'test/java/LoopbackSeed.java','test/java/TransportSeed.java'],check=True)
+          env = dict(os.environ, AGENTSPACES_TEST_JAVA=str(java/'java'), AGENTSPACES_TEST_CLASSPATH=classpath)
+          for proof in ['fabric-v3-proof.mjs','fabric-transports-proof.mjs']:
+              subprocess.run(['node','scripts/'+proof],env=env,check=True)
+          PY

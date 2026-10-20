@@ -51,7 +51,9 @@ their own source and inspect reading and wake readiness separately. Current sour
 preflight a private copy of saved state and defer shutdown around active embedded
 work. All machine-specific configuration remains outside this public repository.
 
-The preview uses the upstream **wire-v3 client**. Setup shows the declared dependency pin, runtime wire version and connection counters. Optional loopback fleet observations expose signed capability cards, observed model usage and advisory votes; local semantic ranking makes no model calls. The work board shows bounded upstream activity without replaying work. See [the upstream integration guide](docs/upstream-v3.md) for opt-in setup, migration checks and compatibility limits.
+Current source uses the upstream **0.4.0 client (wire v3)**. The alpha.4 download remains version-specific; source updates are separately installed. Setup shows the declared dependency pin, runtime wire version and connection counters. Optional loopback fleet observations expose signed capability cards, observed model usage and advisory votes; local semantic ranking makes no model calls. The work board shows bounded upstream activity without replaying work. See [the upstream integration guide](docs/upstream-v3.md) for opt-in setup, migration checks and compatibility limits.
+
+The [0.4.0 transport guide](docs/upstream-040.md) explains compatibility and optional Java DTLS/QUIC gateway links. Native thread delivery retains its existing SSH/channel routes. No JVM or UDP listener is started by Desktop.
 
 ## Get started
 
@@ -147,7 +149,7 @@ flowchart LR
 
 The SSH bridge carries supported remote metadata, source-bound tools and native delivery. Native providers retain authentication and execution control. See [architecture](docs/architecture.md) for source binding, admission, persistence and effect recovery.
 
-[AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) remains the authority for its shared work, claims, leases and results. Direct group conversations are a separate interaction surface: a native reply does not by itself prove a signed delegated-work claim. The application consumes the [pinned TypeScript binding](https://github.com/badmonkeyai/agentspaces-typescript/tree/3996234b6d8323538ad806671bd55a4f76cd1e07) and preserves the [model-wire](https://github.com/badmonkeyai/agentspaces-model-wire) conversation record identity.
+[AgentSpaces](https://github.com/badmonkeyai/AgentSpaces) remains the authority for its shared work, claims, leases and results. Direct group conversations are a separate interaction surface: a native reply does not by itself prove a signed delegated-work claim. The application consumes the [pinned TypeScript binding](https://github.com/badmonkeyai/agentspaces-typescript/tree/fa20e215a002a7085f9f8f526be1af6bb8b82304) and preserves the [model-wire](https://github.com/badmonkeyai/agentspaces-model-wire) conversation record identity.
 
 Exact dependency versions are recorded in [package.json](package.json) and [package-lock.json](package-lock.json). Native version and capability checks are separate. Supported source hosts currently include this device and one configured SSH host; arbitrary-host onboarding is not implemented.
 
