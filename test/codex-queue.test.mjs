@@ -317,8 +317,8 @@ test("transport connects only to existing shared daemon and enables qualified ex
   });
   let launch;
   const adapter = new CodexQueueAdapter({
-    spawnProcess: (command, args) => {
-      launch = { command, args };
+    spawnProcess: (command, args, options) => {
+      launch = { command, args, stdio:options.stdio };
       const child = new EventEmitter(),
         socket = connect(server.address().port, "127.0.0.1");
       child.stdout = socket;
@@ -335,6 +335,7 @@ test("transport connects only to existing shared daemon and enables qualified ex
     assert.deepEqual(launch, {
       command: "ssh",
       args: ["remote", "codex app-server proxy"],
+      stdio:Array(3).fill(process.platform === "win32" ? "overlapped" : "pipe"),
     });
     assert.equal(calls[0].params.capabilities.experimentalApi, true);
     assert.ok(!launch.args.some((arg) => arg.includes("--stdio")));
@@ -396,4 +397,11 @@ test('legacy queued reconciliation refuses a shared native turn before reading i
  const f=steeringAdapter(),request=f.adapter.request;
  f.adapter.request=async(method,params)=>method==='thread/turns/list'?{data:[{id:'shared-owner-turn',status:'completed',items:[{type:'userMessage',clientId:'owner-input'},{type:'userMessage',clientId:f.args.clientId},{type:'agentMessage',phase:'final_answer',text:'Private owner answer'}]}]}:request(method,params);
  const result=await f.adapter.reconcileAnswer({threadId,clientId:f.args.clientId,grant:true});assert.equal(result.status,'explicit-reply-required');assert.equal(result.text,undefined);assert(!f.calls.some(c=>c.method==='thread/items/list'));
+});
+
+test('silent native proxy handshake has its own deadline and detaches only its observer', async()=>{
+ let detached=0;const child=new EventEmitter();child.stdin=new PassThrough();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>{detached++;child.stdin.destroy();child.stdout.destroy();child.emit('close');};
+ const adapter=new CodexQueueAdapter({handshakeTimeoutMs:25,spawnProcess:()=>child});let timer;
+ try{await assert.rejects(Promise.race([adapter.open(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Object.assign(Error('test deadline'),{code:'test_deadline'})),250)})]),{code:'native_websocket_handshake_failed'});assert.ok(detached>=1);}
+ finally{clearTimeout(timer);adapter.close();}
 });

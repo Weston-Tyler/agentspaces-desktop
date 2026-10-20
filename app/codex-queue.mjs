@@ -31,10 +31,13 @@ export class CodexQueueAdapter {
     pollIntervalMs = 2000,
     queueWaitTimeoutMs = 1800000,
     steeringSupported = false,
+    handshakeTimeoutMs = 8000,
   } = {}) {
     if (host !== REMOTE_HOST) throw fail("shared_daemon_host_not_qualified");
     if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 20 || pollIntervalMs > 5000 || !Number.isInteger(queueWaitTimeoutMs) || queueWaitTimeoutMs < 20 || queueWaitTimeoutMs > 1800000) throw fail("invalid_native_delivery_poll_bound");
     Object.assign(this, { host, spawnProcess, persistReceipt, loadReceipt, persistPermissionProof, loadPermissionProof, steeringSupported });
+    if (!Number.isInteger(handshakeTimeoutMs) || handshakeTimeoutMs < 20 || handshakeTimeoutMs > 20000) throw fail("invalid_native_handshake_bound");
+    this.handshakeTimeoutMs = handshakeTimeoutMs;
     this.events = new EventEmitter();
     this.pending = new Map();
     this.proofs = new Map();
@@ -51,7 +54,8 @@ export class CodexQueueAdapter {
     this.child = this.spawnProcess(
       "ssh",
       [SSH_ALIAS, "codex app-server proxy"],
-      { windowsHide: true, shell: false, stdio: ["pipe", "pipe", "pipe"] },
+      // Windows OpenSSH needs overlapped handles for duplex input before EOF.
+      { windowsHide: true, shell: false, stdio: Array(3).fill(process.platform === "win32" ? "overlapped" : "pipe") },
     );
     this.child.stderr.on("data", () => {});
     const disconnected = () => {
@@ -72,7 +76,7 @@ export class CodexQueueAdapter {
     });
     this.websocket = new WebSocket("ws://localhost/", {
       createConnection: () => bridge,
-      handshakeTimeout: 8000,
+      handshakeTimeout: this.handshakeTimeoutMs,
       maxPayload: 1024 * 1024,
       perMessageDeflate: false,
     });
@@ -116,15 +120,16 @@ export class CodexQueueAdapter {
         }
       } else this.events.emit("notification", message);
     });
-    await new Promise((resolve, reject) => {
-      this.websocket.once("open", resolve);
-      this.websocket.once("error", () =>
-        reject(fail("native_websocket_handshake_failed")),
-      );
-      this.websocket.once("close", () =>
-        reject(fail("native_proxy_disconnected")),
-      );
-    });
+    try {
+      await new Promise((resolve, reject) => {
+        // HTTP's socket timeout is not sufficient for a child-process duplex.
+        const timer = setTimeout(() => reject(fail("native_websocket_handshake_failed")), this.handshakeTimeoutMs);
+        const finish = callback => value => { clearTimeout(timer); callback(value); };
+        this.websocket.once("open", finish(resolve));
+        this.websocket.once("error", finish(() => reject(fail("native_websocket_handshake_failed"))));
+        this.websocket.once("close", finish(() => reject(fail("native_proxy_disconnected"))));
+      });
+    } catch (error) { this.close(); throw error; }
     const result = await this.request("initialize", {
       clientInfo: {
         name: "agentspaces_desktop_queue",
