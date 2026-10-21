@@ -55,6 +55,39 @@ test("Claude lifecycle captures exact native process identity and MCP checks it 
   await bootstrap.callTool({ params: { name: "discover_group_discussions", arguments: {} } });
   await bootstrap.server.close();
 });
+
+test('folder changes keep an already loaded Claude bootstrap compatible without restarting its native process', async () => {
+  const { configPath, participantConfig, root } = await setup(), calls = [];
+  const sourceCwd = '/fictional/session-origin';
+  const requestImpl = async (_, path, body) => {
+    calls.push({ path, body });
+    if (path === '/api/native/register') {
+      assert.equal(body.cwd, undefined, 'working directory is not a native source identity assertion');
+      assert.match(body.workingCwd, /^\/fictional\//);
+      return { participantConfig, sourceCwd };
+    }
+    return [];
+  };
+  const bootstrap = await createNativeBootstrap({ configPath, resolveClaude: path => resolveClaudeSource(path, { ancestors: async () => [processRecord] }), requestImpl });
+  for (const cwd of ['/fictional/project-one', '/fictional/project-two']) {
+    await runNativeSessionHook(event({ cwd, hook_event_name: 'UserPromptSubmit' }), { configPath, ancestors: async () => [processRecord], requestImpl });
+    await bootstrap.callTool({ params: { name: 'discover_group_discussions', arguments: {} } });
+    const record = await resolveClaudeSource(configPath, { ancestors: async () => [processRecord] });
+    assert.equal(record.cwd, sourceCwd, 'older loaded MCP clients continue to send the canonical cwd');
+    assert.equal(record.workingCwd, cwd);
+    assert.equal(record.process.pid, processRecord.pid);
+  }
+  assert.equal(calls.filter(c => c.path === '/api/native/register').at(-1).body.workingCwd, '/fictional/project-two');
+  // A later outage retains the last server-observed canonical cwd for old clients.
+  const offline = await runNativeSessionHook(event({ cwd: '/fictional/project-three', hook_event_name: 'Stop' }), {
+    configPath, ancestors: async () => [processRecord], requestImpl: async () => { throw Object.assign(Error('offline'), { code: 'scoped_transport_unavailable' }); },
+  });
+  assert.equal(offline.pendingReason, 'scoped_transport_unavailable');
+  const record = await resolveClaudeSource(configPath, { ancestors: async () => [processRecord] });
+  assert.equal(record.cwd, sourceCwd); assert.equal(record.workingCwd, '/fictional/project-three');
+  assert(!JSON.stringify(record).includes(scopedToken));
+  await bootstrap.server.close();
+});
 test("Claude rejects PID reuse, executable mismatch, ambiguous identities and ended sessions", async () => {
   const { configPath, participantConfig } = await setup();
   const record = async (session_id, hook_event_name = "SessionStart") => runNativeSessionHook(event({ session_id, hook_event_name }), { configPath, ancestors: async () => [processRecord], requestImpl: async () => ({ participantConfig: { ...participantConfig, nativeThreadId: session_id } }) });

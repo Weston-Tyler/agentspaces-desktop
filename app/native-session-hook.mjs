@@ -8,8 +8,9 @@ import http from "node:http";
 const exec = promisify(execFile);
 export const nativeUuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const fail = code => Object.assign(new Error(code), { code });
+export const retryableNativeRegistration = error => ['source_pending', 'scoped_transport_unavailable', 'scoped_transport_timeout'].includes(error?.code);
 const publicDiscussionErrors=new Set(['discussion_source_unavailable','discussion_participant_required','discussion_retrieval_denied','discussion_sharing_denied','discussion_self_registration_disabled','discussion_member_limit','discussion_page_invalid','discussion_cursor_invalid','discussion_cursor_stale','discussion_page_record_too_large','discussion_message_unavailable','discussion_message_changed']);
-const publicRegistrationErrors = new Set(["source_pending", "native_registration_scope_unavailable", "native_registration_device_revoked", "native_registration_device_identity_mismatch", "native_registration_account_mismatch", "native_registration_source_scope_denied", "native_registration_source_excluded", "native_registration_source_cwd_mismatch", "native_registration_source_revoked", "source_connector_revoked", "native_registration_private_config_unavailable", "native_registration_private_config_changed", "native_registration_binding_failed"]);
+const publicRegistrationErrors = new Set(["source_pending", "native_registration_scope_unavailable", "native_registration_device_revoked", "native_registration_device_identity_mismatch", "native_registration_account_mismatch", "native_registration_source_scope_denied", "native_registration_source_excluded", "native_registration_source_cwd_mismatch", "native_registration_working_cwd_invalid", "native_registration_source_revoked", "source_connector_revoked", "native_registration_private_config_unavailable", "native_registration_private_config_changed", "native_registration_binding_failed"]);
 export async function privateFile(path) {
   const absolute = resolve(path);
   for (let p = absolute; ; p = dirname(p)) {
@@ -176,7 +177,11 @@ export async function runNativeSessionHook(input, { configPath = process.env.AGE
     await writeFile(temp, JSON.stringify({ ...previous, hookEvent: "SessionEnd" }), { mode: 0o600 }); await rename(temp, join(root, key + ".json"));
     return { nativeThreadId: previous.nativeThreadId, recorded: true, activeSessionReloaded: false };
   }
-  const baseRecord = { schemaVersion: 1, provider: config.provider, host: config.host, cwd: event.cwd, process: { pid: native.pid, exe: native.exe, startedAt: native.startedAt }, hookEvent: event.hook_event_name, attribution: "local lifecycle observation; native caller not cryptographically verified" };
+  const validCwd = cwd => typeof cwd === 'string' && cwd.length > 0 && cwd.length <= 2000 && !cwd.includes('\0') && (posix.isAbsolute(cwd) || win32.isAbsolute(cwd));
+  let previous;
+  try { previous = await privateFile(join(root, key + '.json')); } catch { /* A first genuine hook has no previous record. */ }
+  const sourceCwd = previous?.nativeThreadId === event.session_id && previous.host === config.host && previous.provider === config.provider && previous.process?.pid === native.pid && previous.process.startedAt === native.startedAt && previous.process.exe === native.exe && validCwd(previous.sourceCwd) ? previous.sourceCwd : undefined;
+  const baseRecord = { schemaVersion: 1, provider: config.provider, host: config.host, cwd: sourceCwd ?? event.cwd, workingCwd: event.cwd, ...(sourceCwd ? {sourceCwd} : {}), process: { pid: native.pid, exe: native.exe, startedAt: native.startedAt }, hookEvent: event.hook_event_name, attribution: "local lifecycle observation; native caller not cryptographically verified" };
   const saveRecord = async (record) => {
     await mkdir(root, { recursive: true, mode: 0o700 });
     if ((await lstat(root)).isSymbolicLink()) throw fail("private_path_symlink_refused");
@@ -188,14 +193,15 @@ export async function runNativeSessionHook(input, { configPath = process.env.AGE
   if (config.provider === "claude") await saveRecord({ ...baseRecord, nativeThreadId: event.session_id, provisional: true });
   const registration = config.provider === "claude" ? { nativeThreadId: event.session_id } : { nativeSessionId: event.session_id };
   let result;
-  try { result = await requestImpl({ ...config, requestTimeoutMs: 4000 }, "/api/native/register", { ...registration, cwd: event.cwd, observedProcess: native, sourceProof: { kind: config.provider === "claude" ? "claude-lifecycle" : "codex-lifecycle", hookEvent: event.hook_event_name } }); }
+  try { result = await requestImpl({ ...config, requestTimeoutMs: 4000 }, "/api/native/register", { ...registration, workingCwd: event.cwd, observedProcess: native, sourceProof: { kind: config.provider === "claude" ? "claude-lifecycle" : "codex-lifecycle", hookEvent: event.hook_event_name } }); }
   catch (error) {
-    if (config.provider === "claude") return { nativeThreadId: event.session_id, recorded: true, pending: true, activeSessionReloaded: false };
+    if (config.provider === "claude") return { nativeThreadId: event.session_id, recorded: true, pending: true, pendingReason: publicRegistrationErrors.has(error?.code) || retryableNativeRegistration(error) ? error.code : 'native_registration_denied', activeSessionReloaded: false };
     throw error;
   }
   const participant = result.participantConfig;
   if (!participant || !nativeUuid.test(participant.nativeThreadId ?? "") || (config.provider === "claude" && participant.nativeThreadId !== event.session_id)) throw fail("registered_source_mismatch");
-  await saveRecord({ ...baseRecord, nativeThreadId: participant.nativeThreadId, provisional: false });
+  if (result.sourceCwd !== undefined && !validCwd(result.sourceCwd)) throw fail('registered_source_mismatch');
+  await saveRecord({ ...baseRecord, ...(result.sourceCwd ? {cwd:result.sourceCwd,sourceCwd:result.sourceCwd} : {}), nativeThreadId: participant.nativeThreadId, provisional: false });
   const additionalContext = config.provider === "claude" && event.hook_event_name !== 'Stop' ? await currentDiscussionContext(config, participant, requestImpl) : undefined;
   return { nativeThreadId: participant.nativeThreadId, recorded: true, activeSessionReloaded: false, ...(additionalContext ? { additionalContext } : {}) };
 }
