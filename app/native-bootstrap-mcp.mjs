@@ -78,10 +78,10 @@ export async function createNativeBootstrap({ configPath = process.env.AGENTSPAC
       nativeThreadId=request?.params?._meta?.threadId;if(!nativeUuid.test(nativeThreadId??''))throw fail('native_request_thread_metadata_required');
       sourceProof={kind:'codex-request-meta',attribution:'native request metadata; client-local observation'};
     }else{
-      const record=await resolveClaude(configPath);nativeThreadId=record.nativeThreadId;cwd=record.cwd;channelOptIn=record.channelOptIn===true;
+      const record=await resolveClaude(configPath);nativeThreadId=record.nativeThreadId;cwd=record.workingCwd??record.cwd;channelOptIn=record.channelOptIn===true;
       sourceProof={kind:'claude-lifecycle',observedProcess:record.process,attribution:'local lifecycle observation; native caller not cryptographically verified'};
     }
-    const registration=await requestImpl(device,'/api/native/register',{nativeThreadId,...(cwd?{cwd}:{}),sourceProof});
+    const registration=await requestImpl(device,'/api/native/register',{nativeThreadId,...(cwd?{workingCwd:cwd}:{}),sourceProof});
     const scoped=registration.participantConfig;
     if(!scoped||scoped.nativeThreadId!==nativeThreadId||!/^[a-f0-9]{64}$/.test(scoped.token??'')||scoped.provider!==device.provider||scoped.host!==device.host)throw fail('registered_native_binding_mismatch');
     return {nativeThreadId,channelOptIn,config:{...scoped,address:device.address,authority:device.authority}};

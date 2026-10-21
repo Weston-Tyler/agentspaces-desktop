@@ -430,7 +430,7 @@ export async function startServer({
           if (!registrationDevice) throw new Error('Registration capability required');
           const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
           const bound = await sourceBindings.register(token, data);
-          result = bound?.config ? { participantConfig: bound.config } : bound;
+          result = bound?.config ? { participantConfig: bound.config, sourceCwd: bound.sourceCwd } : bound;
           break;
         }
         case '/api/discussions/policy':

@@ -40,9 +40,16 @@ export class SourceBindings {
     const device = this.device(token);
     if (input.host !== undefined && input.host !== device.host || input.provider !== undefined && input.provider !== device.provider) return Promise.reject(failure("native_registration_device_identity_mismatch"));
     if (input.nativeThreadId !== undefined && !UUID.test(input.nativeThreadId) || input.nativeSessionId !== undefined && !UUID.test(input.nativeSessionId) || !input.nativeThreadId && !input.nativeSessionId) return Promise.reject(failure("source_pending"));
-    const key = hash(JSON.stringify([hash(token), input.nativeThreadId ?? null, input.nativeSessionId ?? null, input.cwd ?? null]));
+    // Older managed hooks/MCP clients called their mutable working folder cwd.
+    // This protocol marker is not identity evidence: the server still selects
+    // the exact native source from its own host/provider catalog or read API.
+    const lifecycle = input.sourceProof?.kind === device.provider + '-lifecycle';
+    const cwd = lifecycle ? undefined : input.cwd;
+    const workingCwd = input.workingCwd !== undefined ? input.workingCwd : lifecycle ? input.cwd : undefined;
+    try { this.validateWorkingCwd(workingCwd, device, this.profile()); } catch (error) { return Promise.reject(error); }
+    const key = hash(JSON.stringify([hash(token), input.nativeThreadId ?? null, input.nativeSessionId ?? null, cwd ?? null, workingCwd ?? null]));
     if (this.pending.has(key)) return this.pending.get(key);
-    const operation = this.bind(token, { nativeThreadId: input.nativeThreadId, nativeSessionId: input.nativeSessionId, cwd: input.cwd, nativeClientSupplied: true });
+    const operation = this.bind(token, { nativeThreadId: input.nativeThreadId, nativeSessionId: input.nativeSessionId, cwd, workingCwd, nativeClientSupplied: true });
     this.pending.set(key, operation);
     return operation.finally(() => { if (this.pending.get(key) === operation) this.pending.delete(key); });
   }
@@ -59,7 +66,7 @@ export class SourceBindings {
         host: device.host, provider: device.provider, cwd: observed.cwd, account: profile.account, scopeId: profile.id, fixture: false,
         title: typeof observed.title === "string" ? observed.title.slice(0, 200) : "Native session", sourceVersion: String(observed.sourceVersion ?? "unknown").slice(0, 200), status: ["current", "dormant", "archived", "unknown"].includes(observed.status) ? observed.status : "unknown", topics: [],
         registrationProvenance: { nativeClientSupplied: true, metadataObserved: true, attribution: "locally bound; native caller not cryptographically verified" } };
-      this.validateSource(source, device, profile, input.cwd, false);
+      this.validateSource(source, device, this.profile(), input.cwd, false, input.workingCwd);
       const overrides = this.engine.store.data.grants[source.id] ?? {};
       if (["enrolled", "content", "share", "retrieve"].some(key => overrides[key] === false)) throw failure("native_registration_source_revoked");
       this.engine.workspace.restore([source]);
@@ -70,7 +77,7 @@ export class SourceBindings {
       rebuilt.nativeRegistrationObservedAt = new Date().toISOString();
       this.engine.workspace.index = rebuilt; this.engine.workspace.save(); this.engine.store.save();
     }
-    this.validateSource(source, device, this.profile(), input.cwd, true);
+    this.validateSource(source, device, this.profile(), input.cwd, true, input.workingCwd);
     const identity = { sessionId: source.id, nativeThreadId: source.nativeThreadId, host: source.host, provider: source.provider, cwd: normalizeHostPath(source.cwd, source.host), account: source.account, project: source.project, scopeId: source.scopeId };
     const key = hash(JSON.stringify([source.host, source.provider, source.nativeThreadId]));
     const folder = join(this.root, "native-connections", "auto-" + key), configPath = join(folder, "participant.json"), fingerprint = hash(JSON.stringify([identity, this.address]));
@@ -88,7 +95,7 @@ export class SourceBindings {
     mkdirSync(folder, { recursive: true, mode: 0o700 }); assertUnlinkedParents(folder);
     const connector = this.engine.issueConnector(source.id);
     try {
-      this.device(token); this.validateSource(this.engine.session(source.id), device, this.profile(), input.cwd, true);
+      this.device(token); this.validateSource(this.engine.session(source.id), device, this.profile(), input.cwd, true, input.workingCwd);
       const config = { schema: 1, address: this.address, authority: new URL(this.address).host, token: connector.token, sessionId: source.id, nativeThreadId: source.nativeThreadId, host: source.host, provider: source.provider };
       const temp = join(folder, "participant-" + randomUUID() + ".tmp"); writeFileSync(temp, JSON.stringify(config), { flag: "wx", mode: 0o600 }); renameSync(temp, configPath);
       if (old?.connectorKey) delete this.engine.store.data.connectors[old.connectorKey];
@@ -96,12 +103,18 @@ export class SourceBindings {
       this.engine.store.save(); return this.result(config, configPath, false);
     } catch { delete this.engine.store.data.connectors[hash(connector.token)]; this.engine.store.save(); throw failure("native_registration_binding_failed"); }
   }
-  validateSource(source, device, profile, suppliedCwd, requireGrants) {
+  validateWorkingCwd(cwd, device, profile) {
+    if (cwd === undefined) return;
+    if (typeof cwd !== 'string' || !cwd || cwd.length > 2000 || cwd.includes('\0') || !hostPaths(device.host).isAbsolute(cwd)) throw failure('native_registration_working_cwd_invalid');
+    if (scopePathExcluded(cwd, device.host, profile.exclusions[device.host] ?? [])) throw failure('native_registration_source_excluded');
+  }
+  validateSource(source, device, profile, suppliedCwd, requireGrants, workingCwd) {
     if (!source?.cwd || typeof source.cwd !== "string" || !hostPaths(device.host).isAbsolute(source.cwd)) throw failure("source_pending");
     if (source.host !== device.host || source.provider !== device.provider || source.account !== profile.account || source.scopeId !== profile.id || !profile.hosts.includes(source.host) || !profile.providers.includes(source.provider)) throw failure("native_registration_source_scope_denied");
     if (scopePathExcluded(source.cwd, source.host, profile.exclusions[device.host] ?? [])) throw failure("native_registration_source_excluded");
+    this.validateWorkingCwd(workingCwd, device, profile);
     if (suppliedCwd !== undefined && (typeof suppliedCwd !== "string" || normalizeHostPath(suppliedCwd, device.host) !== normalizeHostPath(source.cwd, device.host))) throw failure("native_registration_source_cwd_mismatch");
     if (requireGrants) { const grant = this.engine.permissions(this.engine.session(source.id)); if (!grant.enrolled || !grant.content || !grant.share || !grant.retrieve) throw failure("native_registration_source_revoked"); }
   }
-  result(config, configPath, cached) { return { configPath, config, token: config.token, sessionId: config.sessionId, nativeThreadId: config.nativeThreadId, host: config.host, provider: config.provider, cached, attribution: "locally bound; native caller not cryptographically verified" }; }
+  result(config, configPath, cached) { return { configPath, config, token: config.token, sessionId: config.sessionId, nativeThreadId: config.nativeThreadId, host: config.host, provider: config.provider, sourceCwd: this.engine.session(config.sessionId).cwd, cached, attribution: "locally bound; native caller not cryptographically verified" }; }
 }

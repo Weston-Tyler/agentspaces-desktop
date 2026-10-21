@@ -131,3 +131,70 @@ test('background discovery cannot erase a source that self-registers while inven
   await f.engine.workspace.scan(f.engine.workspace.index.profile,{catalogOnly:true});
   assert.equal(f.engine.discussions.context(room.id,f.engine.connector(registered.token)).available,true);
 });
+
+test('working-directory changes and service restart retain canonical source, grants and connector', async t => {
+  const f = fixture(t), before = structuredClone(f.engine.store.data.grants);
+  const first = await f.service.register(f.device.token, { nativeThreadId: thread, workingCwd: '/home/owner/one' });
+  assert.equal(first.sourceCwd, f.source.cwd);
+  const restarted = new SourceBindings(f.engine, { root: f.root, address: 'http://127.0.0.1:43127' });
+  const next = await restarted.register(f.device.token, { nativeThreadId: thread, workingCwd: '/home/owner/two' });
+  assert.equal(next.token, first.token);
+  assert.equal(next.cached, true);
+  assert.equal(next.sourceCwd, f.source.cwd);
+  assert.equal(f.engine.session(f.source.id).cwd, '/home/owner/work');
+  assert.deepEqual(f.engine.store.data.grants, before);
+  assert.equal(Object.keys(f.engine.store.data.connectors).length, 1);
+});
+
+test('working-directory hints cannot bypass invalid paths, exclusions, source or connector revocation', async t => {
+  const f = fixture(t);
+  for (const workingCwd of [null, 12, '', 'relative', '/too-long/' + 'x'.repeat(4096), '/bad\0path']) {
+    await assert.rejects(f.service.register(f.device.token, { nativeThreadId: thread, workingCwd }), { code: 'native_registration_working_cwd_invalid' });
+  }
+  f.engine.workspace.index.profile.exclusions.remote = ['/home/owner/private'];
+  await assert.rejects(f.service.register(f.device.token, { nativeThreadId: thread, workingCwd: '/home/owner/private/child' }), { code: 'native_registration_source_excluded' });
+  const first = await f.service.register(f.device.token, { nativeThreadId: thread, workingCwd: '/home/owner/allowed' });
+  delete f.engine.store.data.connectors[createHash('sha256').update(first.token).digest('hex')];
+  await assert.rejects(f.service.register(f.device.token, { nativeThreadId: thread, workingCwd: '/home/owner/other' }), { code: 'source_connector_revoked' });
+  const g = fixture(t); g.engine.grant(g.source.id, { retrieve: false });
+  await assert.rejects(g.service.register(g.device.token, { nativeThreadId: thread, workingCwd: '/home/owner/other' }), { code: 'native_registration_source_revoked' });
+  const unknown = fixture(t, { known: false });
+  await assert.rejects(unknown.service.register(unknown.device.token, { nativeThreadId: thread, workingCwd: '/home/owner/allowed' }), { code: 'source_pending' });
+  assert.equal(unknown.engine.catalog.length, 0);
+});
+
+test('already loaded managed clients reconnect across cwd changes without changing their protocol or grants', async t => {
+  const f = fixture(t), input = cwd => ({nativeThreadId:thread,cwd,sourceProof:{kind:'claude-lifecycle'}});
+  const first = await f.service.register(f.device.token, input('/home/owner/project-one'));
+  const next = await f.service.register(f.device.token, input('/home/owner/project-two'));
+  assert.equal(next.token, first.token); assert.equal(next.cached, true);
+  assert.equal(next.sourceCwd, '/home/owner/work');
+  assert.equal(f.engine.session(f.source.id).cwd, '/home/owner/work');
+  f.engine.workspace.index.profile.exclusions.remote = ['/home/owner/private'];
+  await assert.rejects(f.service.register(f.device.token, input('/home/owner/private')), {code:'native_registration_source_excluded'});
+  // A self-reported protocol marker cannot supply an unknown source identity.
+  await assert.rejects(f.service.register(f.device.token, {...input('/home/owner/project-two'),nativeThreadId:nativeSessionId}), {code:'source_pending'});
+  f.engine.grant(f.source.id, {share:false});
+  await assert.rejects(f.service.register(f.device.token, input('/home/owner/project-three')), {code:'native_registration_source_revoked'});
+});
+
+test('Codex lifecycle folders also remain separate from the independently resolved native session', async t => {
+  const f = fixture(t, {known:false,resolveMetadata:async()=>({nativeObserved:true,nativeThreadId:thread,nativeSessionId,host:'remote',provider:'codex',cwd:'/home/owner/origin'})});
+  const device = f.service.issueDevice({host:'remote',provider:'codex'});
+  const first = await f.service.register(device.token,{nativeSessionId,cwd:'/home/owner/live-one',sourceProof:{kind:'codex-lifecycle'}});
+  const next = await f.service.register(device.token,{nativeThreadId:thread,workingCwd:'/home/owner/live-two'});
+  assert.equal(next.token,first.token);assert.equal(next.sourceCwd,'/home/owner/origin');
+  assert.equal(f.engine.session(first.sessionId).provider,'codex');
+  assert.equal(f.engine.catalog.length,1);assert.deepEqual(f.engine.store.data.grants,{});
+});
+
+test('an exclusion added during metadata resolution refuses a folder hint before catalog or connector writes', async t => {
+  let release;
+  const gate = new Promise(resolve=>{release=resolve;});
+  const f = fixture(t,{known:false,resolveMetadata:async()=>{await gate;return {nativeObserved:true,nativeThreadId:thread,host:'remote',provider:'claude',cwd:'/home/owner/origin'};}});
+  const pending = f.service.register(f.device.token,{nativeThreadId:thread,workingCwd:'/home/owner/live'});
+  f.engine.workspace.index.profile = {...f.engine.workspace.index.profile,exclusions:{remote:['/home/owner/live']}};
+  release();
+  await assert.rejects(pending,{code:'native_registration_source_excluded'});
+  assert.equal(f.engine.catalog.length,0);assert.equal(Object.keys(f.engine.store.data.connectors).length,0);
+});

@@ -74,6 +74,30 @@ test('a temporary registration transport outage does not disable an admitted bac
   assert.equal((await waiting).exitCode, 2);
 });
 
+test('a genuine Stop hook reconnects after its initial registration outage without another native turn', async () => {
+  Socket.calls = []; let hooks = 0, attempts = 0;
+  const waiting = runNativeInboxHook(event, options({ retryMinMs: 1,
+    registerHook: async () => { hooks++; return { recorded: true, pending: true, pendingReason: 'scoped_transport_unavailable', nativeThreadId: uuid }; },
+    resolveBinding: async () => { if (++attempts === 1) throw Object.assign(Error('offline'), { code: 'scoped_transport_unavailable' }); return binding; },
+  }));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(Socket.calls.length, 1); assert.equal(hooks, 1);
+  Socket.calls[0].socket.emit('message', JSON.stringify({ content: 'Actual new peer message after reconnect', meta }));
+  assert.equal((await waiting).exitCode, 2);
+});
+
+test('pending Stop registration never retries revoked, excluded or unverified sources', async () => {
+  Socket.calls = []; let attempts = 0;
+  for (const pendingReason of ['native_registration_source_revoked','source_connector_revoked','native_registration_source_excluded','native_registration_device_revoked','native_lifecycle_binding_ambiguous','native_registration_denied']) {
+    const result = await runNativeInboxHook(event,options({waitMs:30,
+      registerHook:async()=>({recorded:true,pending:true,pendingReason,nativeThreadId:uuid}),
+      resolveBinding:async()=>{attempts++;return binding;},
+    }));
+    assert.equal(result.reason,'identity-not-admitted');
+  }
+  assert.equal(attempts,0);assert.equal(Socket.calls.length,0);
+});
+
 test('real HTTP/WebSocket inbox requests one native wake and retains the next queued effect', { timeout: 10000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), 'as-hook-wire-'));
   const engine = new Engine(new Store(root), { diagnostics: () => ({ status: 'fixture' }), close() {} }, { nativeFactory: () => { throw Error('No native history or models allowed'); } });

@@ -4,6 +4,32 @@ In the target native thread, call `ensure_native_connection` with no arguments. 
 
 A fixed-source connector can call the same tool, or run `ensure-connection` using its current private `USE.md`. This reports readiness for its existing connection; use the source-neutral native tool for automatic registration. Never copy another thread's configuration.
 
+## Changing folders and reconnecting
+
+A native thread keeps its identity when its working folder changes. Registration
+selects the exact thread from the owning host/provider metadata, then rechecks
+the existing account, sharing scope, source grants and connector revocation.
+The managed clients send the mutable folder as `workingCwd`; it cannot change
+the source's canonical directory, enroll a new project or grant file access.
+Excluded folders and invalid paths remain refused.
+
+Already loaded managed Claude/Codex lifecycle clients can keep using their old
+payload without restarting: the companion interprets their legacy `cwd` field
+as a working folder. The lifecycle protocol marker is self-reported and grants
+no identity authority. Other callers' explicit canonical `cwd` assertions retain
+their strict equality check. Existing scoped connectors and room memberships
+are reused when only the working folder changes.
+
+Genuine hooks retain the server-observed canonical directory separately from
+the live working folder. A temporary transport outage or metadata-persistence
+delay during a genuine Stop hook retries registration with bounded backoff
+within the existing eight-hour wait. It never invents another hook event,
+restarts a native client, changes permissions or replays a delivered message.
+Missing/ambiguous process identity, exclusions and revocations remain refusals.
+Older already-running hook helpers retain their previous retry behavior until
+their native client loads the refreshed helper; folder-change compatibility is
+provided by the companion immediately.
+
 Automatic Claude setup prefers the installed per-user native launcher over an older system npm installation. It privately records the launcher and its resolved executable. Lifecycle checks follow that exact launcher after upgrades while retaining the setup-time executable for already running sessions; process identity and source grants still have to match. Setup never creates a lifecycle record on behalf of a session. A genuine `SessionStart`, `UserPromptSubmit` or managed `Stop` hook must run before source-neutral tools can identify it.
 
 For Claude, the managed MCP name is `agentspaces-desktop`. See the native background wake route below before configuring the optional direct channel. At the next owner-controlled native launch, enable its custom channel with:

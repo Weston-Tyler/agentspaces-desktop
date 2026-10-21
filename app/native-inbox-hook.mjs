@@ -1,10 +1,10 @@
 import WebSocket from 'ws';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { bootstrapConfigPath, nativeUuid, readDeviceConfig, resolveClaudeSource, runNativeSessionHook, scopedRequest } from './native-session-hook.mjs';
+import { bootstrapConfigPath, nativeUuid, readDeviceConfig, resolveClaudeSource, runNativeSessionHook, scopedRequest, retryableNativeRegistration } from './native-session-hook.mjs';
 
 export const MAX_NATIVE_HOOK_WAIT_MS = 8 * 60 * 60 * 1000;
-const transportUnavailable = error => ['scoped_transport_unavailable', 'scoped_transport_timeout'].includes(error?.code);
+const transportUnavailable = retryableNativeRegistration;
 const validBinding = binding => nativeUuid.test(binding?.nativeThreadId ?? '') && binding?.config?.provider === 'claude' &&
   binding.config.nativeThreadId === binding.nativeThreadId && /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(binding.config.address ?? '') &&
   /^127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(binding.config.authority ?? '') && /^[a-f0-9]{64}$/.test(binding.config.token ?? '');
@@ -14,7 +14,7 @@ async function participantBinding(configPath, options) {
   if (device.provider !== 'claude') throw Error('claude_hook_required');
   const record = await resolveClaudeSource(configPath, options);
   const registration = await (options.requestImpl ?? scopedRequest)(device, '/api/native/register', {
-    nativeThreadId: record.nativeThreadId, cwd: record.cwd,
+    nativeThreadId: record.nativeThreadId, workingCwd: record.workingCwd ?? record.cwd,
     sourceProof: { kind: 'claude-lifecycle', observedProcess: record.process, hookEvent: 'Stop' },
   });
   return { nativeThreadId: record.nativeThreadId, redactions: [device.token], config: { ...registration.participantConfig, address: device.address, authority: device.authority } };
@@ -33,7 +33,7 @@ export async function runNativeInboxHook(input, {
   if (event?.hook_event_name !== 'Stop' || !nativeUuid.test(event.session_id ?? '') || event.agent_id || !Number.isInteger(waitMs) || waitMs < 1 || waitMs > MAX_NATIVE_HOOK_WAIT_MS) return quiet('unsupported-hook');
   try {
     const result = await registerHook(input, { configPath, ...hookOptions });
-    if (!result.recorded || result.pending || result.nativeThreadId !== event.session_id) return quiet('identity-not-admitted');
+    if (!result.recorded || result.pending && !retryableNativeRegistration({code:result.pendingReason}) || result.nativeThreadId !== event.session_id) return quiet('identity-not-admitted');
   } catch { return quiet('identity-unavailable'); }
   const binding = resolveBinding ?? (() => participantBinding(configPath, hookOptions));
   return new Promise(resolveResult => {

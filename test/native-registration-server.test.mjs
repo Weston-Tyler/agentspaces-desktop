@@ -8,7 +8,42 @@ import { Store } from "../app/store.mjs";
 import { Engine } from "../app/engine.mjs";
 import { startServer } from "../app/server.mjs";
 import { createNativeBootstrap } from "../app/native-bootstrap-mcp.mjs";
+import { runNativeSessionHook, resolveClaudeSource } from '../app/native-session-hook.mjs';
+import { runNativeInboxHook } from '../app/native-inbox-hook.mjs';
 const THREAD = "00000000-0000-4000-8000-000000000001", UNKNOWN = "00000000-0000-4000-8000-000000000002";
+
+test('real HTTP registration and loaded MCP survive folder changes; the same native Stop hook rearms its inbox', async t => {
+  const f = await fixture(t), configPath = join(f.root, 'directory-device.json');
+  writeFileSync(configPath, JSON.stringify({schemaVersion:1,...f.device,address:f.app.address,authority:new URL(f.app.address).host}), {mode:0o600});
+  const processRecord = {pid:4242,exe:'/native/claude',startedAt:'fixture-same-process'};
+  const ancestors = async () => [processRecord], grants = structuredClone(f.engine.store.data.grants);
+  const room = f.engine.discussions.create({title:'Folder-change wire contract',sessionIds:[f.source.id],selfRegistration:true});
+  const bootstrap = await createNativeBootstrap({configPath,resolveClaude:path=>resolveClaudeSource(path,{ancestors})});
+  t.after(()=>bootstrap.server.close());
+  let token;
+  for (const cwd of [join(f.root,'work-one'),join(f.root,'work-two')]) {
+    // Unchanged older MCP processes still use this legacy payload.
+    const old = await f.call('/api/native/register',{nativeThreadId:THREAD,cwd,sourceProof:{kind:'claude-lifecycle'}},f.device.token);
+    assert.equal(old.status,200); assert.equal(old.body.sourceCwd,f.source.cwd);
+    token ??= old.body.participantConfig.token;
+    assert.equal(old.body.participantConfig.token,token);
+    const event = {hook_event_name:'UserPromptSubmit',session_id:THREAD,cwd};
+    assert.equal((await runNativeSessionHook(event,{configPath,ancestors})).recorded,true);
+    const read = await bootstrap.callTool({params:{name:'read_group_discussion',arguments:{id:room.id,limit:1}}});
+    assert.equal(JSON.parse(read.content[0].text).available,true);
+  }
+  const waiting = runNativeInboxHook({hook_event_name:'Stop',session_id:THREAD,cwd:join(f.root,'work-three')},{configPath,ancestors,waitMs:2000});
+  const deadline = Date.now()+1000;
+  while (!f.app.channels.isConnected(f.source.id) && Date.now()<deadline) await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(f.app.channels.transportKind(f.source.id),'async-hook');
+  // No message/model is needed to prove that the real source-bound inbox armed.
+  assert.equal((await waiting).reason,'wait-expired');
+  assert.equal(f.engine.session(f.source.id).cwd,f.source.cwd);
+  assert.deepEqual(f.engine.store.data.grants,grants);
+  assert.equal(f.engine.modelCalls,0);
+  f.engine.grant(f.source.id,{retrieve:false});
+  await assert.rejects(bootstrap.callTool({params:{name:'discover_group_discussions',arguments:{}}}),{code:'native_registration_source_revoked'});
+});
 async function fixture(t, sourceMetadataResolver = async () => null, nativeThreadAdapterFactory) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "as-registration-http-"));
   const engine = new Engine(new Store(root), { diagnostics: () => ({ status: "synthetic-disconnected" }), close() {} }, { nativeFactory: () => { throw new Error("No native or model call permitted by registration fixture"); } });
