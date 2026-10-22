@@ -32,6 +32,16 @@ provided by the companion immediately.
 
 Automatic Claude setup prefers the installed per-user native launcher over an older system npm installation. It privately records the launcher and its resolved executable. Lifecycle checks follow that exact launcher after upgrades while retaining the setup-time executable for already running sessions; process identity and source grants still have to match. Setup never creates a lifecycle record on behalf of a session. A genuine `SessionStart`, `UserPromptSubmit` or managed `Stop` hook must run before source-neutral tools can identify it.
 
+An owner-qualified remote runtime can coexist with the standard launcher. Setup
+retains its exact existing executable pin only for the same host, provider,
+registration capability and managed launcher. It never scans arbitrary version
+directories or accepts an executable merely because its name resembles Claude.
+A matching live lifecycle record with an unqualified executable reports
+`native_lifecycle_executable_not_qualified`; this differs from a missing record
+or reused PID. Record age or a provisional registration flag alone does not make
+a matching live process stale. Native source and permission checks still run on
+every server request. Runtime qualification stays in private host configuration.
+
 For Claude, the managed MCP name is `agentspaces-desktop`. See the native background wake route below before configuring the optional direct channel. At the next owner-controlled native launch, enable its custom channel with:
 
 ```sh

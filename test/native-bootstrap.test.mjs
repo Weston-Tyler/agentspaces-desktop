@@ -101,6 +101,14 @@ test("Claude rejects PID reuse, executable mismatch, ambiguous identities and en
   await record(UUID, "SessionEnd");
   await assert.rejects(resolveClaudeSource(configPath, { ancestors: async () => [processRecord] }), /stale_or_missing/);
 });
+
+test('a matching live lifecycle record distinguishes an unqualified executable from a stale identity', async () => {
+  const {configPath,device,participantConfig}=await setup();
+  await runNativeSessionHook(event(),{configPath,ancestors:async()=>[processRecord],requestImpl:async()=>({participantConfig})});
+  await writeFile(configPath,JSON.stringify({...device,nativeExecutable:'/fictional/different-runtime/claude'}));
+  await assert.rejects(resolveClaudeSource(configPath,{ancestors:async()=>[processRecord]}),{code:'native_lifecycle_executable_not_qualified'});
+  await assert.rejects(resolveClaudeSource(configPath,{ancestors:async()=>[{...processRecord,startedAt:'reused-pid'}]}),{code:'native_lifecycle_binding_stale_or_missing'});
+});
 test("Codex hook registers native session ID for owning resolver rather than guessing thread UUID", async () => {
   const { configPath, participantConfig } = await setup("codex");
   let body;

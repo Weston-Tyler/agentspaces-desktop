@@ -109,6 +109,8 @@ export async function createNativeBootstrap({ configPath = process.env.AGENTSPAC
       const code=error.code ?? "native_source_request_denied";
       const hint=['native_lifecycle_binding_missing','native_lifecycle_binding_stale_or_missing'].includes(code)
         ? 'The local Claude lifecycle record is missing or stale. Let this actual native Claude session run its installed SessionStart or UserPromptSubmit hook, then retry. Reconnecting the network alone cannot establish source identity. Do not invent a binding or copy another thread configuration.'
+        : code==='native_lifecycle_executable_not_qualified'
+          ? 'A matching live lifecycle record exists, but its native executable is not qualified by this host configuration. Owner-managed setup must retain the exact approved runtime alongside its standard launcher. Changing folders or starting a new chat does not qualify it. Do not invent or copy a binding.'
         : code==='native_lifecycle_binding_ambiguous'
           ? 'More than one local lifecycle record matches. Resolve the conflicting session records through their actual native lifecycle hooks before retrying. Do not choose or invent a thread identity.' : null;
       return { isError: true, content: [{ type: "text", text: hint ? `${code}: ${hint}` : code }] };

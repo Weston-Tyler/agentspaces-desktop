@@ -118,15 +118,18 @@ export async function resolveClaudeSource(configPath, { ancestors = processAnces
   if (config.provider !== "claude") throw fail("claude_device_required");
   const chain = await ancestors(), matchesExecutable = await nativeExecutableMatcher(config, chain), root = join(dirname(resolve(configPath)), "bindings");
   let files; try { files = await readdir(root); } catch { throw fail("native_lifecycle_binding_missing"); }
-  const matches = [];
+  const matches = []; let unqualified = false;
   for (const file of files.slice(0, 2000)) {
     if (!/^[a-f0-9]{64}\.json$/.test(file)) continue;
     let record; try { record = await readRecord(join(root, file)); } catch { continue; }
     if (record.schemaVersion !== 1 || record.hookEvent === "SessionEnd" || record.provider !== config.provider || record.host !== config.host || !nativeUuid.test(record.nativeThreadId ?? "") || !record.process) continue;
     const current = chain.find(p => p.pid === record.process.pid);
-    if (current && matchesExecutable(current) && current.startedAt === record.process.startedAt && current.exe === record.process.exe) matches.push({...record,channelOptIn:current.channelOptIn===true});
+    if (current && current.startedAt === record.process.startedAt && current.exe === record.process.exe) {
+      if (matchesExecutable(current)) matches.push({...record,channelOptIn:current.channelOptIn===true});
+      else unqualified = true;
+    }
   }
-  if (matches.length !== 1) throw fail(matches.length ? "native_lifecycle_binding_ambiguous" : "native_lifecycle_binding_stale_or_missing");
+  if (matches.length !== 1) throw fail(matches.length ? "native_lifecycle_binding_ambiguous" : unqualified ? 'native_lifecycle_executable_not_qualified' : "native_lifecycle_binding_stale_or_missing");
   return matches[0];
 }
 async function currentDiscussionContext(device, participant, requestImpl) {
