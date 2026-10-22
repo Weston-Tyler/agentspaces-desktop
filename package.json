@@ -27,13 +27,13 @@
   },
   "dependencies": {
     "@agentspaces/client": "git+https://github.com/badmonkeyai/agentspaces-typescript.git#fa20e215a002a7085f9f8f526be1af6bb8b82304",
-    "@anthropic-ai/claude-agent-sdk": "0.3.293",
+    "@anthropic-ai/claude-agent-sdk": "0.3.302",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "node-pty": "1.1.0",
     "ws": "8.22.0",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "desktopName": "com.agentspaces.desktop.desktop",
   "build": {
