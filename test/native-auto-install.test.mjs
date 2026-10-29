@@ -147,17 +147,19 @@ test('managed setup preserves an explicitly qualified runtime alongside the stan
   const launcher = join(f.home,'.local','bin',name), remote = join(f.home,'approved-remote-runtime',name);
   for(const p of [launcher,remote]){mkdirSync(join(p,'..'),{recursive:true});writeFileSync(p,'fictional executable');chmodSync(p,0o755);}
   const first = await installOnCurrentHost(f.options);
-  const prior = JSON.parse(readFileSync(first.configPath,'utf8'));prior.nativeExecutable=remote;
+  const prior = JSON.parse(readFileSync(first.configPath,'utf8'));prior.nativeExecutable=remote;prior.nativeExecutables=[f.binary];
   writeFileSync(first.configPath,JSON.stringify(prior),{mode:0o600});
   await installOnCurrentHost({...f.options,sources:{...f.options.sources,bootstrap:'// Fictional helper update'}});
   const current = JSON.parse(readFileSync(first.configPath,'utf8'));
   assert.equal(current.nativeExecutable,remote);
+  assert.deepEqual(current.nativeExecutables,[f.binary]);
   assert.equal(current.nativeLauncher,launcher);
   assert.equal(current.token,TOKEN);
   assert.equal(f.calls.at(-1).path,realpathSync.native(launcher),'management commands still use the standard launcher');
   // A different device capability must not inherit this runtime qualification.
   await installOnCurrentHost({...f.options,config:{...f.options.config,token:'b'.repeat(64)}});
   assert.equal(JSON.parse(readFileSync(first.configPath,'utf8')).nativeExecutable,realpathSync.native(launcher));
+  assert.equal(JSON.parse(readFileSync(first.configPath,'utf8')).nativeExecutables,undefined);
 });
 
 test('qualified Claude setup adds an asynchronous native Stop wake without launch flags',async()=>{

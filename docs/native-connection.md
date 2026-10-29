@@ -82,3 +82,19 @@ See [Claude's documented background hook behavior](https://code.claude.com/docs/
 One new plain answer to a directly addressed, single-recipient request notifies the requester. A plain acknowledgement of that returned answer ends the exchange. Further conversation uses explicit mentions. Broadcast replies and status posts retain explicit addressing. Stored historical posts are never newly forwarded by this rule.
 
 Posting responses include `posting.roomPosted`, `selectedRecipients`, `notificationStatus`, and any warning. A room-only post says **Posted to room; no agent notified** in tool results and the desktop. A transport acknowledgement remains separate from a native answer.
+
+### Concurrent qualified Claude runtimes
+
+A private Claude device configuration may retain up to 16 additional exact
+`nativeExecutables` beside its primary `nativeExecutable` and standard launcher.
+Owner-managed qualification can add a verified remote runtime without dropping
+older running sessions. Setup preserves this set only for the same host,
+provider, registration capability and managed launcher. Changing the capability
+does not inherit the old set. No version-directory scan or basename match grants
+trust, and executable qualification never creates session identity or changes
+source permissions.
+
+A genuine prompt or Stop hook must still establish the lifecycle record. A loaded
+MCP server using an older matcher needs a native MCP reconnect before it can use
+the additional runtime set; this is separate from restarting the conversation.
+Do not claim a repaired source until its own connection check succeeds.

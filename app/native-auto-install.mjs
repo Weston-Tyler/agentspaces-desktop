@@ -127,7 +127,13 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
     noLinks(configPath);
     let previous; try { previous = JSON.parse(readFileSync(configPath, 'utf8')); } catch { throw new Error('Existing native runtime configuration is invalid'); }
     if (previous.schemaVersion === 1 && previous.host === config.host && previous.provider === config.provider && previous.token === config.token && previous.nativeLauncher === launcher &&
-        typeof previous.nativeExecutable === 'string' && isAbsolute(previous.nativeExecutable) && !/(?:^|[\\/])node(?:\.exe)?$/i.test(previous.nativeExecutable)) device.nativeExecutable = previous.nativeExecutable;
+        typeof previous.nativeExecutable === 'string' && isAbsolute(previous.nativeExecutable) && !/(?:^|[\\/])node(?:\.exe)?$/i.test(previous.nativeExecutable)) {
+      device.nativeExecutable = previous.nativeExecutable;
+      if (previous.nativeExecutables !== undefined) {
+        if (!Array.isArray(previous.nativeExecutables) || previous.nativeExecutables.length > 16 || previous.nativeExecutables.some(path => typeof path !== 'string' || !isAbsolute(path) || /(?:^|[\\/])node(?:\.exe)?$/i.test(path))) throw new Error('Existing native runtime qualifications are invalid');
+        device.nativeExecutables = [...new Set(previous.nativeExecutables)];
+      }
+    }
   }
   savePrivate(configPath, JSON.stringify(device));
   const bootstrap = join(runtime, 'native-bootstrap-mcp.mjs'), name = 'agentspaces-desktop';
