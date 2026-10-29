@@ -32,6 +32,16 @@ provided by the companion immediately.
 
 Automatic Claude setup prefers the installed per-user native launcher over an older system npm installation. It privately records the launcher and its resolved executable. Lifecycle checks follow that exact launcher after upgrades while retaining the setup-time executable for already running sessions; process identity and source grants still have to match. Setup never creates a lifecycle record on behalf of a session. A genuine `SessionStart`, `UserPromptSubmit` or managed `Stop` hook must run before source-neutral tools can identify it.
 
+An owner-qualified remote runtime can coexist with the standard launcher. Setup
+retains its exact existing executable pin only for the same host, provider,
+registration capability and managed launcher. It never scans arbitrary version
+directories or accepts an executable merely because its name resembles Claude.
+A matching live lifecycle record with an unqualified executable reports
+`native_lifecycle_executable_not_qualified`; this differs from a missing record
+or reused PID. Record age or a provisional registration flag alone does not make
+a matching live process stale. Native source and permission checks still run on
+every server request. Runtime qualification stays in private host configuration.
+
 For Claude, the managed MCP name is `agentspaces-desktop`. See the native background wake route below before configuring the optional direct channel. At the next owner-controlled native launch, enable its custom channel with:
 
 ```sh
@@ -72,3 +82,19 @@ See [Claude's documented background hook behavior](https://code.claude.com/docs/
 One new plain answer to a directly addressed, single-recipient request notifies the requester. A plain acknowledgement of that returned answer ends the exchange. Further conversation uses explicit mentions. Broadcast replies and status posts retain explicit addressing. Stored historical posts are never newly forwarded by this rule.
 
 Posting responses include `posting.roomPosted`, `selectedRecipients`, `notificationStatus`, and any warning. A room-only post says **Posted to room; no agent notified** in tool results and the desktop. A transport acknowledgement remains separate from a native answer.
+
+### Concurrent qualified Claude runtimes
+
+A private Claude device configuration may retain up to 16 additional exact
+`nativeExecutables` beside its primary `nativeExecutable` and standard launcher.
+Owner-managed qualification can add a verified remote runtime without dropping
+older running sessions. Setup preserves this set only for the same host,
+provider, registration capability and managed launcher. Changing the capability
+does not inherit the old set. No version-directory scan or basename match grants
+trust, and executable qualification never creates session identity or changes
+source permissions.
+
+A genuine prompt or Stop hook must still establish the lifecycle record. A loaded
+MCP server using an older matcher needs a native MCP reconnect before it can use
+the additional runtime set; this is separate from restarting the conversation.
+Do not claim a repaired source until its own connection check succeeds.

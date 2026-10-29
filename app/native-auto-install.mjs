@@ -1,6 +1,6 @@
 import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
 import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, lstatSync, realpathSync, chmodSync, statSync, accessSync, constants } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, execFile, spawn } from 'node:child_process';
@@ -120,6 +120,21 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
   const device = { ...config, ...(config.provider === 'claude' ? { nativeExecutable: binary } : {}) };
   delete device.nativeLauncher;
   if (launcher) device.nativeLauncher = launcher;
+  // A host can deliberately qualify a different native runtime (for example a
+  // remote-session binary). Keep that exact pin while following the standard
+  // launcher too. Setup refreshes must not strand its still-running sessions.
+  if (config.provider === 'claude' && launcher && existsSync(configPath)) {
+    noLinks(configPath);
+    let previous; try { previous = JSON.parse(readFileSync(configPath, 'utf8')); } catch { throw new Error('Existing native runtime configuration is invalid'); }
+    if (previous.schemaVersion === 1 && previous.host === config.host && previous.provider === config.provider && previous.token === config.token && previous.nativeLauncher === launcher &&
+        typeof previous.nativeExecutable === 'string' && isAbsolute(previous.nativeExecutable) && !/(?:^|[\\/])node(?:\.exe)?$/i.test(previous.nativeExecutable)) {
+      device.nativeExecutable = previous.nativeExecutable;
+      if (previous.nativeExecutables !== undefined) {
+        if (!Array.isArray(previous.nativeExecutables) || previous.nativeExecutables.length > 16 || previous.nativeExecutables.some(path => typeof path !== 'string' || !isAbsolute(path) || /(?:^|[\\/])node(?:\.exe)?$/i.test(path))) throw new Error('Existing native runtime qualifications are invalid');
+        device.nativeExecutables = [...new Set(previous.nativeExecutables)];
+      }
+    }
+  }
   savePrivate(configPath, JSON.stringify(device));
   const bootstrap = join(runtime, 'native-bootstrap-mcp.mjs'), name = 'agentspaces-desktop';
   const nativePath = config.provider === 'codex' ? join(home, '.codex', 'config.toml') : join(home, '.claude.json');

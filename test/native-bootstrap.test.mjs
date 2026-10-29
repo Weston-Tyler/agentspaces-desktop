@@ -101,6 +101,14 @@ test("Claude rejects PID reuse, executable mismatch, ambiguous identities and en
   await record(UUID, "SessionEnd");
   await assert.rejects(resolveClaudeSource(configPath, { ancestors: async () => [processRecord] }), /stale_or_missing/);
 });
+
+test('a matching live lifecycle record distinguishes an unqualified executable from a stale identity', async () => {
+  const {configPath,device,participantConfig}=await setup();
+  await runNativeSessionHook(event(),{configPath,ancestors:async()=>[processRecord],requestImpl:async()=>({participantConfig})});
+  await writeFile(configPath,JSON.stringify({...device,nativeExecutable:'/fictional/different-runtime/claude'}));
+  await assert.rejects(resolveClaudeSource(configPath,{ancestors:async()=>[processRecord]}),{code:'native_lifecycle_executable_not_qualified'});
+  await assert.rejects(resolveClaudeSource(configPath,{ancestors:async()=>[{...processRecord,startedAt:'reused-pid'}]}),{code:'native_lifecycle_binding_stale_or_missing'});
+});
 test("Codex hook registers native session ID for owning resolver rather than guessing thread UUID", async () => {
   const { configPath, participantConfig } = await setup("codex");
   let body;
@@ -332,3 +340,17 @@ test('a genuine Stop event records its own lifecycle event rather than fabricati
  assert.equal(result.recorded,true);assert.equal(observed.length,1);assert.equal(observed[0].body.sourceProof.hookEvent,'Stop');
  const record=await resolveClaudeSource(configPath,{ancestors:async()=>[processRecord]});assert.equal(record.hookEvent,'Stop');assert.equal(record.nativeThreadId,UUID);
 });
+
+ test('qualified runtime sets admit exact live runtimes without trusting adjacent versions',async()=>{
+  const {configPath,device,participantConfig}=await setup();
+  const pinned='/fictional/approved-original-runtime/claude';
+  await writeFile(configPath,JSON.stringify({...device,nativeExecutable:pinned,nativeExecutables:[processRecord.exe]}));
+  await runNativeSessionHook(event(),{configPath,ancestors:async()=>[processRecord],requestImpl:async()=>({participantConfig})});
+  assert.equal((await resolveClaudeSource(configPath,{ancestors:async()=>[processRecord]})).nativeThreadId,UUID);
+  await assert.rejects(runNativeSessionHook(event(),{configPath,ancestors:async()=>[{...processRecord,exe:'/fictional/unapproved-version/claude'}]}),{code:'native_process_not_identified'});
+  await assert.rejects(resolveClaudeSource(configPath,{ancestors:async()=>[{...processRecord,startedAt:'reused'}]}),{code:'native_lifecycle_binding_stale_or_missing'});
+  for(const nativeExecutables of [['relative/claude'],['/usr/bin/node'],Array(17).fill(processRecord.exe),'wrong']){
+   await writeFile(configPath,JSON.stringify({...device,nativeExecutable:pinned,nativeExecutables}));
+   await assert.rejects(resolveClaudeSource(configPath,{ancestors:async()=>[processRecord]}),{code:'native_executable_invalid'});
+  }
+ });

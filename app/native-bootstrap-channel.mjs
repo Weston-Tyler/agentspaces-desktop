@@ -35,7 +35,7 @@ export class NativeBootstrapChannel {
      await this.notify({method:'notifications/claude/channel',params:{content:p.content,meta:p.meta}});
     }catch{ /* No delivery replay: native notification acceptance is uncertain. */ }
    });
-  }catch(error){this.invalidate(['native_lifecycle_binding_missing','native_lifecycle_binding_stale_or_missing','native_lifecycle_binding_ambiguous'].includes(error.code)?error.code:'source-registration-unavailable');this.retry();}
+  }catch(error){this.invalidate(['native_lifecycle_binding_missing','native_lifecycle_binding_stale_or_missing','native_lifecycle_binding_ambiguous','native_lifecycle_executable_not_qualified'].includes(error.code)?error.code:'source-registration-unavailable');this.retry();}
   return this.health();
  }
  invalidate(status){this.status=status;const socket=this.socket;this.socket=null;socket?.terminate();}

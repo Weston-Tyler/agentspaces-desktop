@@ -27,6 +27,7 @@ export async function readDeviceConfig(path) {
   if (c.schemaVersion !== 1 || !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(c.address ?? "") || !/^127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(c.authority ?? "") || !/^[a-f0-9]{64}$/.test(c.token ?? "") || !["claude", "codex"].includes(c.provider) || typeof c.host !== "string" || !c.host || c.host.length > 100 || Number(new URL(c.address).port) > 65535 || Number(c.authority.split(":")[1]) > 65535) throw fail("device_config_invalid");
   if (c.nativeExecutable !== undefined && (typeof c.nativeExecutable !== "string" || (!posix.isAbsolute(c.nativeExecutable) && !win32.isAbsolute(c.nativeExecutable)) || /^node(?:\.exe)?$/i.test(basename(c.nativeExecutable.replaceAll("\\", "/"))))) throw fail("native_executable_invalid");
   if (c.nativeLauncher !== undefined && (c.provider !== "claude" || !c.nativeExecutable || typeof c.nativeLauncher !== "string" || (!posix.isAbsolute(c.nativeLauncher) && !win32.isAbsolute(c.nativeLauncher)) || !/^claude(?:\.exe)?$/i.test(basename(c.nativeLauncher.replaceAll("\\", "/"))))) throw fail("native_launcher_invalid");
+  if (c.nativeExecutables !== undefined && (c.provider !== 'claude' || !c.nativeExecutable || !Array.isArray(c.nativeExecutables) || c.nativeExecutables.length > 16 || c.nativeExecutables.some(path => typeof path !== 'string' || (!posix.isAbsolute(path) && !win32.isAbsolute(path)) || /^node(?:\.exe)?$/i.test(basename(path.replaceAll('\\', '/')))))) throw fail('native_executable_invalid');
   return c;
 }
 export async function scopedRequest(config, path, body) {
@@ -94,10 +95,11 @@ export async function processAncestors({ pid = process.ppid, inspect = inspectPr
   return chain;
 }
 async function nativeExecutableMatcher(config, chain) {
-  const allowed = new Set(config.nativeExecutable ? [config.nativeExecutable] : []);
+  const qualified = [config.nativeExecutable, ...(config.nativeExecutables ?? [])].filter(Boolean);
+  const allowed = new Set(qualified);
   // Native realpath expands Windows 8.3 aliases consistently. Keep exact raw
   // identities too: an already running executable can have been removed.
-  for (const path of [config.nativeExecutable, config.nativeLauncher].filter(Boolean)) {
+  for (const path of [...qualified, config.nativeLauncher].filter(Boolean)) {
     let current;
     try { current = await realpath(path); } catch { /* Retain only the exact configured pin when resolution is unavailable. */ }
     if (current) {
@@ -118,15 +120,18 @@ export async function resolveClaudeSource(configPath, { ancestors = processAnces
   if (config.provider !== "claude") throw fail("claude_device_required");
   const chain = await ancestors(), matchesExecutable = await nativeExecutableMatcher(config, chain), root = join(dirname(resolve(configPath)), "bindings");
   let files; try { files = await readdir(root); } catch { throw fail("native_lifecycle_binding_missing"); }
-  const matches = [];
+  const matches = []; let unqualified = false;
   for (const file of files.slice(0, 2000)) {
     if (!/^[a-f0-9]{64}\.json$/.test(file)) continue;
     let record; try { record = await readRecord(join(root, file)); } catch { continue; }
     if (record.schemaVersion !== 1 || record.hookEvent === "SessionEnd" || record.provider !== config.provider || record.host !== config.host || !nativeUuid.test(record.nativeThreadId ?? "") || !record.process) continue;
     const current = chain.find(p => p.pid === record.process.pid);
-    if (current && matchesExecutable(current) && current.startedAt === record.process.startedAt && current.exe === record.process.exe) matches.push({...record,channelOptIn:current.channelOptIn===true});
+    if (current && current.startedAt === record.process.startedAt && current.exe === record.process.exe) {
+      if (matchesExecutable(current)) matches.push({...record,channelOptIn:current.channelOptIn===true});
+      else unqualified = true;
+    }
   }
-  if (matches.length !== 1) throw fail(matches.length ? "native_lifecycle_binding_ambiguous" : "native_lifecycle_binding_stale_or_missing");
+  if (matches.length !== 1) throw fail(matches.length ? "native_lifecycle_binding_ambiguous" : unqualified ? 'native_lifecycle_executable_not_qualified' : "native_lifecycle_binding_stale_or_missing");
   return matches[0];
 }
 async function currentDiscussionContext(device, participant, requestImpl) {
