@@ -208,3 +208,17 @@ metadata or unsupported wake routes explicitly. Native metadata reads and a
 verified bridge do not establish a message/response round trip. Windows remote
 Claude SDK reads use overlapped SSH handles; an absent native metadata result
 remains `null`, rather than becoming a misleading transport/parsing error.
+
+### Local Codex control-socket delivery
+
+Local Codex conversations use the native `codex app-server proxy` against its
+existing control socket. AgentSpaces never starts a replacement app-server to
+make the proxy succeed. Local delivery requires a current compatible protocol,
+existing-native-policy acceptance and an exact loaded target accepting direct
+input. Windows paths use native Windows path rules. Missing control sockets and
+unloaded targets remain undispatched; bounded recovery rechecks permissions and
+native eligibility before submission. Local cold resume is refused, since a
+separate stdio controller may still own the thread. Unknown submission acceptance
+is reconciled rather than replayed. `native-control-connection-required` is not a
+verified wake receipt. Changing a native client's listener at its next supported
+launch is separate from installing this adapter; no current client is restarted.

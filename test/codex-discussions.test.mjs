@@ -397,3 +397,23 @@ test('a changed working directory cannot settle an earlier explicit reply reques
  const binding=f.engine.connector(f.engine.issueConnector(f.source.id).token);f.engine.discussions.contribute({id:f.group.id,text:'Reply after identity changed',nativeTurnId:'unreported',deliveryId:'changed-source-reply-01',replyTo:f.args.messageId},binding);
  assert.equal(f.hub.observeContribution(f.group,f.group.messages.at(-1)),false);assert.equal(f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].status,'steered-awaiting-reply');
 });
+
+function makeLocal(f){
+ f.source.host='local';f.engine.store.data.projects[f.source.project].targets['local:codex']={path:f.source.cwd,host:'local',provider:'codex'};
+ const member=f.engine.discussions.group(f.args.discussionId).members.find(m=>m.sessionId===f.source.id);member.host='local';
+ f.engine.store.data.desktopPreferences={allowNativeFullAccess:true};return f;
+}
+test('local discussion delivery uses a loaded target and retains sharing revocation fences',async t=>{
+ const f=makeLocal(setup());t.after(()=>f.hub.close());const factory=f.hub.adapterFactory;let loaded=0;
+ f.hub.adapterFactory=options=>{assert.equal(options.host,'local');const a=factory(options);a.bindLoadedThread=async()=>{loaded++;};return a;};
+ f.hub.dispatch(f.args);assert.equal((await f.hub.wait(f.args.requestId)).status,'native-agent-replied');assert.equal(loaded,1);assert.equal(f.counters.bind,0);
+ const g=makeLocal(setup());t.after(()=>g.hub.close());g.engine.grant(g.source.id,{share:false});assert.throws(()=>g.hub.dispatch(g.args));assert.equal(g.counters.factory,0);
+});
+test('local dormant or unavailable targets are retained as undispatched and never cold-resumed',async t=>{
+ const f=makeLocal(setup());t.after(()=>f.hub.close());const factory=f.hub.adapterFactory;
+ f.hub.adapterFactory=options=>{const a=factory(options);a.bindLoadedThread=async()=>{throw fail('native_loaded_target_not_available');};return a;};
+ f.hub.dispatch(f.args);const r=await f.hub.wait(f.args.requestId);assert.equal(r.status,'native-agent-unavailable');assert.equal(r.reasonCode,'local_native_loaded_target_required');assert.equal(r.undispatched,true);assert.equal(r.uncertainOutcome,false);assert(r.nextRetryAt);assert.equal(f.counters.bind,0);assert.equal(f.counters.answer,0);
+});
+test('local routing cannot acquire existing native policy acceptance implicitly',async t=>{
+ const f=makeLocal(setup());t.after(()=>f.hub.close());f.engine.store.data.desktopPreferences.allowNativeFullAccess=false;f.hub.dispatch(f.args);const r=await f.hub.wait(f.args.requestId);assert.equal(r.reasonCode,'local_native_policy_acceptance_required');assert.equal(f.counters.factory,0);assert.equal(f.counters.bind,0);assert.equal(f.counters.answer,0);assert.equal(r.nextRetryAt,undefined);
+});

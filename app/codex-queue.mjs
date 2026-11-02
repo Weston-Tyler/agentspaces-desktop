@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { Duplex } from "node:stream";
 import { posix } from "node:path";
+import { hostPaths } from "./platform.mjs";
 
 const fail = (code, uncertainOutcome = false, receipt = null) =>
   Object.assign(new Error(code), { code, uncertainOutcome, receipt });
@@ -23,6 +24,7 @@ function finiteNativePolicy(sandbox, approval, reviewer, fullAccessGranted = fal
 export class CodexQueueAdapter {
   constructor({
     host = REMOTE_HOST,
+    platform = process.platform,
     spawnProcess = spawn,
     persistReceipt,
     loadReceipt = async () => null,
@@ -33,7 +35,9 @@ export class CodexQueueAdapter {
     steeringSupported = false,
     handshakeTimeoutMs = 8000,
   } = {}) {
-    if (host !== REMOTE_HOST) throw fail("shared_daemon_host_not_qualified");
+    if (!["local", REMOTE_HOST].includes(host)) throw fail("shared_daemon_host_not_qualified");
+    this.paths = hostPaths(host, platform);
+    this.platform = platform;
     if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 20 || pollIntervalMs > 5000 || !Number.isInteger(queueWaitTimeoutMs) || queueWaitTimeoutMs < 20 || queueWaitTimeoutMs > 1800000) throw fail("invalid_native_delivery_poll_bound");
     Object.assign(this, { host, spawnProcess, persistReceipt, loadReceipt, persistPermissionProof, loadPermissionProof, steeringSupported });
     if (!Number.isInteger(handshakeTimeoutMs) || handshakeTimeoutMs < 20 || handshakeTimeoutMs > 20000) throw fail("invalid_native_handshake_bound");
@@ -52,10 +56,10 @@ export class CodexQueueAdapter {
     if (this.child) return;
     const { default: WebSocket } = await import("ws");
     this.child = this.spawnProcess(
-      "ssh",
-      [SSH_ALIAS, "codex app-server proxy"],
+      this.host === "local" ? "codex" : "ssh",
+      this.host === "local" ? ["app-server", "proxy"] : [SSH_ALIAS, "codex app-server proxy"],
       // Windows OpenSSH needs overlapped handles for duplex input before EOF.
-      { windowsHide: true, shell: false, stdio: Array(3).fill(process.platform === "win32" ? "overlapped" : "pipe") },
+      { windowsHide: true, shell: false, stdio: Array(3).fill(this.host !== "local" && this.platform === "win32" ? "overlapped" : "pipe") },
     );
     this.child.stderr.on("data", () => {});
     const disconnected = () => {
@@ -236,9 +240,10 @@ export class CodexQueueAdapter {
     };
   }
   async bindExistingThread({ threadId, cwd, grant } = {}) {
+    if (this.host === "local") throw fail("local_native_loaded_target_required");
     const executionGranted = grant === true || grant?.execution === true;
     const fullAccessGranted = grant?.execution === true && grant.allowFullAccess === true;
-    if (!executionGranted || !UUID.test(threadId ?? "") || typeof cwd !== "string" || !posix.isAbsolute(cwd) || cwd.includes("\0")) throw fail("existing_thread_identity_and_execution_grant_required");
+    if (!executionGranted || !UUID.test(threadId ?? "") || typeof cwd !== "string" || !this.paths.isAbsolute(cwd) || cwd.includes("\0")) throw fail("existing_thread_identity_and_execution_grant_required");
     if (this.bindingThreads.has(threadId)) throw fail("existing_thread_bind_inflight");
     this.bindingThreads.add(threadId);
     try {
@@ -263,7 +268,7 @@ export class CodexQueueAdapter {
     } finally { this.bindingThreads.delete(threadId); }
   }
   async bindLoadedThread({ threadId, cwd, grant } = {}) {
-    if (grant?.execution !== true || grant.allowExistingNativePolicy !== true || !UUID.test(threadId ?? "") || typeof cwd !== "string" || !posix.isAbsolute(cwd) || cwd.includes("\0")) throw fail("loaded_native_input_grant_required");
+    if (grant?.execution !== true || grant.allowExistingNativePolicy !== true || !UUID.test(threadId ?? "") || typeof cwd !== "string" || !this.paths.isAbsolute(cwd) || cwd.includes("\0")) throw fail("loaded_native_input_grant_required");
     const response = await this.request("thread/read", { threadId, includeTurns: false }), thread = response.thread;
     if (!thread || thread.id !== threadId || thread.cwd !== cwd) throw fail("native_loaded_target_identity_mismatch");
     if (!["active", "idle"].includes(thread.status?.type) || thread.canAcceptDirectInput !== true || thread.ephemeral) throw fail("native_loaded_target_not_available");
@@ -272,7 +277,7 @@ export class CodexQueueAdapter {
     return { nativeThreadId: threadId, permissionProof: proof, limitations: ["Loaded native input target only; effective sandbox and approval policy are not asserted", "Explicit owner accepts existing native policy; no settings are overridden", "Correlated approval requests raise attention without responding for the owner"] };
   }
   async bindReadTarget({ threadId, cwd, grant } = {}) {
-    if (grant !== true || !UUID.test(threadId ?? "") || typeof cwd !== "string" || !posix.isAbsolute(cwd) || cwd.includes("\0")) throw fail("native_read_target_grant_required");
+    if (grant !== true || !UUID.test(threadId ?? "") || typeof cwd !== "string" || !this.paths.isAbsolute(cwd) || cwd.includes("\0")) throw fail("native_read_target_grant_required");
     const result = await this.request("thread/read", { threadId, includeTurns: false });
     if (!result.thread || result.thread.id !== threadId || result.thread.cwd !== cwd) throw fail("native_read_target_identity_mismatch");
     const target = { nativeThreadId: threadId, host: this.host, cwd, source: "native-readonly-metadata-target" };

@@ -3,7 +3,7 @@ import { REMOTE_HOST } from "./remote-host.mjs";
 import { createHash } from "node:crypto";
 import { CodexQueueAdapter } from "./codex-queue.mjs";
 import { nativeAdapterCompatible, observedVersion, qualifiedNativeVersion } from './native-versions.mjs';
-const transientTransport = new Set(['companion_update_deferred', 'native_proxy_disconnected', 'native_proxy_not_connected', 'native_websocket_handshake_failed', 'native_websocket_not_ready', 'native_rpc_timeout']);
+const transientTransport = new Set(['local_native_loaded_target_required', 'companion_update_deferred', 'native_proxy_disconnected', 'native_proxy_not_connected', 'native_websocket_handshake_failed', 'native_websocket_not_ready', 'native_rpc_timeout']);
 const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 // Direct user-addressed conversation transport. These receipts are not work
 // claims, a task queue, a scheduler or upstream completion authority.
@@ -18,7 +18,7 @@ export class CodexDiscussionHub {
   }
   async inspectContinuation(sessionId) {
     const source=this.engine.session(sessionId),grant=this.engine.permissions(source);
-    if(source.fixture||source.provider!=='codex'||source.host!==REMOTE_HOST)return {state:'unsupported',reason:'This native route does not expose qualified idle state'};
+    if(source.fixture||source.provider!=='codex'||!['local',REMOTE_HOST].includes(source.host))return {state:'unsupported',reason:'This native route does not expose qualified idle state'};
     if(!grant.enrolled||!grant.retrieve||!grant.share||!grant.content)return {state:'unknown',reason:'Native source grant unavailable'};
     if(this.engine.store.data.desktopPreferences?.allowNativeFullAccess!==true)return {state:'unsupported',reason:'Owner opt-in to existing native client policy is required'};
     let adapter;
@@ -46,7 +46,7 @@ export class CodexDiscussionHub {
   validate(sessionId, discussionId, messageId) {
     if (this.closed) throw new Error("Native conversation service is closed");
     const source = this.engine.session(sessionId), grant = this.engine.permissions(source);
-    if (source.fixture || source.provider !== "codex" || source.host !== REMOTE_HOST) throw new Error("Shared native Codex connection is available on remote only");
+    if (source.fixture || source.provider !== "codex" || !["local", REMOTE_HOST].includes(source.host)) throw new Error("Supported local or remote native Codex source required");
     if (!grant.enrolled || !grant.content || !grant.share || !grant.retrieve) throw new Error("Native agent connection was revoked or unavailable");
     if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(source.nativeThreadId ?? "")) throw new Error("Original native thread identity is unavailable");
     const group = this.engine.discussions.group(discussionId);
@@ -68,6 +68,7 @@ export class CodexDiscussionHub {
   async bind(source, effect) {
     if (this.bindings.has(source.id)) return this.bindings.get(source.id);
     const promise = (async () => {
+      if (source.host === "local" && this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true) throw Object.assign(new Error("Existing native policy acceptance is required for local loaded delivery"), { code: "local_native_policy_acceptance_required" });
       let steeringProtocol=false,checkedCliVersion=null;
       if (this.verifyProvider) {
         await this.engine.probe(source.host);
@@ -102,6 +103,7 @@ export class CodexDiscussionHub {
         catch (error) { if (effect?.continuation||error.code !== 'native_loaded_target_not_available') throw error; }
       }
       if(effect?.continuation&&!loaded)throw new Error('Standing wake requires a loaded native target; no resume attempted');
+      if (!loaded && source.host === "local") throw Object.assign(new Error("Local native delivery requires a loaded target on its existing control socket"), { code: "local_native_loaded_target_required" });
       if (!loaded) await adapter.bindExistingThread({ threadId: source.nativeThreadId, cwd, grant: nativeGrant });
       if (loaded && this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true) throw new Error('Existing native policy grant changed');
       const connector = this.engine.issueConnector(source.id), binding = this.engine.connector(connector.token);
@@ -202,7 +204,7 @@ export class CodexDiscussionHub {
       if (!nativeReceipt && error.uncertainOutcome === false) { effect.undispatched = true; effect.uncertainOutcome = false; }
       // Do not retain native diagnostics, prompts, tool arguments or secrets.
       effect.reason = "Native agent unavailable, busy, needs attention or access changed";
-      const safeCodes = [...transientTransport, 'native_protocol_unavailable', 'native_daemon_version_mismatch', 'native_loaded_target_not_available', 'native_existing_thread_busy_or_unavailable', 'native_rpc_rejected', 'native_rpc_timeout', 'native_steer_ack_uncertain', 'native_queue_ack_uncertain'];
+      const safeCodes = [...transientTransport, 'local_native_policy_acceptance_required', 'native_protocol_unavailable', 'native_daemon_version_mismatch', 'native_loaded_target_not_available', 'native_existing_thread_busy_or_unavailable', 'native_rpc_rejected', 'native_rpc_timeout', 'native_steer_ack_uncertain', 'native_queue_ack_uncertain'];
       effect.reasonCode = safeCodes.includes(error.code) ? error.code : 'native_access_or_binding_unavailable';
       if (typeof error.rpcMethod === 'string') effect.failedMethod = error.rpcMethod;
       if (effect.undispatched && !effect.uncertainOutcome && !nativeReceipt && transientTransport.has(effect.reasonCode)) {
@@ -210,7 +212,7 @@ export class CodexDiscussionHub {
         effect.nextRetryAt = new Date(Date.now() + Math.min(300000, 15000 * 2 ** Math.min(effect.retryCount ?? 0, 5))).toISOString();
         effect.reason = 'Connection interrupted before message submission; waiting to reconnect';
       }
-      const reasons = { native_protocol_unavailable: 'Native protocol check failed; message was not queued', native_daemon_version_mismatch: 'Native daemon version differs from the checked CLI; message was not queued' };
+      const reasons = { local_native_policy_acceptance_required: 'Existing native policy acceptance is required; no connection or resume attempted', local_native_loaded_target_required: 'Waiting for a loaded native target on the existing control socket; no local resume attempted', native_protocol_unavailable: 'Native protocol check failed; message was not queued', native_daemon_version_mismatch: 'Native daemon version differs from the checked CLI; message was not queued' };
       if (!answerAttempted && reasons[effect.reasonCode]) effect.reason = reasons[effect.reasonCode];
       const observationEnded = (nativeReceipt ?? error.receipt)?.observationEnded === true;
       if(effect.deliveryMode==='steer'&&effect.uncertainOutcome)effect.reason='Steering acceptance is uncertain; no duplicate was queued';
@@ -321,7 +323,7 @@ export class CodexDiscussionHub {
     } finally { this.reconciling = false; }
   }
   async refreshTools(host) {
-    if (host !== REMOTE_HOST) return { status: 'new-session-load-required' };
+    if (!['local',REMOTE_HOST].includes(host)) return { status: 'native-host-unavailable' };
     const adapter = this.adapterFactory({ host });
     try { await adapter.open(); await adapter.request('config/mcpServer/reload', null); return { status: 'refresh-requested-for-next-native-turn' }; }
     catch { return { status: 'native-refresh-unavailable' }; }
