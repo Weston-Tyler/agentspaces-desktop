@@ -12,7 +12,7 @@ import { WorkspaceMap } from "./workspace-map.mjs";
 import { Discussions } from "./discussions.mjs";
 import { hostOS } from "./platform.mjs";
 import { Ask } from "./ask.mjs";
-import { nativeAdapterCompatible } from './native-versions.mjs';
+import { nativeReadAdapterCompatible } from './native-versions.mjs';
 const hash = (s) => createHash("sha256").update(s).digest("hex");
 export class Engine {
   constructor(
@@ -422,7 +422,7 @@ export class Engine {
     const tool = this.tools.find(
       (t) => t.provider === provider && (t.host ?? "local") === host,
     );
-    if (!nativeAdapterCompatible(tool))
+    if (!nativeReadAdapterCompatible(tool))
       throw new Error(
         "Installed native version is not qualified for this read adapter; detect this host first",
       );

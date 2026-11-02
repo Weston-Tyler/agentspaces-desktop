@@ -159,3 +159,7 @@ test("host config exception refuses directories, symlinks and dangling links bef
     assert.equal(existsSync(join(root,'ROUTER.md')),false);assert.equal(existsSync(join(options.codexHome,'AGENTS.md')),false);
   }
 });
+
+test('routing guidance distinguishes verified recovery, native session discovery and native refresh limits',()=>{
+ const text=routerText();assert(text.includes('agents --json'));assert(text.includes('without fabricating a hook record'));assert(text.includes('fresh signed round trip'));assert(text.includes('Already loaded legacy MCP code still needs one native connection refresh'));
+});

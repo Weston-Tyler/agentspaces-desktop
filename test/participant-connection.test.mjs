@@ -9,7 +9,7 @@ import { runInNewContext } from "node:vm";
 import { ParticipantConnections } from "../app/participant-connection.mjs";
 import { participantGuide } from "../app/participant-guide.mjs";
 
-function fixture(t, { host = "local", installRemote, tunnelFactory, verifyLocal } = {}) {
+function fixture(t, { host = "local", installRemote, tunnelFactory, verifyLocal, verifyBridge = async () => true } = {}) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "agentspaces-participant-")); t.after(() => rmSync(root, { recursive: true, force: true }));
   const source = { id: "participant-source", nativeThreadId: "00000000-0000-4000-8000-000000000001", provider: "claude", host, account: "own", project: "own-project", status: "current", fixture: false };
   const grant = { enrolled: true, retrieve: true, share: true }, store = { data: { connectors: {} }, save() {} };
@@ -20,6 +20,7 @@ function fixture(t, { host = "local", installRemote, tunnelFactory, verifyLocal 
     const binding = store.data.connectors[createHash("sha256").update(token).digest("hex")]; if (!binding || !grant.enrolled || !grant.retrieve || !grant.share) throw new Error("Revoked"); return binding;
   }, nativeFactory: () => { throw new Error("No native resume or model permitted"); } };
   const service = new ParticipantConnections(engine, { root, address: "http://127.0.0.1:43127",
+    verifyBridge,
     verifyLocal: verifyLocal ?? (async args => { local.push(args); return "verified-http-200"; }),
     installRemote: installRemote ?? (async payload => { installs.push(payload); return { configPath: "/home/owner/.agentspaces-desktop-native/connections/" + payload.connectionId + "/participant.json", usageGuidePath: "/home/owner/.agentspaces-desktop-native/connections/" + payload.connectionId + "/USE.md", cliPath: "/home/owner/.agentspaces-desktop-native/participant-runtime/participant-cli.mjs", transportStatus: "verified-http-200" }; }),
     tunnelFactory: tunnelFactory ?? (async options => { const handle = { child: new EventEmitter(), options, closes: 0, close() { this.closes++; this.child.emit("close"); } }; tunnels.push(handle); return handle; }),
@@ -100,23 +101,23 @@ test("successful remote preparation persists transport metadata only and restart
   assert.equal(record.remotePort, f.tunnels[0].options.remotePort); assert.equal(record.authority, "127.0.0.1:43127");
   f.service.close(); assert.deepEqual(f.store.data.participantBridge, record);
   const restored = [];
-  const manager = new ParticipantConnections(f.engine, { root: f.root, address: "http://127.0.0.1:43127", tunnelFactory: async options => { const handle = { options, child: new EventEmitter(), closed: false, close() { this.closed = true; } }; restored.push(handle); return handle; } });
+  const manager = new ParticipantConnections(f.engine, { root: f.root, address: "http://127.0.0.1:43127", verifyBridge: async () => true, tunnelFactory: async options => { const handle = { options, child: new EventEmitter(), closed: false, close() { this.closed = true; } }; restored.push(handle); return handle; } });
   t.after(() => manager.close()); await manager.restorePromise;
   assert.equal(restored.length, 1); assert.equal(restored[0].options.remotePort, record.remotePort);
-  assert.equal(f.issued(), count); assert.deepEqual(f.store.data.connectors, connectors); assert.equal(manager.bridgeRestore.status, "owned-tunnel-started");
+  assert.equal(f.issued(), count); assert.deepEqual(f.store.data.connectors, connectors); assert.equal(manager.bridgeRestore.status, "verified-round-trip");
   manager.close(); assert.equal(restored[0].closed, true); assert.deepEqual(f.store.data.participantBridge, record);
 });
 test("malformed or changed-authority bridge records never spawn a restored tunnel", async t => {
   for (const record of [{ host: "other", remotePort: 45000, authority: "127.0.0.1:43127" }, { host: "remote", remotePort: "45000", authority: "127.0.0.1:43127" }, { host: "remote", remotePort: 45000, authority: "127.0.0.1:9999" }, { host: "remote", remotePort: 45000, authority: "127.0.0.1:43127", token: "forbidden-extra" }]) {
     const f = fixture(t); f.store.data.participantBridge = record; let starts = 0;
-    const manager = new ParticipantConnections(f.engine, { root: f.root, address: "http://127.0.0.1:43127", tunnelFactory: async () => { starts++; throw new Error("Must not spawn"); } });
+    const manager = new ParticipantConnections(f.engine, { root: f.root, address: "http://127.0.0.1:43127", verifyBridge: async () => true, tunnelFactory: async () => { starts++; throw new Error("Must not spawn"); } });
     await manager.restorePromise; assert.equal(starts, 0); assert.equal(manager.bridgeRestore.status, "ignored-invalid-record"); assert.equal(f.issued(), 0); manager.close();
   }
 });
 test("failed bridge restore is generic and explicit prepare retries the recorded port without a loop", async t => {
   const f = fixture(t, { host: "remote" }); const record = { host: "remote", remotePort: 45678, authority: "127.0.0.1:43127" }; f.store.data.participantBridge = record;
   let attempts = 0;
-  const manager = new ParticipantConnections(f.engine, { root: f.root, address: "http://127.0.0.1:43127", installRemote: f.service.installRemote,
+  const manager = new ParticipantConnections(f.engine, { root: f.root, address: "http://127.0.0.1:43127", verifyBridge: async () => true, installRemote: f.service.installRemote,
     tunnelFactory: async options => { attempts++; assert.equal(options.remotePort, 45678); if (attempts === 1) throw new Error("PRIVATE diagnostic"); return { child: new EventEmitter(), close() {} }; } });
   t.after(() => manager.close()); await manager.restorePromise;
   assert.equal(manager.bridgeRestore.status, "unavailable"); assert.ok(!JSON.stringify(manager.bridgeRestore).includes("PRIVATE")); assert.equal(attempts, 1); assert.equal(f.issued(), 0);
@@ -169,4 +170,29 @@ test('verified bridge reconnects on its original port without issuing new source
   assert.equal(f.issued(), count); assert.equal(f.service.health().status, 'connected');
   f.service.close(); f.tunnels[1].child.emit('close');
   await new Promise(resolve => setTimeout(resolve, 30)); assert.equal(f.tunnels.length, 2);
+});
+
+
+test('a living bridge process is not connected before an end-to-end probe succeeds',async t=>{
+ let release;const pending=new Promise(resolve=>release=resolve);const f=fixture(t,{host:'remote',verifyBridge:()=>pending});
+ const prepared=f.service.prepare({sessionId:f.source.id});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.notEqual(f.service.health().status,'connected');
+ release(true);await prepared;assert.equal(f.service.health().status,'connected');
+});
+test('failed round trips invalidate a live tunnel and recover on its original port without enrollment',async t=>{
+ let healthy=true;const f=fixture(t,{host:'remote',verifyBridge:async()=>healthy});
+ f.service.reconnectMinMs=5;f.service.reconnectMaxMs=20;
+ await f.service.prepare({sessionId:f.source.id});const port=f.tunnels[0].options.remotePort,count=f.issued();
+ healthy=false;await f.service.checkHealth();assert.notEqual(f.service.health().status,'connected');
+ await f.service.checkHealth();assert.equal(f.tunnels[0].closes,1);assert.equal(f.issued(),count);
+ healthy=true;await new Promise(resolve=>setTimeout(resolve,60));
+ assert.equal(f.service.health().status,'connected');assert.equal(f.tunnels.at(-1).options.remotePort,port);assert.equal(f.issued(),count);
+});
+test('unverified transports cannot issue prepared connections and shutdown cannot be undone by a late probe',async t=>{
+ const f=fixture(t,{host:'remote',verifyBridge:async()=>false});
+ await assert.rejects(f.service.prepare({sessionId:f.source.id}));assert.equal(Object.keys(f.store.data.connectors).length,0);
+ let release;const g=fixture(t,{host:'remote',verifyBridge:()=>new Promise(resolve=>release=resolve)});
+ const pending=g.service.tunnel();await new Promise(resolve=>setImmediate(resolve));g.service.close();release(true);
+ await assert.rejects(pending);assert.equal(g.service.health().status,'closed');
 });

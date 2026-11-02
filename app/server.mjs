@@ -1,3 +1,5 @@
+import { messageReference } from './agent-message.mjs';
+import { createBridgeHealth, probeRemoteBridge } from './bridge-health.mjs';
 import { observedFleet } from './observed-fleet.mjs';
 import { UpdateGate } from './update-gate.mjs';
 import {nativeWakeReadiness,ensureNativeConnection} from './native-readiness.mjs';
@@ -77,6 +79,7 @@ export async function startServer({
   codexAdapterFactory,
   participantInstallRemote,
   participantTunnelFactory,
+  participantVerifyBridge,
   sourceMetadataResolver = resolveNativeSourceMetadata,
   automaticInstallLocal,
   automaticInstallRemote,
@@ -101,6 +104,7 @@ export async function startServer({
   const ownerBrowser = new OwnerBrowserSession(store), recentHistory = new RecentHistory(store);
   const admin = randomBytes(32).toString("hex"),
     instance = randomBytes(16).toString("hex");
+  const bridgeHealth = createBridgeHealth();
   let closing = false;
   const headlessJobs = new HeadlessJobs(engine,{...headlessJobOptions,admitLaunch:()=>engine.dispatchAllowed()});
   const activeAnswers = new Map();
@@ -203,6 +207,10 @@ export async function startServer({
       const bytes = readFileSync(vendorFiles[url.pathname] ?? join(ui, file));
       res.end(url.pathname === "/" ? bytes.toString("utf8").replace("<head>", '<head><meta name="terminal-style-nonce" content="' + styleNonce + '">') : bytes);
       return;
+    }
+    if (req.method === 'GET' && url.pathname === '/api/native/bridge-probe') {
+      const reply = bridgeHealth.respond(url.searchParams.get('nonce'), closing ? 'stopping' : 'running');
+      json(res, reply ? 200 : 400, reply ?? { error: 'Invalid probe nonce' }); return;
     }
     const cookie = /\bas_session=([a-f0-9]+)/.exec(
       req.headers.cookie ?? "",
@@ -613,7 +621,18 @@ export async function startServer({
             break;
           }
           result = engine.discussions.contribute(data, connector);
-          { const group = engine.discussions.group(data.id), message = group.messages.find(message => message.deliveryId === data.deliveryId); await routeConversation(engine, { codexAgents, channels }, group, message); result.posting = messageDelivery(message); }
+          {
+            const group = engine.discussions.group(data.id), message = group.messages.find(message => message.deliveryId === data.deliveryId);
+            await routeConversation(engine, { codexAgents, channels }, group, message); result.posting = messageDelivery(message);
+            if(connector&&message){
+              const source=message.source?Object.fromEntries(['sessionId','nativeThreadId','provider','host','title'].map(key=>[key,message.source[key]])):null;
+              const targets=(message.targets??[]).map(target=>Object.fromEntries(['sessionId','provider','host','status','requestId'].map(key=>[key,target[key]])));
+              result={id:group.id,title:group.title,version:group.version,available:result.available,storage:result.storage,historyPartial:true,reference:messageReference(group,message),posting:result.posting,messages:[{id:message.id,at:message.at,text:message.text,author:message.author,source,turnId:message.turnId,deliveryId:message.deliveryId,replyTo:message.replyTo,targets}]};
+              // A post is already durable. Never turn a large acknowledgement
+              // into an apparent delivery failure by returning the room history.
+              if(Buffer.byteLength(JSON.stringify(result),'utf8')>512*1024){result.messages=[];result.contentOmitted=true;}
+            }
+          }
           break;
         case "/api/sample":
           if (!allowDemo) throw new Error("Sample data is available only in a separate demo runtime");
@@ -777,7 +796,7 @@ export async function startServer({
   const address = `http://127.0.0.1:${server.address().port}`;
   engine.companionAddress=address;
   connections = new NativeConnections(engine, { root, address, remoteInstall });
-  participantConnections = new ParticipantConnections(engine, { root, address, installRemote: participantInstallRemote, tunnelFactory: participantTunnelFactory });
+  participantConnections = new ParticipantConnections(engine, { root, address, installRemote: participantInstallRemote, tunnelFactory: participantTunnelFactory, verifyBridge: participantVerifyBridge ?? (async options => { const nonce = randomBytes(32).toString('hex'); return bridgeHealth.verify(await probeRemoteBridge({ ...options, nonce }), nonce); }) });
   sourceBindings = new SourceBindings(engine, { root, address, resolveMetadata: sourceMetadataResolver });
   automaticConnections = new NativeAutoInstaller(engine, { sourceBindings, participantConnections, address, installLocal: automaticInstallLocal, installRemote: automaticInstallRemote, refreshNative: host => codexAgents.refreshTools(host) });
   if (desktopDiscovery && store.data.desktopPreferences?.nativeAutoSetup) automaticConnections.setup().catch(() => {});

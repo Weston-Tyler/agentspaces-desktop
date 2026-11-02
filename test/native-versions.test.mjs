@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { qualifiedNativeVersion, nativeCompatibility, nativeAdapterCompatible, observedVersion } from '../app/native-versions.mjs';
+import { qualifiedNativeVersion, nativeCompatibility, nativeAdapterCompatible, nativeReadAdapterCompatible, observedVersion } from '../app/native-versions.mjs';
 
 test('exact version comparison keeps reviewed releases separate from unknown prereleases', () => {
   assert.equal(qualifiedNativeVersion('remote', 'codex', 'codex-cli 0.162.0'), true);
@@ -20,4 +20,12 @@ test('breaking contracts refuse even a familiar version while an unavailable che
   const options = { protocolCheck: async () => ({ compatible: false, status: 'protocol-probe-unavailable' }) };
   assert.equal(nativeAdapterCompatible(await nativeCompatibility('remote', 'codex', '0.162.0', options)), true);
   assert.equal(nativeAdapterCompatible(await nativeCompatibility('remote', 'codex', '0.999.0', options)), false);
+});
+
+test('Claude metadata uses its read SDK interface independently of native execution release qualification',async()=>{
+ const verdict=await nativeCompatibility('remote','claude','Claude Code 2.999.0');const tool={provider:'claude',installed:true,...verdict};
+ assert.equal(tool.versionMatches,false);assert.equal(nativeAdapterCompatible(tool),false);assert.equal(nativeReadAdapterCompatible(tool),true);
+ assert.equal(nativeReadAdapterCompatible({...tool,installed:false}),false);assert.equal(nativeReadAdapterCompatible({...tool,readAdapterCompatible:false}),false);
+ const broken={provider:'codex',installed:true,...await nativeCompatibility('remote','codex','0.999.0',{protocolCheck:async()=>({compatible:false,status:'protocol-incompatible'})})};
+ assert.equal(nativeReadAdapterCompatible(broken),false);assert.equal(nativeAdapterCompatible(broken),false);
 });

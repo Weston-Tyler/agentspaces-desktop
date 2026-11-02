@@ -140,7 +140,7 @@ function run(spawnProcess, command, args, input = "", capture = false) {
     const finish = (error, result) => { if (done) return; done = true; clearTimeout(timer); error ? no(fail("protocol_probe_unavailable")) : yes(result); };
     const timer = setTimeout(() => { child?.kill(); finish(true); }, 20000);
     try {
-      child = spawnProcess(command, args, { windowsHide: true, shell: false, stdio: ["pipe", "pipe", "pipe"] });
+      child = spawnProcess(command, args, { windowsHide: true, shell: false, stdio: process.platform === "win32" ? ["overlapped", "overlapped", "overlapped"] : ["pipe", "pipe", "pipe"] });
       child.stderr.on("data", () => {});
       child.stdout.on("data", chunk => { size += chunk.length; if (size > MAX) { child.kill(); finish(true); } else if (capture) data += chunk.toString(); });
       child.on("error", () => finish(true)); child.on("close", code => finish(code !== 0, data));

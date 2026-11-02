@@ -24,7 +24,7 @@ function runPrivateProcess(command, args, { input = "", timeoutMs = 20000 } = {}
   });
 }
 function createTunnel({ remotePort, localPort, host }) {
-  const child = spawn("ssh", ["-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3", "-R", "127.0.0.1:" + remotePort + ":127.0.0.1:" + localPort, SSH_ALIAS], { windowsHide: true, shell: false, stdio: ["ignore", "ignore", "pipe"] });
+  const child = spawn("ssh", ["-N", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3", "-R", "127.0.0.1:" + remotePort + ":127.0.0.1:" + localPort, SSH_ALIAS], { windowsHide: true, shell: false, stdio: ["ignore", "ignore", process.platform === "win32" ? "overlapped" : "pipe"] });
   child.stderr.on("data", () => {});
   let exited = false; child.on("error", () => { exited = true; }); child.on("close", () => { exited = true; });
   return { child, get exited() { return exited; }, close: () => child.kill("SIGTERM") };
@@ -56,27 +56,29 @@ if(!verified)throw Error('Participant discovery unavailable');console.log(JSON.s
 }
 
 export class ParticipantConnections {
-  constructor(engine, { root, address, installRemote = installRemoteParticipant, tunnelFactory = createTunnel, verifyLocal = verifyLocalDiscovery, reconnectMinMs = 1000, reconnectMaxMs = 30000 } = {}) {
+  constructor(engine, { root, address, installRemote = installRemoteParticipant, tunnelFactory = createTunnel, verifyLocal = verifyLocalDiscovery, verifyBridge = async () => false, healthCheckMs = 15000, failureThreshold = 2, reconnectMinMs = 1000, reconnectMaxMs = 30000 } = {}) {
     if (typeof root !== "string" || !isAbsolute(root) || !/^http:\/\/127\.0\.0\.1:\d+$/.test(address ?? "") || !new URL(address).port) throw error("Owned absolute root and literal-loopback companion address required");
-    Object.assign(this, { engine, root, address, installRemote, tunnelFactory, verifyLocal });
+    Object.assign(this, { engine, root, address, installRemote, tunnelFactory, verifyLocal, verifyBridge, healthCheckMs, failureThreshold });
+    if (typeof verifyBridge !== 'function' || !Number.isInteger(healthCheckMs) || healthCheckMs < 10 || !Number.isInteger(failureThreshold) || failureThreshold < 1 || failureThreshold > 5) throw error('Invalid bridge verification configuration');
     this.reconnectMinMs = reconnectMinMs; this.reconnectMaxMs = reconnectMaxMs; this.reconnectAttempts = 0; this.reconnectTimer = null;
     this.tunnels = new Map(); this.tunnelPending = new Map(); this.closed = false;
     const saved = engine.store.data.participantBridge;
     const valid = saved && typeof saved === "object" && !Array.isArray(saved) && Object.keys(saved).length === 3 && saved.host === REMOTE_HOST && Number.isInteger(saved.remotePort) && saved.remotePort > 1023 && saved.remotePort <= 65535 && saved.authority === new URL(address).host;
     this.savedBridge = valid ? { ...saved } : null;
+    this.healthTimer = setInterval(() => { void this.checkHealth(); }, healthCheckMs); this.healthTimer.unref?.();
     this.bridgeRestore = { status: valid ? "restoring" : saved ? "ignored-invalid-record" : "not-configured" };
     // Restore only the app-owned transport. This never creates a connector,
     // changes source grants, reads conversations or resumes a native session.
-    this.restorePromise = valid ? Promise.resolve().then(() => this.tunnel()).then(() => { this.bridgeRestore.status = "owned-tunnel-started"; return { status: this.bridgeRestore.status }; }).catch(() => { this.bridgeRestore.status = "unavailable"; this.scheduleReconnect(); return { status: "unavailable" }; }) : Promise.resolve({ status: this.bridgeRestore.status });
+    this.restorePromise = valid ? Promise.resolve().then(() => this.tunnel()).then(() => { this.bridgeRestore.status = "verified-round-trip"; return { status: this.bridgeRestore.status }; }).catch(() => { this.bridgeRestore.status = "unavailable"; this.scheduleReconnect(); return { status: "unavailable" }; }) : Promise.resolve({ status: this.bridgeRestore.status });
   }
   health() {
-    const connected = [...this.tunnels.values()].some(tunnel => !tunnel.exited);
-    return { status: this.closed ? 'closed' : connected ? 'connected' : this.savedBridge ? 'reconnecting' : 'not-configured',
+    const connected = [...this.tunnels.values()].some(tunnel => !tunnel.exited && tunnel.verified && Date.now() - tunnel.verifiedAt <= this.healthCheckMs * 2);
+    return { status: this.closed ? 'closed' : connected ? 'connected' : this.tunnels.size ? 'verifying' : this.savedBridge ? 'reconnecting' : 'not-configured',
       attempts: this.reconnectAttempts, nextRetryAt: this.nextRetryAt ?? null,
-      verification: this.bridgeRestore.status, nativeTurnsCancelled: false };
+      verification: this.bridgeRestore.status, lastVerifiedAt: this.lastVerifiedAt ?? null, failureCode: this.failureCode ?? null, nativeTurnsCancelled: false };
   }
   retain(tunnel) {
-    if (this.closed || tunnel.exited || this.tunnels.get(tunnel.key) !== tunnel) throw error('Owned participant tunnel unavailable');
+    if (this.closed || tunnel.exited || !tunnel.verified || this.tunnels.get(tunnel.key) !== tunnel) throw error('Owned participant tunnel unavailable');
     const record = { host: REMOTE_HOST, remotePort: tunnel.remotePort, authority: new URL(this.address).host };
     this.engine.store.data.participantBridge = record; this.engine.store.save();
     this.savedBridge = record; tunnel.uses++;
@@ -87,10 +89,43 @@ export class ParticipantConnections {
     this.nextRetryAt = new Date(Date.now() + delay).toISOString();
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null; this.nextRetryAt = null; this.reconnectAttempts++;
-      try { await this.tunnel(); this.bridgeRestore.status = 'owned-tunnel-started'; }
+      try { await this.tunnel(); this.bridgeRestore.status = 'verified-round-trip'; }
       catch { this.bridgeRestore.status = 'unavailable'; this.scheduleReconnect(); }
     }, delay);
     this.reconnectTimer.unref?.();
+  }
+  invalidate(tunnel) {
+    if (tunnel.exited) return;
+    tunnel.exited = true; tunnel.verified = false;
+    if (this.tunnels.get(tunnel.key) === tunnel) this.tunnels.delete(tunnel.key);
+    this.bridgeRestore.status = 'unavailable'; tunnel.handle.close();
+    this.scheduleReconnect();
+  }
+  async verifyTunnel(tunnel) {
+    if (tunnel.probePromise) return tunnel.probePromise;
+    const run = async () => {
+      let verified = false;
+      try { verified = await this.verifyBridge({ host: REMOTE_HOST, remotePort: tunnel.remotePort, authority: new URL(this.address).host }) === true; }
+      catch (err) { this.failureCode = ['bridge_authentication_required','bridge_probe_timeout','bridge_probe_invalid','bridge_probe_unavailable'].includes(err?.code) ? err.code : 'bridge_probe_failed'; }
+      if (this.closed || tunnel.exited || this.tunnels.get(tunnel.key) !== tunnel) return false;
+      tunnel.verified = verified;
+      if (verified) {
+        tunnel.failures = 0; tunnel.verifiedAt = Date.now(); this.lastVerifiedAt = new Date(tunnel.verifiedAt).toISOString();
+        this.failureCode = null; this.bridgeRestore.status = 'verified-round-trip';
+      } else {
+        tunnel.failures++; this.failureCode ??= 'bridge_probe_failed'; this.bridgeRestore.status = 'round-trip-failed';
+      }
+      return verified;
+    };
+    tunnel.probePromise = run();
+    try { return await tunnel.probePromise; } finally { tunnel.probePromise = null; }
+  }
+  async checkHealth() {
+    if (this.closed) return this.health();
+    await Promise.all([...this.tunnels.values()].map(async tunnel => {
+      if (!await this.verifyTunnel(tunnel) && !this.closed && tunnel.failures >= this.failureThreshold) this.invalidate(tunnel);
+    }));
+    return this.health();
   }
   source(sessionId) {
     if (this.closed) throw error("Participant connection service closed");
@@ -102,18 +137,21 @@ export class ParticipantConnections {
   async tunnel() {
     if (this.closed) throw error("Participant connection service closed");
     const key = REMOTE_HOST + ":" + new URL(this.address).port;
-    const existing = this.tunnels.get(key); if (existing && !existing.exited) return existing;
+    const existing = this.tunnels.get(key); if (existing && !existing.exited && existing.verified) return existing;
     if (this.tunnelPending.has(key)) return this.tunnelPending.get(key);
     if (this.tunnels.size + this.tunnelPending.size >= 4) throw error("Owned participant tunnel limit reached");
     const pending = (async () => {
+      if (existing && !existing.exited) { if (await this.verifyTunnel(existing)) return existing; this.invalidate(existing); }
       let remotePort = this.savedBridge?.remotePort ?? randomInt(40000, 60000); const localPort = Number(new URL(this.address).port);
       if (!this.savedBridge && remotePort === localPort) remotePort = remotePort < 59999 ? remotePort + 1 : remotePort - 1;
       const handle = await this.tunnelFactory({ remotePort, localPort, host: REMOTE_HOST });
       if (this.closed || handle.exited || handle.child?.exitCode != null) { handle.close(); throw error("Owned participant tunnel unavailable"); }
-      const tunnel = { key, remotePort, handle, exited: false, uses: this.savedBridge ? 1 : 0 };
-      const exited = () => { tunnel.exited = true; this.bridgeRestore.status = "unavailable"; if (this.tunnels.get(key) === tunnel) { this.tunnels.delete(key); this.scheduleReconnect(); } };
+      const tunnel = { key, remotePort, handle, exited: false, uses: this.savedBridge ? 1 : 0, verified: false, failures: 0 };
+      const exited = () => { tunnel.exited = true; if (this.tunnels.get(key) === tunnel) { this.bridgeRestore.status = "unavailable"; this.tunnels.delete(key); this.scheduleReconnect(); } };
       handle.child?.on("error", exited); handle.child?.on("close", exited);
-      this.tunnels.set(key, tunnel); clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.nextRetryAt = null; return tunnel;
+      this.tunnels.set(key, tunnel);
+      if (!await this.verifyTunnel(tunnel)) { this.invalidate(tunnel); throw error('Bridge round trip unavailable'); }
+      clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.nextRetryAt = null; return tunnel;
     })();
     this.tunnelPending.set(key, pending);
     try { return await pending; } finally { this.tunnelPending.delete(key); }
@@ -155,5 +193,5 @@ export class ParticipantConnections {
       throw error("Participant connection preparation failed; new capability revoked");
     }
   }
-  close() { this.closed = true; clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.nextRetryAt = null; for (const tunnel of this.tunnels.values()) tunnel.handle.close(); this.tunnels.clear(); }
+  close() { this.closed = true; clearInterval(this.healthTimer); clearTimeout(this.reconnectTimer); this.reconnectTimer = null; this.nextRetryAt = null; for (const tunnel of this.tunnels.values()) tunnel.handle.close(); this.tunnels.clear(); }
 }

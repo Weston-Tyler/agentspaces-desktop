@@ -30,6 +30,7 @@ async function setup(t, { installationGate } = {}) {
         cliPath: "/home/fixture/.agentspaces-desktop-native/participant-runtime/participant-cli-" + createHash("sha256").update(input.source).digest("hex") + ".mjs",
         transportStatus: "verified-http-200" };
     },
+    participantVerifyBridge: async () => true,
     participantTunnelFactory: async options => {
       const child = new EventEmitter(), handle = { child, exited: false,
         close() { if (!handle.exited) { handle.exited = true; closedTunnels++; child.emit("close", 0); } } };
@@ -117,4 +118,28 @@ test("source-scoped remote preparations reuse only the owned tunnel and server c
   assert.equal(f.installed[0].config.nativeThreadId, THREAD); assert.equal(f.installed[1].config.nativeThreadId, THREAD);
   assert.notEqual(f.installed[0].config.token, f.installed[1].config.token);
   await f.close(); assert.equal(f.closedTunnelCount(), 1); assert.equal(f.app.participantConnections.tunnels.size, 0);
+});
+
+test('bridge liveness exposes only an instance-bound proof and never source or owner operations',async t=>{
+ const f=await setup(t),nonce='d'.repeat(64),before=JSON.stringify(f.engine.store.data.grants);
+ const response=await fetch(f.app.address+'/api/native/bridge-probe?nonce='+nonce);assert.equal(response.status,200);
+ const reply=await response.json();assert.deepEqual(Object.keys(reply).sort(),['nonce','proof','state']);assert.equal(reply.nonce,nonce);assert.equal(reply.state,'running');assert.match(reply.proof,/^[a-f0-9]{64}$/);
+ assert.equal((await fetch(f.app.address+'/api/native/bridge-probe?nonce=bad')).status,400);
+ assert.equal((await fetch(f.app.address+'/api/state')).status,401);
+ assert.equal((await fetch(f.app.address+'/api/native/bridge-probe?nonce='+nonce,{headers:{Origin:'https://foreign.example'}})).status,403);
+ assert.equal(JSON.stringify(f.engine.store.data.grants),before);
+ const g=await setup(t);const other=await (await fetch(g.app.address+'/api/native/bridge-probe?nonce='+nonce)).json();assert.notEqual(reply.proof,other.proof);
+});
+
+test('large-room contribution returns a bounded receipt and retry never duplicates the stored message',async t=>{
+ const f=await setup(t);f.engine.grant('sample-codex-old',{enrolled:true,content:true,share:true,retrieve:true});
+ const id=f.engine.discussions.create({title:'Large synthetic room',sessionIds:[f.source.id,'sample-codex-old']}).id;
+ const group=f.engine.discussions.group(id),seed=f.engine.discussions.append(group,{text:'雪🦉'.repeat(900),deliveryId:'history-seed-fixture'});
+ group.messages=Array.from({length:310},(_,i)=>({...structuredClone(seed),id:'history-'+i,deliveryId:'history-delivery-'+i}));group.version=310;
+ assert(Buffer.byteLength(JSON.stringify(f.engine.discussions.view(group)))>1048576);
+ const token=f.engine.issueConnector(f.source.id).token,payload={id,text:'Synthetic new report',nativeTurnId:'fixture',deliveryId:'bounded-write-receipt-test'};
+ const post=()=>fetch(f.app.address+'/api/discussions/contribute',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+ const response=await post();assert.equal(response.status,200);const raw=await response.text();assert(Buffer.byteLength(raw)<65536);
+ const result=JSON.parse(raw);assert.equal(result.posting.roomPosted,true);assert.equal(result.messages.length,1);assert.equal(result.messages[0].text,payload.text);assert.equal(result.historyPartial,true);assert.equal(result.reference.messageId,group.messages.at(-1).id);
+ const count=group.messages.length,again=await (await post()).json();assert.equal(group.messages.length,count);assert.equal(again.reference.messageId,result.reference.messageId);assert.equal(f.engine.modelCalls,0);
 });
