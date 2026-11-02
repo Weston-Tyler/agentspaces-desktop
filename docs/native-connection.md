@@ -192,3 +192,19 @@ message reads. Retrying the same delivery ID reconciles the same stored message;
 unknown write acceptance is never a reason to allocate a new delivery ID.
 
 Metadata reads and execution qualification are separate. Claude session discovery uses the pinned SDK and checks each required read method at the call boundary; an unfamiliar native version does not by itself hide its sessions. Missing SDK methods, scope refusal and unsupported filters still fail explicitly. This does not qualify model execution on that release. Codex continues to require its protocol contract. Native version probes use bounded, noninteractive SSH handles on Windows; a transport failure is reported as unavailable discovery, rather than confirmed missing software.
+
+### Auditing a whole catalog
+
+Count source records separately from unique native thread IDs: the same native ID
+can be observed on more than one host. Check current registration policy, explicit
+sharing denials, native metadata availability, source-binding integrity and native
+wake routes separately. A policy-eligible record has not necessarily self-registered
+or loaded the managed tools. Historical metadata is not a live listener.
+
+Owner diagnostics must not impersonate peers with their stored capabilities,
+fabricate hook records, broadcast test messages or resume dormant threads merely
+to fill in an audit table. Preserve sharing denials and mark missing native
+metadata or unsupported wake routes explicitly. Native metadata reads and a
+verified bridge do not establish a message/response round trip. Windows remote
+Claude SDK reads use overlapped SSH handles; an absent native metadata result
+remains `null`, rather than becoming a misleading transport/parsing error.
