@@ -3,7 +3,7 @@ import { REMOTE_HOST } from "./remote-host.mjs";
 import { createHash } from "node:crypto";
 import { CodexQueueAdapter } from "./codex-queue.mjs";
 import { nativeAdapterCompatible, observedVersion, qualifiedNativeVersion } from './native-versions.mjs';
-const transientTransport = new Set(['local_native_loaded_target_required', 'companion_update_deferred', 'native_proxy_disconnected', 'native_proxy_not_connected', 'native_websocket_handshake_failed', 'native_websocket_not_ready', 'native_rpc_timeout']);
+const transientTransport = new Set(['native_delivery_capacity_busy', 'local_native_loaded_target_required', 'companion_update_deferred', 'native_proxy_disconnected', 'native_proxy_not_connected', 'native_websocket_handshake_failed', 'native_websocket_not_ready', 'native_rpc_timeout']);
 const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 // Direct user-addressed conversation transport. These receipts are not work
 // claims, a task queue, a scheduler or upstream completion authority.
@@ -120,12 +120,15 @@ export class CodexDiscussionHub {
     const inputHash = hash({ sessionId, discussionId, messageId, text, budget });
     const effects = this.engine.store.data.codexDiscussionDeliveries, previous = effects[requestId];
     if (previous) { if (previous.inputHash !== inputHash) throw new Error("Native message identity reused for different content"); return { ...previous, duplicate: true, replayed: false }; }
-    if (Object.keys(effects).length >= 1000) throw new Error("Native conversation receipt limit reached");
     const continuation=!!this.engine.discussions.group(discussionId).messages.find(message=>message.id===messageId)?.continuation;
     const effect = { requestId, sessionId, discussionId, messageId, inputHash, continuation, status: "connecting-native-agent", retryAllowed: false, at: new Date().toISOString() };
+    if (this.aborters.size >= 1000) {
+      Object.assign(effect,{status:'waiting-for-native-delivery-capacity',reasonCode:'native_delivery_capacity_busy',reason:'Waiting for native delivery capacity; no input submitted',undispatched:true,uncertainOutcome:false,recoveryDeadline:new Date(Date.now()+86400000).toISOString(),nextRetryAt:new Date(Date.now()+15000).toISOString()});
+      effects[requestId]=effect;this.engine.store.save();return {...effect};
+    }
     effects[requestId] = effect; this.engine.store.save();
     const abort = new AbortController(); this.aborters.set(requestId, abort);
-    const run = this.run(effect, text, budget, abort.signal).finally(() => this.aborters.delete(requestId));
+    const run = this.run(effect, text, budget, abort.signal).finally(() => { this.aborters.delete(requestId); this.pending.delete(requestId); });
     this.pending.set(requestId, run); return { ...effect };
   }
   async run(effect, text, budget, signal) {
@@ -243,13 +246,14 @@ export class CodexDiscussionHub {
   }
   wait(requestId) { return this.pending.get(requestId) ?? Promise.resolve(this.engine.store.data.codexDiscussionDeliveries[requestId]); }
   async recoverUndispatched({ includeLegacy = false } = {}) {
-    if (this.recoveryRunning || this.closed || this.engine.dispatchAllowed?.() === false) return { recovered: [], skipped: true };
+    if (this.recoveryRunning || this.closed || this.aborters.size >= 1000 || this.engine.dispatchAllowed?.() === false) return { recovered: [], skipped: true };
     const candidates = Object.values(this.engine.store.data.codexDiscussionDeliveries).filter(effect => effect.undispatched === true && !this.engine.store.data.codexDiscussionNativeReceipts[effect.requestId] && !effect.nativeTurnId && !this.aborters.has(effect.requestId) && ((transientTransport.has(effect.reasonCode) && !effect.uncertainOutcome && Date.parse(effect.recoveryDeadline) > Date.now() && Date.parse(effect.nextRetryAt) <= Date.now()) || ((effect.retryCount ?? 0) < 3 && (effect.reasonCode === 'native_protocol_unavailable' || (includeLegacy && !effect.reasonCode)))));
     if (!candidates.length) return { recovered: [] };
     this.recoveryRunning = true;
     const recovered = [], sessions = new Set();
     try {
       for (const effect of candidates) {
+        if (this.aborters.size >= 1000) break;
         if (recovered.length >= 4 || sessions.has(effect.sessionId)) continue;
         let source, message;
         try {
@@ -266,7 +270,7 @@ export class CodexDiscussionHub {
           effect.undispatched = false; effect.uncertainOutcome = false; effect.status = 'connecting-native-agent'; this.engine.store.save();
           const target = message.targets?.find(target => target.sessionId === effect.sessionId); if (target) target.status = effect.status;
           const abort = new AbortController(); this.aborters.set(effect.requestId, abort);
-          const run = this.run(effect, message.text, budget, abort.signal).finally(() => this.aborters.delete(effect.requestId));
+          const run = this.run(effect, message.text, budget, abort.signal).finally(() => { this.aborters.delete(effect.requestId); this.pending.delete(effect.requestId); });
           this.pending.set(effect.requestId, run); recovered.push(effect.requestId); sessions.add(effect.sessionId);
         } catch { /* Current permissions or ancestry no longer admit delivery. */ }
       }

@@ -217,3 +217,19 @@ test('a refused queued message leaves the one-shot listener available for the ne
   assert.equal(f.engine.store.data.channelReceipts[f.args.requestId].status, 'channel-access-changed; not dispatched');
   assert.equal(received.length, 1); assert(received[0].content.startsWith('Owner: Valid next message'));
 });
+
+test('old channel delivery receipts do not consume undelivered inbox capacity',async t=>{
+ const f=setup(t);for(let i=0;i<1000;i++)f.engine.store.data.channelReceipts['old-'+i]={status:'native-participant-contributed',inputHash:'retained-'+i};
+ const receipt=await f.hub.deliver(f.args);assert.equal(receipt.status,'delivered-to-native-transport');assert.equal(f.engine.store.data.channelReceipts['old-0'].inputHash,'retained-0');assert.equal(f.sent.length,1);
+});
+test('channel replies return only a short receipt even for large retained rooms',async t=>{
+ const f=setup(t);await f.hub.deliver(f.args);const group=f.engine.discussions.group(f.args.discussionId),seed=group.messages[0];
+ for(let i=0;i<100;i++)group.messages.push({...structuredClone(seed),id:'history-'+i,deliveryId:'old-history-'+i,text:'PRIVATE-OLD-MESSAGE '.repeat(500)});
+ const args={requestId:f.args.requestId,discussionId:group.id,text:'Brief current reply',deliveryId:'compact-channel-reply'};
+ const result=f.hub.reply(args,f.binding),raw=JSON.stringify(result);assert(raw.length<10000);assert(!raw.includes('PRIVATE-OLD-MESSAGE'));assert.equal(result.discussion.messages.length,1);assert.equal(result.discussion.reference.messageId,group.messages.at(-1).id);
+ const count=group.messages.length;assert.equal(f.hub.reply(args,f.binding).discussion.reference.messageId,result.discussion.reference.messageId);assert.equal(group.messages.length,count);
+});
+test('only undelivered channel inbox entries consume admission capacity',async t=>{
+ const f=setup(t);f.connection.close();for(let i=0;i<1000;i++)f.engine.store.data.channelReceipts['pending-'+i]={status:'waiting-for-native-transport'};
+ await assert.rejects(f.hub.deliver(f.args),e=>e.code==='channel_inbox_capacity_busy');assert.equal(f.engine.store.data.channelReceipts[f.args.requestId],undefined);assert.equal(Object.keys(f.engine.store.data.channelReceipts).length,1000);
+});

@@ -417,3 +417,21 @@ test('local dormant or unavailable targets are retained as undispatched and neve
 test('local routing cannot acquire existing native policy acceptance implicitly',async t=>{
  const f=makeLocal(setup());t.after(()=>f.hub.close());f.engine.store.data.desktopPreferences.allowNativeFullAccess=false;f.hub.dispatch(f.args);const r=await f.hub.wait(f.args.requestId);assert.equal(r.reasonCode,'local_native_policy_acceptance_required');assert.equal(f.counters.factory,0);assert.equal(f.counters.bind,0);assert.equal(f.counters.answer,0);assert.equal(r.nextRetryAt,undefined);
 });
+
+test('completed delivery history does not block the next native message and exact duplicates stay deduplicated',async t=>{
+ const f=setup();t.after(()=>f.hub.close());
+ for(let i=0;i<1000;i++)f.engine.store.data.codexDiscussionDeliveries['old-'+i]={requestId:'old-'+i,status:'native-agent-replied',inputHash:'retained-'+i};
+ f.hub.dispatch(f.args);await f.hub.wait(f.args.requestId);assert.equal(f.counters.answer,1);assert.equal(Object.keys(f.engine.store.data.codexDiscussionDeliveries).length,1001);
+ assert.equal(f.hub.pending.size,0);assert.equal(f.hub.aborters.size,0);
+ assert.equal(f.hub.dispatch(f.args).duplicate,true);assert.equal(f.counters.answer,1);assert.equal(f.engine.store.data.codexDiscussionDeliveries['old-0'].inputHash,'retained-0');
+});
+test('busy native admission defers durably, then recovers once without replaying duplicates',async t=>{
+ const f=setup();t.after(()=>{f.hub.aborters.clear();f.hub.close();});f.args.budget={timeoutMs:90000,maxOutputTokens:800};
+ for(let i=0;i<1000;i++)f.hub.aborters.set('active-'+i,new AbortController());
+ const waiting=f.hub.dispatch(f.args);assert.equal(waiting.status,'waiting-for-native-delivery-capacity');assert.equal(waiting.undispatched,true);assert.equal(f.counters.factory,0);assert.equal(f.hub.dispatch(f.args).duplicate,true);
+ assert.equal((await f.hub.recoverUndispatched()).skipped,true);f.hub.aborters.clear();f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].nextRetryAt=new Date(0).toISOString();
+ assert.deepEqual((await f.hub.recoverUndispatched()).recovered,[f.args.requestId]);await f.hub.wait(f.args.requestId);assert.equal(f.counters.answer,1);assert.equal(f.hub.pending.size,0);assert.equal(f.hub.dispatch(f.args).duplicate,true);assert.equal(f.counters.answer,1);
+});
+test('deferred native capacity never bypasses subsequent sharing revocation',async t=>{
+ const f=setup();t.after(()=>{f.hub.aborters.clear();f.hub.close();});f.args.budget={timeoutMs:90000,maxOutputTokens:800};for(let i=0;i<1000;i++)f.hub.aborters.set('active-'+i,new AbortController());f.hub.dispatch(f.args);f.hub.aborters.clear();f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].nextRetryAt=new Date(0).toISOString();f.engine.grant(f.source.id,{share:false});assert.deepEqual((await f.hub.recoverUndispatched()).recovered,[]);assert.equal(f.counters.factory,0);assert.equal(f.counters.answer,0);
+});

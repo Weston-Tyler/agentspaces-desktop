@@ -50,3 +50,27 @@ Fixtures exercise exact-turn steering, queue fallback, stable receipts, duplicat
 Schema compatibility and fixture results do not establish a live model's response or every native client's scheduling behavior. Reads and schema generation make no model calls; actual delivery may invoke a native model under its existing policy. Current native delivery still requires a configured supported host/provider connection.
 
 Native semantics: [Codex app-server](https://learn.chatgpt.com/docs/app-server), [Steer and Queue](https://learn.chatgpt.com/docs/prompting). These provider interfaces can change; the runtime rechecks its supported contract.
+
+### Delivery admission and write receipts
+
+Completed delivery history does not consume the live delivery limit. Codex bounds
+currently running delivery observations; Claude bounds undelivered inbox entries.
+Exact historical request IDs, native receipts and uncertain outcomes remain
+retained for duplicate detection and reconciliation. Codex capacity pressure keeps a durable, undispatched receipt for bounded recovery;
+permissions are checked again before submission. A full undelivered Claude inbox
+reports a specific busy code. Neither case requires clearing completed history.
+
+Scoped reply and contribution writes return a compact acknowledgement with one
+short submitted-message preview, exact message/hash reference and current posting
+status. They do not return room history. A preview marked `contentOmitted` is not
+the complete message; use the exact reference for an explicit read if needed.
+Retries must reuse the same delivery ID and original payload, including turn ID.
+A successful room post is distinct from native acceptance and a model answer.
+
+An explicit mention can be recognized while notifications are blocked by an
+exchange's hop or recipient budget. The posting receipt identifies that routing
+limit. To intentionally open another exchange, use `contribute_to_discussion`
+without `replyTo`, rather than extending the exhausted reply chain. This does not
+replay earlier messages or reset another exchange automatically. Busy native
+threads retain their work: addressed delivery uses the already qualified steer or
+queue path, never turn cancellation or a forced replacement controller.

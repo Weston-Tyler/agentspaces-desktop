@@ -1,4 +1,4 @@
-import { messageReference } from './agent-message.mjs';
+import { contributionReceipt } from './agent-message.mjs';
 import { createBridgeHealth, probeRemoteBridge } from './bridge-health.mjs';
 import { observedFleet } from './observed-fleet.mjs';
 import { UpdateGate } from './update-gate.mjs';
@@ -512,7 +512,7 @@ export async function startServer({
         case "/api/native/channel/reply":
           if (!connector) throw new Error("Participant-bound native channel capability required");
           result = channels.reply(data, connector);
-          { const group = engine.discussions.group(data.discussionId), message = group.messages.find(message => message.deliveryId === data.deliveryId); await routeConversation(engine, { codexAgents, channels }, group, message); result.posting = messageDelivery(message); }
+          { const group = engine.discussions.group(data.discussionId), message = group.messages.find(message => message.deliveryId === data.deliveryId); await routeConversation(engine, { codexAgents, channels }, group, message); result.posting = messageDelivery(message); result.discussion=contributionReceipt(group,message,result.posting); }
           break;
         case "/api/ask/providers":
           result = await detectAnswerProviders({ host: data.host ?? "local" });
@@ -625,12 +625,7 @@ export async function startServer({
             const group = engine.discussions.group(data.id), message = group.messages.find(message => message.deliveryId === data.deliveryId);
             await routeConversation(engine, { codexAgents, channels }, group, message); result.posting = messageDelivery(message);
             if(connector&&message){
-              const source=message.source?Object.fromEntries(['sessionId','nativeThreadId','provider','host','title'].map(key=>[key,message.source[key]])):null;
-              const targets=(message.targets??[]).map(target=>Object.fromEntries(['sessionId','provider','host','status','requestId'].map(key=>[key,target[key]])));
-              result={id:group.id,title:group.title,version:group.version,available:result.available,storage:result.storage,historyPartial:true,reference:messageReference(group,message),posting:result.posting,messages:[{id:message.id,at:message.at,text:message.text,author:message.author,source,turnId:message.turnId,deliveryId:message.deliveryId,replyTo:message.replyTo,targets}]};
-              // A post is already durable. Never turn a large acknowledgement
-              // into an apparent delivery failure by returning the room history.
-              if(Buffer.byteLength(JSON.stringify(result),'utf8')>512*1024){result.messages=[];result.contentOmitted=true;}
+              result=contributionReceipt(group,message,result.posting);
             }
           }
           break;

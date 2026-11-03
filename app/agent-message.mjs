@@ -43,3 +43,11 @@ export function formatAgentMessage({group,message,requestId,replyMode='final',ma
  const excerpt=long?line(body,240):body;
  return sender+': '+excerpt.slice(0,allowance)+(long||excerpt.length>allowance?'\n[Excerpt; full message at source.]':'')+suffix;
 }
+
+// Scoped write acknowledgement: one bounded preview and an exact immutable source
+// reference. History remains available only through the explicit read endpoint.
+export function contributionReceipt(group,message,posting){
+ const source=message.source?Object.fromEntries(['sessionId','nativeThreadId','provider','host'].map(key=>[key,message.source[key]])):null;
+ const targets=(message.targets??[]).slice(0,32).map(target=>Object.fromEntries(['sessionId','status','reasonCode','requestId'].filter(key=>target[key]!==undefined).map(key=>[key,target[key]])));
+ return {id:group.id,title:group.title,version:group.version,messageId:message.id,historyPartial:true,receiptOnly:true,reference:messageReference(group,message),...(posting?{posting}:{}),storage:{messageCount:group.messages.length},messages:[{id:message.id,at:message.at,text:message.text.slice(0,240),contentOmitted:message.text.length>240,source,turnId:message.turnId,deliveryId:message.deliveryId,replyTo:message.replyTo,targets,targetCount:(message.targets??[]).length}]};
+}

@@ -2,9 +2,10 @@ import { implicitRoomWake } from "./room-subscriptions.mjs";
 import { createHash } from "node:crypto";
 export function messageDelivery(message) {
   const targets = message?.targets ?? [];
-  return { messageId: message?.id, roomPosted: !!message, selectedRecipients: targets.length,
-    notificationStatus: !targets.length ? 'no-recipients' : 'see-recipient-receipts',
-    ...(targets.length ? {} : { warning: 'Posted to room; no agent notified. Mention a recipient to request another turn.' }),
+  const blockedReason=message?.routing?.status==='forward-hop-limit-reached'?'Forward-hop limit reached. Start a new opening post without replyTo; earlier messages will not be replayed.':message?.routing?.status==='target-budget-exhausted'?'Exchange recipient budget exhausted. Start a new opening post for another exchange.':null;
+  return { ...(blockedReason?{routingStatus:message.routing.status}:{}),messageId: message?.id, roomPosted: !!message, selectedRecipients: targets.length,
+    notificationStatus: blockedReason ? 'routing-limited' : !targets.length ? 'no-recipients' : 'see-recipient-receipts',
+    ...(blockedReason ? {warning:'Posted to room. '+blockedReason} : targets.length ? {} : { warning: 'Posted to room; no agent notified. Mention a recipient to request another turn.' }),
     nativeAnswerConfirmed: targets.some(target => ['native-agent-replied', 'native-participant-contributed'].includes(target.status)) };
 }
 // Bounded direct room delivery only; no work claims, scheduler or idle models.
@@ -111,7 +112,7 @@ export async function routeConversation(engine, { codexAgents, channels }, group
       else if (channels.isConnected(target.sessionId) || channels.canQueue?.(target.sessionId)) target.status = (await channels.deliver({ sessionId: target.sessionId,
         discussionId: group.id, messageId: message.id, text: message.text, requestId })).status;
       else target.status = "participant transport unavailable; not dispatched";
-    } catch { target.status = "native agent unavailable or access changed"; }
+    } catch(error) { target.status = "native agent unavailable or access changed"; if(['native_delivery_capacity_busy','channel_inbox_capacity_busy'].includes(error.code)){target.reasonCode=error.code;target.undispatched=true;target.reason='Native delivery capacity is busy; no input was submitted';} }
     engine.store.save();
   }
 }
