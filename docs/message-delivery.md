@@ -8,7 +8,7 @@ Release review: @codex2 Persistence tests passed; please review the result.
 Room: Release coordination · @claude1 · 2026-01-01T12:00:00Z
 ```
 
-Short message text appears once, followed by the room, sender alias, time, exact source reference and reply instructions. A human can open a link to the exact message on the companion device; ordinary owner-browser authentication still applies. Owner-authenticated posts say **Owner**; a peer's text never acquires owner authority. The service does not invent a priority or summarize private transcripts. Messages over 1,800 characters carry a labeled 240-character excerpt, exact message reference and SHA-256 rather than the entire body. The existing discussion store retains the original text.
+Short message text appears once, followed by the room, sender alias, time, exact source reference and reply instructions. A human can open a link to the exact message on the companion device; ordinary owner-browser authentication still applies. Owner-authenticated posts say **Owner**; a peer's text never acquires owner authority. The service does not invent a priority or summarize private transcripts. Main-thread messages over 1,800 characters carry a labeled 240-character excerpt, exact message reference and SHA-256 rather than the entire body. The existing discussion store retains the original text.
 
 ## References and repeated context
 
@@ -20,7 +20,9 @@ The native context hook now supplies short excerpts and source/message IDs inste
 
 Small actionable messages stay inline because another tool call and response may cost more than repeating a short instruction. The long-message cutoff is a deterministic size heuristic, not a provider-specific price optimizer. Referencing saves input when the full body is already known or irrelevant; fetching it adds a round trip and reference overhead when needed. No monetary or token-billing savings are claimed from character counts, and native prompt caching remains client/provider-owned. Small provenance and reply safeguards remain inline so they survive missing guides or compacted context.
 
-## Delivery defaults
+## Delivery in Main thread mode
+
+The following table applies when the owner selects **Main thread**. See [Side chat delivery](#side-chat-delivery) for the default.
 
 | Message | Qualified Codex route | Claude route |
 | --- | --- | --- |
@@ -82,3 +84,5 @@ The discussion default for new posts is **Side chat**. The local owner can chang
 On a qualified Codex App Server connection, a side question uses an ephemeral fork of the exact target, a read-only sandbox, and no approvals. Desktop disables configured external tool servers for the child and checks its inventory before starting the side turn. It listens for the child's exact answer and stores the bounded answer with side-chat attribution in the existing room. No request queues, steers, resumes or cancels the parent. Each new question can open a fresh child; there is no permanent assistant thread. The side model still sees the permitted parent context and consumes usage; no token-savings claim is made.
 
 Claude Code offers interactive `/btw`; automatic invocation and answer capture are not qualified. If a provider, its native transport or a Codex control socket cannot open a side chat, the message remains visible in the room with its delivery status. It never silently falls through to the main chat. An unconfirmed side answer is not retried. Select **Main thread** explicitly for work direction or when intentionally using the existing Claude delivery route.
+
+Run `node scripts/codex-side-proof.mjs` with a supported Codex CLI to reproduce the isolated App Server test. It uses a synthetic loopback model, temporary native home and separate fixture thread; it never attaches to an existing user session or makes a paid model request.
