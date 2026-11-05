@@ -722,6 +722,7 @@ export async function startServer({
           fabric.close();
           engine.fabricObservationOptions = undefined;
           engine.fabricProject = null;
+          engine.fabricWorkspace = null;
           store.audit("Fabric disconnected");
           result = fabric.diagnostics();
           break;

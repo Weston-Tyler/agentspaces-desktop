@@ -6,6 +6,7 @@ import {
   verifySignedGroupAd,
   wire,
 } from "@agentspaces/client";
+import { TlsDialer } from "@agentspaces/client/node";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
@@ -49,9 +50,13 @@ export class FabricAdapter {
     return this._status;
   }
   set status(value) { this._status = value; }
-  async connect({ host, port, groupId, scheme = 'tcp' }) {
-    if (scheme !== 'tcp')
-      throw new Error('Desktop qualifies loopback TCP to an upstream gateway. DTLS/QUIC belong on the Java gateway links; they are not direct TypeScript dialers.');
+  async connect({ host, port, groupId, scheme = 'tcp', seedPeerId }) {
+    if (!['tcp', 'tls'].includes(scheme))
+      throw new Error('Desktop uses loopback TCP or pinned TLS. DTLS/QUIC belong on the Java gateway links.');
+    if (scheme === 'tls' && (typeof seedPeerId !== 'string' || !/^z[1-9A-HJ-NP-Za-km-z]{40,46}$/.test(seedPeerId)))
+      throw new Error('TLS requires the trusted seed PeerID');
+    if (scheme === 'tcp' && seedPeerId !== undefined)
+      throw new Error('A seed PeerID requires TLS');
     if (!["127.0.0.1", "::1"].includes(host))
       throw new Error("This alpha qualifies literal-loopback seeds only.");
     if (
@@ -66,6 +71,21 @@ export class FabricAdapter {
     this.close();
     const identity = loadOrCreateIdentity(`${this.stateRoot}/fabric-keys`);
     this.peer = new Peer(identity, groupId, this.clock);
+    this.scheme = scheme;
+    if (scheme === 'tls') {
+      const upstream = new TlsDialer();
+      // joinByGroupId still selects the default scheme in 0.5.0. On this
+      // peer both selectors are pinned TLS; neither can send a plain frame.
+      const dial = async (seed, context) => {
+        const channel = await upstream.dial({ ...seed, scheme: 'tls' }, context);
+        if (channel.attestedPeer() !== seedPeerId) {
+          channel.close();
+          throw new Error('TLS seed identity differs from the configured PeerID');
+        }
+        return channel;
+      };
+      for (const name of ['tcp', 'tls']) this.peer.registerDialer({scheme:name, dial});
+    }
     this.status = "connecting";
     try {
       const path = join(this.stateRoot, "founding.cbor");
@@ -74,7 +94,7 @@ export class FabricAdapter {
         // A verified cached founding document is the existing configured-group contract.
         // Reconnect need not bootstrap while a seed still holds the old member route.
         this.peer.founding = saved;
-        await this.peer.connect(host, port);
+        await this.peer.connect(host, port, scheme);
       } else {
         await this.peer.joinByGroupId(host, port, groupId, 10000);
         const temp = path + ".tmp";
@@ -84,7 +104,7 @@ export class FabricAdapter {
       this.peer.pullAds();
       this.status = "connected";
       this.reason =
-        "Verified founding document and loopback TCP connection; admission/liveness not independently acknowledged";
+        `Verified founding document and loopback ${scheme === 'tls' ? 'pinned TLS' : 'TCP'} connection; admission/liveness not independently acknowledged`;
     } catch (e) {
       this.close();
       this.status = "disconnected";
@@ -163,7 +183,7 @@ export class FabricAdapter {
       bindingVersion,
       bindingSource: "package.json declared dependency pin",
       wireVersion: wire.WIRE_VERSION,
-      transport: { desktop: 'loopback-tcp', gatewaySchemes: ['dtls', 'quic'],
+      transport: { desktop: this.scheme === 'tls' ? 'loopback-tls' : 'loopback-tcp', supportedDesktop: ['loopback-tcp', 'loopback-tls'], gatewaySchemes: ['dtls', 'quic'],
         gatewayManagedBy: 'upstream Java PeerNode', gatewayConnected: null,
         nativeDelivery: 'separate native channel / SSH routes' },
       recovery: { managedBy: "upstream Peer", inProgress: disconnected ? null : false, reconnectWindowMillis: counter(this.peer?.reconnectWindowMs) },

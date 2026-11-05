@@ -4,17 +4,18 @@ import { generateKeyPairSync, createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Identity, Peer, cbor, cryptoPort, bytes, nobleCrypto } from '@agentspaces/client';
+import { Identity, Peer, cbor, cryptoPort, bytes, nobleCrypto, wire } from '@agentspaces/client';
 import { loadOrCreateIdentity, agentKeys } from '../app/agentspaces-node.mjs';
 import { FabricAdapter } from '../app/fabric.mjs';
 import { assertReplicaRetained } from '../app/replica-compatibility.mjs';
 
-test('0.4 Node adapter registers TCP and selects the owning OpenSSL crypto port', () => {
+test('0.5 Node adapter registers TCP and TLS and selects the owning OpenSSL crypto port', () => {
   const fabric = new FabricAdapter(), peer = new Peer(Identity.generate(), 'synthetic-group');
   try {
-    assert.equal(fabric.diagnostics().bindingVersion, '0.4.0');
+    assert.equal(fabric.diagnostics().bindingVersion, '0.5.0');
     assert.equal(cryptoPort().name, 'node');
     assert.ok(peer.dialableSchemes().includes('tcp'));
+    assert.ok(peer.dialableSchemes().includes('tls'));
     assert.ok(!peer.dialableSchemes().includes('dtls'));
     assert.ok(!peer.dialableSchemes().includes('quic'));
     const seed = new Uint8Array(32).fill(7), message = cbor.dumps({ fixture: true });
@@ -68,4 +69,34 @@ test('unsupported direct UDP transports fail before detaching an existing connec
   assert.equal(closed,false);
   assert.equal(fabric.status,'connected');
   assert.equal(fabric.diagnostics().transport.gatewayConnected,null);
+});
+
+test('upstream TLS joins a new group, reconnects with its verified founding, and refuses a different seed identity', async t => {
+  const { foundGroup, verifySignedGroupAd } = await import('@agentspaces/client');
+  const { TlsListener } = await import('@agentspaces/client/node');
+  const identity = Identity.generate(), now = new Date().toISOString();
+  const founding = foundGroup(identity, 'Synthetic Desktop TLS', 'OPEN', 'EAGER', 3, 'PT1S', now, 'PT1H');
+  const groupId = verifySignedGroupAd(founding);
+  assert.ok(groupId);
+  let requests=0;
+  const close = await new TlsListener(identity).listen('127.0.0.1:0', channel => channel.onFrame(frame=>{
+    const envelope=wire.decodeFrame(frame);
+    if(envelope?.kind!=='GROUP_AD_WANT')return;
+    requests++;
+    channel.send(wire.encodeFrame(wire.envelope(groupId,'GROUP_AD',identity.peerId,wire.hlcNow(identity.peerId,Date.now()),wire.groupAdBody(founding)),identity));
+  }));
+  const root = mkdtempSync(join(tmpdir(),'as-desktop-tls-'));
+  const adapter = new FabricAdapter({stateRoot:root});
+  t.after(() => {adapter.close();close();rmSync(root,{recursive:true,force:true});});
+  const config = {host:'127.0.0.1',port:Number(close.address.split(':').at(-1)),groupId,scheme:'tls',seedPeerId:identity.peerId};
+  await adapter.connect(config);
+  assert.equal(adapter.diagnostics().status,'connected');
+  assert.equal(adapter.diagnostics().transport.desktop,'loopback-tls');
+  assert.equal(verifySignedGroupAd(adapter.peer.founding),groupId);
+  adapter.close();
+  await adapter.connect(config);
+  assert.equal(adapter.peer.currentSeed().scheme,'tls');
+  await assert.rejects(adapter.connect({...config,seedPeerId:Identity.generate().peerId}),/TLS seed identity differs/);
+  assert.equal(adapter.status,'disconnected');
+  assert.equal(requests,1,'verified cache skips re-bootstrap; wrong TLS peer receives no founding request');
 });

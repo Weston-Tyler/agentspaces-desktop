@@ -37,6 +37,7 @@ export class Engine {
     this.modelCalls = 0;
     this.tools = [];
     this.fabricProject = null;
+    this.fabricWorkspace = null;
     this.published = store.data.published ?? {};
     this.workspace = new WorkspaceMap(this);
     this.workBoard = new WorkBoard(this);
@@ -310,17 +311,32 @@ export class Engine {
     };
   }
   async connectFabric(config) {
-    const p = this.project(config.project);
-    if (!p.fixture)
-      throw new Error(
-        "Native private-content fabric admission is not qualified; local fixture project only",
-      );
+    if (this.fabric.status === 'connecting') throw Error('A fabric connection is already in progress');
+    if (config.observeWorkspace !== undefined && typeof config.observeWorkspace !== 'boolean')
+      throw Error('Invalid workspace observation mode');
+    let workspace = null, project = null;
+    if (config.observeWorkspace === true) {
+      const p = this.workspace.index?.profile;
+      if (config.scheme !== 'tls' || !p?.active || p.policy !== 'local-retrieval')
+        throw Error('Workspace observations require an active local workspace and a pinned TLS seed');
+      workspace = { id:p.id, account:p.account };
+    } else {
+      project = this.project(config.project);
+      if (!project.fixture) throw Error('Native private-content fabric admission is not qualified; local fixture project only');
+    }
     const observations = configureFleetObservations(config.observationSpaces);
+    this.fabricProject = null; this.fabricWorkspace = null; this.fabricObservationOptions = undefined;
     await this.fabric.connect(config);
+    const current = this.workspace.index?.profile;
+    if (workspace && (!current?.active || current.policy !== 'local-retrieval' || current.id !== workspace.id || current.account !== workspace.account)) {
+      this.fabric.close();
+      throw Error('Workspace access changed while connecting');
+    }
     this.fabricObservationOptions = observations;
+    this.fabricProject = project?.id ?? null;
+    this.fabricWorkspace = workspace;
     for (const key of ['usage', 'advisory']) if (observations[key]) this.fabric.peer.pullSpace(observations[key]);
-    this.fabricProject = p.id;
-    this.store.audit("Loopback fabric connected", { project: p.id });
+    this.store.audit("Loopback fabric connected", { project: project?.id ?? null, workspaceObservations:!!workspace });
     return this.fabric.diagnostics();
   }
   async publish(id) {

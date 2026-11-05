@@ -1,5 +1,7 @@
 # Upstream wire v3 integration
 
+This describes the historical 0.4.0 qualification. See [the current 0.5 integration](upstream-05.md) for the active Desktop pin and workspace observations.
+
 This guide describes the wire-v3 integration, updated for the 2026-10-20
 AgentSpaces 0.4.0 source pin. Published installers and individual companion
 installations remain separately qualified. See [0.4.0 migration and transports](upstream-040.md).

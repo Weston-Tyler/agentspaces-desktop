@@ -70,7 +70,7 @@ The UI currently displays the first bounded page; filtering/pagination is pendin
 
 The upstream exact-selection/snapshot extension is merged in
 [AgentSpaces TypeScript PR #2](https://github.com/badmonkeyai/agentspaces-typescript/pull/2).
-Desktop now pins `fa20e215a002a7085f9f8f526be1af6bb8b82304`, which retains that extension and adds wire-v3 and Space events.
+The current [0.5 TypeScript pin](upstream-05.md) retains that extension, wire v3 and Space events.
 This source integration does not imply an installed or released Desktop build.
 
 ## Agent lanes and report artifacts
