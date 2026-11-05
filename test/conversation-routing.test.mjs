@@ -24,6 +24,8 @@ test('room defaults to side, unsupported Claude stays pending, and a one-message
  const pending=post('side-route-default');await routeConversation(engine,transport,group,pending);
  assert.equal(engine.discussions.policy(group).destination,'side');
  assert.equal(pending.targets[0].status,'side-chat-unavailable');
+ assert.equal(messageDelivery(pending).notificationStatus,'side-chat-pending');
+ assert.equal(messageDelivery(pending).targets[0].reasonCode,'native_side_provider_unavailable');
  assert.equal(nativeMainCalls,0);
  const explicit=post('side-route-main','main');await routeConversation(engine,transport,group,explicit);
  assert.equal(nativeMainCalls,1);

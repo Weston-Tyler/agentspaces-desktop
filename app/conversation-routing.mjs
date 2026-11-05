@@ -4,8 +4,10 @@ import { createHash } from "node:crypto";
 export function messageDelivery(message) {
   const targets = message?.targets ?? [];
   const blockedReason=message?.routing?.status==='forward-hop-limit-reached'?'Forward-hop limit reached. Start a new opening post without replyTo; earlier messages will not be replayed.':message?.routing?.status==='target-budget-exhausted'?'Exchange recipient budget exhausted. Start a new opening post for another exchange.':null;
+  const sidePending = targets.length > 0 && targets.every(target=>target.status==='side-chat-unavailable');
   return { ...(blockedReason?{routingStatus:message.routing.status}:{}),messageId: message?.id, roomPosted: !!message, selectedRecipients: targets.length,
-    notificationStatus: blockedReason ? 'routing-limited' : !targets.length ? 'no-recipients' : 'see-recipient-receipts',
+    notificationStatus: blockedReason ? 'routing-limited' : !targets.length ? 'no-recipients' : sidePending ? 'side-chat-pending' : 'see-recipient-receipts',
+    targets: targets.slice(0,32).map(t=>({sessionId:t.sessionId,status:t.status,deliveryMode:t.deliveryMode??null,reasonCode:t.reasonCode??null})),
     ...(blockedReason ? {warning:'Posted to room. '+blockedReason} : targets.length ? {} : { warning: 'Posted to room; no agent notified. Mention a recipient to request another turn.' }),
     nativeAnswerConfirmed: targets.some(target => ['native-agent-replied', 'native-participant-contributed'].includes(target.status)) };
 }
@@ -113,6 +115,7 @@ export async function routeConversation(engine, { codexAgents, channels }, group
         target.status = 'side-chat-unavailable';
         target.deliveryMode = 'side';
         target.undispatched = true;
+        target.reasonCode = 'native_side_provider_unavailable';
         target.reason = 'Automatic native side chat is unavailable for this client; kept in the room';
       } else if (!source.fixture && source.provider === "codex") target.status = codexAgents.dispatch({ sessionId: source.id,
         discussionId: group.id, messageId: message.id, text: message.text, requestId, destination }).status;

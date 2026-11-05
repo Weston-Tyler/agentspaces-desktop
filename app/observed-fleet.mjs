@@ -39,7 +39,7 @@ export function observedFleet(engine,input={},binding=null) {
  // content is deleted from the owning peer; omitted observations are explicit.
  for(const [section,key] of [['discovery','cards'],['discovery','models'],['usage','observations'],['usage','models'],['advisory','proposals'],['semantic','matches']]){
   const view=result[section],rows=view[key];let bytes=0,keep=0;
-  for(const row of rows){bytes+=Buffer.byteLength(JSON.stringify(row))+1;if(bytes>(section==='discovery'?64:96)*1024)break;keep++;}
+  for(const row of rows){bytes+=Buffer.byteLength(JSON.stringify(row))+1;if(bytes>(section==='discovery'?56:96)*1024)break;keep++;}
   if(keep<rows.length){view[key]=rows.slice(0,keep);view.truncated=true;if(view.coverage)view.coverage.truncated=true;result.response.truncated=true;}
  }
  if(result.usage.truncated)for(const model of result.usage.models){model.promptTokens=null;model.completionTokens=null;model.totalTokens=null;model.reason='response_truncated';}

@@ -144,11 +144,13 @@ export async function startServer({
   } });
   const broadcasts = new AgentBroadcast(engine);
   const routeBatches = async result => {
+    const batches = [];
     for (const batch of result.batches) {
-      const group = engine.discussions.group(batch.discussionId);
-      await routeConversation(engine, { codexAgents, channels }, group, group.messages.find(m => m.id === batch.messageId));
+      const group = engine.discussions.group(batch.discussionId), message = group.messages.find(m => m.id === batch.messageId);
+      await routeConversation(engine, { codexAgents, channels }, group, message);
+      batches.push({...batch,posting:messageDelivery(message)});
     }
-    return result;
+    return {...result,batches};
   };
   const continuationWaker=new ContinuationWaker(engine,{inspect:id=>codexAgents.inspectContinuation(id),route:(group,message)=>routeConversation(engine,{codexAgents,channels},group,message),dispatchAllowed:()=>!closing&&(!engine.dispatchAllowed||engine.dispatchAllowed())});
   let connections, participantConnections, sourceBindings, automaticConnections;
@@ -483,6 +485,7 @@ export async function startServer({
           result = await peerMessages.send(data, connector);
           const group = engine.discussions.group(result.discussionId), message = group.messages.find(m => m.id === result.messageId);
           await routeConversation(engine, { codexAgents, channels }, group, message);
+          result.posting = messageDelivery(message);
           break;
         }
         case '/api/agent/broadcast':
