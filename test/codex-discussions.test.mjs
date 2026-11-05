@@ -435,3 +435,47 @@ test('busy native admission defers durably, then recovers once without replaying
 test('deferred native capacity never bypasses subsequent sharing revocation',async t=>{
  const f=setup();t.after(()=>{f.hub.aborters.clear();f.hub.close();});f.args.budget={timeoutMs:90000,maxOutputTokens:800};for(let i=0;i<1000;i++)f.hub.aborters.set('active-'+i,new AbortController());f.hub.dispatch(f.args);f.hub.aborters.clear();f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].nextRetryAt=new Date(0).toISOString();f.engine.grant(f.source.id,{share:false});assert.deepEqual((await f.hub.recoverUndispatched()).recovered,[]);assert.equal(f.counters.factory,0);assert.equal(f.counters.answer,0);
 });
+
+test('side delivery stores one attributed room answer without steering or queuing its parent', async t => {
+  const f=setup(), child='12345678-1234-4234-8234-123456789012', calls=[];
+  t.after(()=>f.hub.close());
+  f.engine.store.data.desktopPreferences={allowNativeFullAccess:true};
+  const factory=f.hub.adapterFactory;
+  f.hub.adapterFactory=options=>{
+    const adapter=factory(options);
+    adapter.request=async(method,params)=>{
+      calls.push([method,params.threadId]);
+      if(method==='thread/read')return {thread:{id:THREAD,cwd:f.source.cwd,status:{type:'active'}}};
+      if(method==='config/read')return {config:{}};
+      if(method==='thread/fork')return {thread:{id:child,forkedFromId:THREAD,cwd:f.source.cwd,ephemeral:true},cwd:f.source.cwd,sandbox:{type:'readOnly'},approvalPolicy:'never'};
+      if(method==='mcpServerStatus/list')return {data:[],nextCursor:null};
+      if(method==='turn/start'){
+        const receipt=f.engine.store.data.codexDiscussionDeliveries[f.args.requestId];
+        assert.equal(receipt.status,'side-chat-submitting');assert.equal(receipt.uncertainOutcome,true);
+        adapter.events.emit('notification',{method:'item/completed',params:{threadId:child,turnId:TURN,item:{type:'agentMessage',phase:'final_answer',text:'Fixture side reply'}}});
+        adapter.events.emit('notification',{method:'turn/completed',params:{threadId:child,turn:{id:TURN,status:'completed'}}});
+        return {turn:{id:TURN}};
+      }
+      if(method==='thread/unsubscribe')return {};
+      throw Error('Unexpected RPC');
+    };
+    return adapter;
+  };
+  const args={...f.args,destination:'side'};
+  f.hub.dispatch(args);
+  const effect=await f.hub.wait(args.requestId);
+  assert.equal(effect.status,'native-agent-replied');
+  assert.equal(effect.sideThreadId,child);
+  assert.equal(effect.uncertainOutcome,false);
+  const group=f.engine.discussions.group(args.discussionId);
+  const replies=group.messages.filter(m=>m.replyTo===args.messageId);
+  assert.equal(replies.length,1);
+  assert.equal(replies[0].text,'Fixture side reply');
+  assert.equal(replies[0].nativeSideReply,true);
+  assert.equal(replies[0].source.nativeThreadId,THREAD);
+  assert.equal(replies[0].replyNotificationVersion,0);
+  assert.deepEqual(calls.filter(([m])=>m==='turn/start'),[['turn/start',child]]);
+  assert.equal(f.counters.bind,0);assert.equal(f.counters.answer,0);
+  assert.equal(f.hub.dispatch(args).duplicate,true);
+  assert.throws(()=>f.hub.dispatch({...args,destination:'main'}),/reused/);
+});

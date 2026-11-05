@@ -13,3 +13,24 @@ test('an alias blocked by ancestry limits gets an actionable receipt; a fresh op
  const fresh=post('@codex1 New opening',null,'fresh');await routeConversation(engine,transport,group,fresh);assert.equal(fresh.targets[0].sessionId,peer.id);assert.equal(messageDelivery(fresh).selectedRecipients,1);assert.equal(calls,1);
  await routeConversation(engine,transport,group,old);await routeConversation(engine,transport,group,fresh);assert.equal(calls,1);assert.equal(engine.modelCalls,0);
 });
+
+test('room defaults to side, unsupported Claude stays pending, and a one-message main override works',async t=>{
+ const root=mkdtempSync(join(tmpdir(),'as-routing-side-'));t.after(()=>rmSync(root,{recursive:true,force:true}));const engine=new Engine(new Store(root),new FabricAdapter({stateRoot:root}));engine.loadSample();
+ const sender=engine.session('sample-codex-old'),peer=engine.session('sample-claude-new');peer.fixture=false;
+ for(const s of [sender,peer])engine.grant(s.id,{enrolled:true,content:true,retrieve:true,share:true});
+ const id=engine.discussions.create({title:'Side routing fixture',sessionIds:[sender.id,peer.id],agentInitiation:true}).id;const group=engine.discussions.group(id);let nativeMainCalls=0;
+ const transport={codexAgents:{},channels:{isConnected:()=>true,async deliver(){nativeMainCalls++;return {status:'delivered-to-native-transport'};}}};
+ const post=(deliveryId,destination)=>{engine.discussions.post({id,text:'What was verified?',targets:[peer.id],deliveryId,destination});return group.messages.at(-1);};
+ const pending=post('side-route-default');await routeConversation(engine,transport,group,pending);
+ assert.equal(engine.discussions.policy(group).destination,'side');
+ assert.equal(pending.targets[0].status,'side-chat-unavailable');
+ assert.equal(nativeMainCalls,0);
+ const explicit=post('side-route-main','main');await routeConversation(engine,transport,group,explicit);
+ assert.equal(nativeMainCalls,1);
+ assert.equal(engine.discussions.policy(group).destination,'side');
+ engine.discussions.setPolicy({id,destination:'main'});
+ await routeConversation(engine,transport,group,pending);
+ assert.equal(nativeMainCalls,1,'no replay on changing the room preference');
+ await routeConversation(engine,transport,group,post('main-room-default'));
+ assert.equal(nativeMainCalls,2);
+});

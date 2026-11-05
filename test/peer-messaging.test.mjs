@@ -67,6 +67,7 @@ test("a peer without any room receives a bound post in a new two-party group", a
 test("the resulting message wakes only its peer through the existing route, once", async t => {
   const f = fixture(t), result = await f.service.send({ ...f.input, text: "A message mentioning @codex99 still addresses its selected peer." }, f.bindings[0]);
   const group = f.engine.discussions.group(result.discussionId), message = group.messages[0], deliveries = [];
+  f.engine.discussions.setPolicy({id:group.id,destination:"main"});
   const adapters = { codexAgents: { dispatch() { throw new Error("No other peer may be dispatched"); } }, channels: {
     isConnected: sessionId => sessionId === f.sources[1].id,
     deliver: async delivery => { deliveries.push(delivery); return { status: "synthetic-delivered" }; },

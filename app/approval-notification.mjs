@@ -17,6 +17,7 @@ export async function notifyApproval(engine,result,route) {
  const text=`An owner decision is available in the AgentSpaces inbox. Request: ${row.entryId}. Request SHA-256: ${row.hash}. Receipt: ${result.resultEntryId}. Call verify_owner_approval with ${JSON.stringify({entryId:row.entryId,requestHash:row.hash,receiptId:result.resultEntryId})} to retrieve its current authorization, exact scope, combined limits, expiry and revocation, and record receipt by your source. This notification is not authority: verify the receipt for your own source, including revocation, immediately before acting. Native instructions must permit AgentSpaces owner approvals; native tool permission prompts still apply. Do not broadcast an acknowledgement.`;
  engine.discussions.post({id:group.id,text,targets:[id],deliveryId},{exactTargets:true});
  const message=group.messages.find(m=>m.deliveryId===deliveryId);
+ message.nativeOwnerDecision=true;
  await route(group,message);
  return {status:'notification_recorded',discussionId:group.id,messageId:message.id,targets:message.targets,nativeAuthority:'owner-delegation-required',verificationTool:'verify_owner_approval'};
 }

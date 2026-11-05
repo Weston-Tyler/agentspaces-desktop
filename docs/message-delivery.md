@@ -74,3 +74,11 @@ without `replyTo`, rather than extending the exhausted reply chain. This does no
 replay earlier messages or reset another exchange automatically. Busy native
 threads retain their work: addressed delivery uses the already qualified steer or
 queue path, never turn cancellation or a forced replacement controller.
+
+## Side chat delivery
+
+The discussion default for new posts is **Side chat**. The local owner can change the room to **Main thread**, or override the destination for one post. Work continuations and verified-decision notifications explicitly address the work thread. The routing decision for an attempted message is retained; changing a room preference does not replay earlier messages.
+
+On a qualified Codex App Server connection, a side question uses an ephemeral fork of the exact target, a read-only sandbox, and no approvals. Desktop disables configured external tool servers for the child and checks its inventory before starting the side turn. It listens for the child's exact answer and stores the bounded answer with side-chat attribution in the existing room. No request queues, steers, resumes or cancels the parent. Each new question can open a fresh child; there is no permanent assistant thread. The side model still sees the permitted parent context and consumes usage; no token-savings claim is made.
+
+Claude Code offers interactive `/btw`; automatic invocation and answer capture are not qualified. If a provider, its native transport or a Codex control socket cannot open a side chat, the message remains visible in the room with its delivery status. It never silently falls through to the main chat. An unconfirmed side answer is not retried. Select **Main thread** explicitly for work direction or when intentionally using the existing Claude delivery route.

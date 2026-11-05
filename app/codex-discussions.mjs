@@ -1,3 +1,4 @@
+import {answerCodexSide} from './codex-side-chat.mjs';
 import {deliveryIntent,formatAgentMessage} from './agent-message.mjs';
 import { REMOTE_HOST } from "./remote-host.mjs";
 import { createHash } from "node:crypto";
@@ -11,6 +12,8 @@ export class CodexDiscussionHub {
   constructor(engine, { adapterFactory, onContribution } = {}) {
     this.engine = engine; this.adapterFactory = adapterFactory ?? (options => new CodexQueueAdapter(options)); this.verifyProvider = !adapterFactory; this.adapters = new Map(); this.bindings = new Map(); this.pending = new Map(); this.aborters = new Map(); this.closed = false;
     this.onContribution = onContribution;
+    this.sideActive = new Set();
+    this.sideAdapters = new Set();
     engine.store.data.codexDiscussionDeliveries ??= {};
     engine.store.data.codexDiscussionNativeReceipts ??= {};
     engine.store.data.codexDiscussionProofs ??= {};
@@ -112,24 +115,96 @@ export class CodexDiscussionHub {
     this.bindings.set(source.id, promise);
     try { return await promise; } catch (error) { this.bindings.delete(source.id); this.adapters.get(source.id)?.close(); this.adapters.delete(source.id); throw error; }
   }
-  dispatch({ sessionId, discussionId, messageId, text, requestId, budget = { timeoutMs: 90000, maxOutputTokens: 800 } }) {
+  dispatch({ sessionId, discussionId, messageId, text, requestId, destination = 'main', budget = { timeoutMs: 90000, maxOutputTokens: 800 } }) {
     this.validate(sessionId, discussionId, messageId);
     this.validateContinuation(sessionId,discussionId,messageId);
     if (!/^[a-zA-Z0-9_-]{8,128}$/.test(requestId ?? "") || typeof text !== "string" || !text.trim() || text.length > 8000) throw new Error("Invalid native conversation message");
     if (!Number.isInteger(budget.timeoutMs) || budget.timeoutMs < 1 || budget.timeoutMs > 90000 || !Number.isInteger(budget.maxOutputTokens) || budget.maxOutputTokens < 1 || budget.maxOutputTokens > 800) throw new Error("Invalid native conversation budget");
-    const inputHash = hash({ sessionId, discussionId, messageId, text, budget });
+    if (!['main','side'].includes(destination)) throw new Error('Unknown native delivery destination');
+    const inputHash = hash({ sessionId, discussionId, messageId, text, budget, ...(destination==='side'?{destination}:{}) });
     const effects = this.engine.store.data.codexDiscussionDeliveries, previous = effects[requestId];
     if (previous) { if (previous.inputHash !== inputHash) throw new Error("Native message identity reused for different content"); return { ...previous, duplicate: true, replayed: false }; }
     const continuation=!!this.engine.discussions.group(discussionId).messages.find(message=>message.id===messageId)?.continuation;
-    const effect = { requestId, sessionId, discussionId, messageId, inputHash, continuation, status: "connecting-native-agent", retryAllowed: false, at: new Date().toISOString() };
+    const effect = { requestId, sessionId, discussionId, messageId, inputHash, continuation, ...(destination==='side'?{destination,deliveryMode:'side'}:{}), status: "connecting-native-agent", retryAllowed: false, at: new Date().toISOString() };
     if (this.aborters.size >= 1000) {
       Object.assign(effect,{status:'waiting-for-native-delivery-capacity',reasonCode:'native_delivery_capacity_busy',reason:'Waiting for native delivery capacity; no input submitted',undispatched:true,uncertainOutcome:false,recoveryDeadline:new Date(Date.now()+86400000).toISOString(),nextRetryAt:new Date(Date.now()+15000).toISOString()});
       effects[requestId]=effect;this.engine.store.save();return {...effect};
     }
     effects[requestId] = effect; this.engine.store.save();
     const abort = new AbortController(); this.aborters.set(requestId, abort);
-    const run = this.run(effect, text, budget, abort.signal).finally(() => { this.aborters.delete(requestId); this.pending.delete(requestId); });
+    const run = (destination==='side' ? this.runSide(effect, budget, abort.signal) : this.run(effect, text, budget, abort.signal)).finally(() => { this.aborters.delete(requestId); this.pending.delete(requestId); });
     this.pending.set(requestId, run); return { ...effect };
+  }
+  async runSide(effect, budget, signal) {
+    let adapter, occupied = false, submitted = false;
+    const { discussionId, messageId, sessionId, requestId } = effect;
+    const group = this.engine.discussions.group(discussionId);
+    const message = group.messages.find(m=>m.id===messageId);
+    const target = message.targets?.find(t=>t.sessionId===sessionId);
+    const save = (status, extra = {}) => {
+      Object.assign(effect,{status,...extra});
+      if (target) Object.assign(target,{status,deliveryMode:'side',...Object.fromEntries(['reason','reasonCode','undispatched'].filter(k=>extra[k]!==undefined).map(k=>[k,extra[k]]))});
+      this.engine.store.save();
+    };
+    const denied = (code, reason) => Object.assign(Error(code), { code, publicReason:reason });
+    try {
+      const source = this.validate(sessionId,discussionId,messageId), cwd = source.cwd ?? this.engine.target(source).path;
+      const boundary = row => hash([row.nativeThreadId,row.host,row.account,row.project,row.scopeId??null,row.cwd??this.engine.target(row).path]);
+      const expected = boundary(source);
+      const fence = () => {
+        if (this.engine.dispatchAllowed?.() === false || this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true)
+          throw denied('native_side_policy_required','Native execution consent or the companion connection is unavailable');
+        if (boundary(this.validate(sessionId,discussionId,messageId)) !== expected)
+          throw denied('native_side_boundary_changed','The native source changed');
+      };
+      fence();
+      if (this.sideActive.size >= 4 || this.sideActive.has(sessionId))
+        throw denied('native_side_capacity','The side chat is busy; the message remains in the room');
+      this.sideActive.add(sessionId); occupied = true;
+      let checked;
+      if (this.verifyProvider) {
+        await this.engine.probe(source.host);
+        const tool = this.engine.tools.find(t=>t.host===source.host&&t.provider==='codex');
+        if (tool?.protocol?.sideChat?.compatible !== true)
+          throw denied('native_side_protocol_unavailable','This Codex client does not expose a qualified side-chat protocol');
+        checked = observedVersion(tool.version);
+      }
+      fence();
+      adapter = this.adapterFactory({host:source.host});
+      this.sideAdapters.add(adapter);
+      await adapter.open();
+      if (this.verifyProvider && (!checked || observedVersion(adapter.serverInfo?.userAgent) !== checked))
+        throw denied('native_side_protocol_unavailable','The running Codex server differs from the checked side-chat client');
+      const answer = await answerCodexSide(adapter,{
+        parentId:source.nativeThreadId,cwd,signal,timeoutMs:budget.timeoutMs,maxOutputTokens:budget.maxOutputTokens,fence,
+        question:formatAgentMessage({group,message,requestId,replyMode:'side',origin:this.engine.companionAddress}),
+        beforeStart:childId=>{
+          fence();
+          save('side-chat-submitting',{sideThreadId:childId,undispatched:false,uncertainOutcome:true});
+          submitted = true;
+        },
+      });
+      fence();
+      if (signal.aborted) throw Error('Side answer observation ended');
+      const deliveryId='codex-side-'+hash(requestId);
+      const binding={sessionId,account:source.account,project:source.project,scopeId:source.scopeId??null};
+      this.engine.discussions.contribute({id:discussionId,text:answer.text,nativeTurnId:answer.nativeTurnId,deliveryId,replyTo:messageId},binding,{nativeSideReply:true});
+      save('native-agent-replied',{nativeThreadId:source.nativeThreadId,nativeTurnId:answer.nativeTurnId,
+        replyMessageId:group.messages.find(m=>m.deliveryId===deliveryId)?.id,uncertainOutcome:false,usage:answer.usage});
+    } catch(error) {
+      // Never send the question to the parent, even if the fork expired, a
+      // model response is lost, or the user changes the room default.
+      save(submitted?'side-chat-reply-unconfirmed':'side-chat-unavailable',{
+        reasonCode: error.code?.startsWith('native_side_') ? error.code : 'native_side_unavailable',
+        reason: error.publicReason ?? (submitted?'Side chat reply was not confirmed; no retry or main-thread delivery':'Native side chat unavailable; kept in the room'),
+        undispatched:!submitted,uncertainOutcome:submitted,
+      });
+    } finally {
+      if (occupied) this.sideActive.delete(sessionId);
+      this.sideAdapters.delete(adapter);
+      adapter?.close();
+    }
+    return {...effect};
   }
   async run(effect, text, budget, signal) {
     let answerAttempted = false;
@@ -247,7 +322,7 @@ export class CodexDiscussionHub {
   wait(requestId) { return this.pending.get(requestId) ?? Promise.resolve(this.engine.store.data.codexDiscussionDeliveries[requestId]); }
   async recoverUndispatched({ includeLegacy = false } = {}) {
     if (this.recoveryRunning || this.closed || this.aborters.size >= 1000 || this.engine.dispatchAllowed?.() === false) return { recovered: [], skipped: true };
-    const candidates = Object.values(this.engine.store.data.codexDiscussionDeliveries).filter(effect => effect.undispatched === true && !this.engine.store.data.codexDiscussionNativeReceipts[effect.requestId] && !effect.nativeTurnId && !this.aborters.has(effect.requestId) && ((transientTransport.has(effect.reasonCode) && !effect.uncertainOutcome && Date.parse(effect.recoveryDeadline) > Date.now() && Date.parse(effect.nextRetryAt) <= Date.now()) || ((effect.retryCount ?? 0) < 3 && (effect.reasonCode === 'native_protocol_unavailable' || (includeLegacy && !effect.reasonCode)))));
+    const candidates = Object.values(this.engine.store.data.codexDiscussionDeliveries).filter(effect => effect.destination!=='side' && effect.undispatched === true && !this.engine.store.data.codexDiscussionNativeReceipts[effect.requestId] && !effect.nativeTurnId && !this.aborters.has(effect.requestId) && ((transientTransport.has(effect.reasonCode) && !effect.uncertainOutcome && Date.parse(effect.recoveryDeadline) > Date.now() && Date.parse(effect.nextRetryAt) <= Date.now()) || ((effect.retryCount ?? 0) < 3 && (effect.reasonCode === 'native_protocol_unavailable' || (includeLegacy && !effect.reasonCode)))));
     if (!candidates.length) return { recovered: [] };
     this.recoveryRunning = true;
     const recovered = [], sessions = new Set();
@@ -339,7 +414,7 @@ export class CodexDiscussionHub {
     this.closePromise = (async () => {
       const pending = [...this.pending.values()], closures = [];
       const detach = () => {
-        for (const adapter of [...this.adapters.values()]) {
+        for (const adapter of [...this.adapters.values(), ...this.sideAdapters]) {
           try { closures.push(Promise.resolve(adapter.close()).catch(() => {})); } catch { /* Preserve durable receipts if a transport close fails. */ }
         }
       };

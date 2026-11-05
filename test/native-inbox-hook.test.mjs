@@ -105,6 +105,7 @@ test('real HTTP/WebSocket inbox requests one native wake and retains the next qu
   const native = engine.catalog.find(row => row.id === ids[1]); native.fixture = false; native.nativeThreadId = uuid;
   for (const id of ids) engine.grant(id, { enrolled: true, content: true, share: true, retrieve: true });
   const group = engine.discussions.create({ title: 'Synthetic remote hook transport', sessionIds: ids });
+  engine.discussions.setPolicy({id:group.id,destination:'main'});
   const connector = engine.issueConnector(ids[1]); const app = await startServer({ root, port: 0, engine });
   t.after(async () => { await app.close(); rmSync(root, { recursive: true, force: true }); });
   const scoped = { nativeThreadId: uuid, config: { ...connector, provider: 'claude', nativeThreadId: uuid, address: app.address, authority: new URL(app.address).host } };

@@ -28,6 +28,7 @@ for (const aliasProxy of [false, true]) test("Native channel stdio actor roundtr
   syntheticNative.title = "Synthetic native catalog entry for transport test";
   for (const id of [claudeId, codexId]) engine.grant(id, { enrolled: true, content: true, share: true, retrieve: true });
   const group = engine.discussions.create({ title: "Synthetic channel roundtrip", sessionIds: [claudeId, codexId] });
+  engine.discussions.setPolicy({id:group.id,destination:'main'});
   const connector = engine.issueConnector(claudeId);
   const app = await startServer({ root, port: 0, engine });
   let channelAddress = app.address, proxy = null;

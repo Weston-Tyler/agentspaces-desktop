@@ -1,3 +1,4 @@
+import { conversationDestination } from './agent-message.mjs';
 import { implicitRoomWake } from "./room-subscriptions.mjs";
 import { createHash } from "node:crypto";
 export function messageDelivery(message) {
@@ -10,7 +11,7 @@ export function messageDelivery(message) {
 }
 // Bounded direct room delivery only; no work claims, scheduler or idle models.
 export async function routeConversation(engine, { codexAgents, channels }, group, message) {
-  if (!message || engine.discussions.group(group.id) !== group || !group.messages.includes(message)) return;
+  if (!message || message.nativeSideReply || engine.discussions.group(group.id) !== group || !group.messages.includes(message)) return;
   codexAgents.observeContribution?.(group,message);
   const policy = engine.discussions.policy(group);
   const permitted = sessionId => {
@@ -107,8 +108,14 @@ export async function routeConversation(engine, { codexAgents, channels }, group
         target.status = "subscription changed; not dispatched"; engine.store.save(); continue;
       }
       const source = engine.session(target.sessionId);
-      if (!source.fixture && source.provider === "codex") target.status = codexAgents.dispatch({ sessionId: source.id,
-        discussionId: group.id, messageId: message.id, text: message.text, requestId }).status;
+      const destination = target.destination ??= conversationDestination(group, message);
+      if (!source.fixture && destination === 'side' && source.provider !== 'codex') {
+        target.status = 'side-chat-unavailable';
+        target.deliveryMode = 'side';
+        target.undispatched = true;
+        target.reason = 'Automatic native side chat is unavailable for this client; kept in the room';
+      } else if (!source.fixture && source.provider === "codex") target.status = codexAgents.dispatch({ sessionId: source.id,
+        discussionId: group.id, messageId: message.id, text: message.text, requestId, destination }).status;
       else if (channels.isConnected(target.sessionId) || channels.canQueue?.(target.sessionId)) target.status = (await channels.deliver({ sessionId: target.sessionId,
         discussionId: group.id, messageId: message.id, text: message.text, requestId })).status;
       else target.status = "participant transport unavailable; not dispatched";

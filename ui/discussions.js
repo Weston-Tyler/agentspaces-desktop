@@ -7,7 +7,7 @@ function el(tag, text, cls) {
   return n;
 }
 function replyLabel(status) {
-  const labels = { 'queued-awaiting-reply': 'Queued in native chat · reply pending', 'steered-awaiting-reply': 'Steered into active turn · reply pending', 'native-participant-contributed': 'Replied from native thread', "waiting-for-native-transport": "Waiting for native wake connection", "channel-access-changed; not dispatched": "Access changed; message not sent", "connecting-native-agent": "Connecting…", "queued": "Queued in native chat", "conversation-budget-reached": "Automatic exchange paused", "awaiting-native-reply": "Waiting for reply", "native-agent-replied": "Replied", "needs-native-attention": "Needs attention in the native app", "native-reply-uncertain": "Reply status unknown", "native-reply-pending": "Reply pending; native work preserved", "native-agent-unavailable": "Agent unavailable", "delivered-to-native-transport": "Sent to native transport; awaiting response" };
+  const labels = { "side-chat-unavailable":"Side chat pending in AgentSpaces", "side-chat-submitting":"Waiting for side answer", "side-chat-reply-unconfirmed":"Side answer unconfirmed", 'queued-awaiting-reply': 'Queued in native chat · reply pending', 'steered-awaiting-reply': 'Steered into active turn · reply pending', 'native-participant-contributed': 'Replied from native thread', "waiting-for-native-transport": "Waiting for native wake connection", "channel-access-changed; not dispatched": "Access changed; message not sent", "connecting-native-agent": "Connecting…", "queued": "Queued in native chat", "conversation-budget-reached": "Automatic exchange paused", "awaiting-native-reply": "Waiting for reply", "native-agent-replied": "Replied", "needs-native-attention": "Needs attention in the native app", "native-reply-uncertain": "Reply status unknown", "native-reply-pending": "Reply pending; native work preserved", "native-agent-unavailable": "Agent unavailable", "delivered-to-native-transport": "Sent to native transport; awaiting response" };
   if (labels[status]) return labels[status];
   return /blocked|unavailable|access changed/.test(status ?? "") ? "Agent is not connected" : status;
 }
@@ -204,6 +204,16 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
     });
     registration.append(allowJoin, document.createTextNode("Connected agents can join this group"));
     header.append(registration);
+    const defaultDelivery = el('select'), deliveryLabel = el('label', 'Default delivery ');
+    for (const [value,title] of [['side','Side chat'],['main','Main thread']]) {
+      const option = el('option', title); option.value = value; defaultDelivery.append(option);
+    }
+    defaultDelivery.value = g.policy?.destination ?? 'side';
+    defaultDelivery.onchange = run(async () => {
+      await api('discussions/policy', {id:g.id,destination:defaultDelivery.value});
+      await load(); render();
+    });
+    deliveryLabel.append(defaultDelivery); header.append(deliveryLabel);
     const messages = el("div", null, "discussion-messages");
     messages.setAttribute("aria-live", "polite");
     if (!g.available)
@@ -276,7 +286,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
       if (m.notice || m.routing?.status === 'no-addressed-targets') content.append(el('p', m.notice ?? 'Posted to room; no agent notified. Mention a recipient to request another turn.', 'reply-status'));
       for (const t of m.targets ?? [])
         content.append(
-          el("div", "@" + t.alias + " · " + replyLabel(t.status) + (t.deliveryMode?" · "+({steer:"Steer",queue:"Queue"}[t.deliveryMode]??t.deliveryMode):"") + (t.deliveryFallback?" · native steering unavailable; queued":""), "reply-status"),
+          el("div", "@" + t.alias + " · " + replyLabel(t.status) + (t.deliveryMode?" · "+({steer:"Steer",queue:"Queue",side:"Side chat"}[t.deliveryMode]??t.deliveryMode):"") + (t.deliveryFallback?" · native steering unavailable; queued":"") + (t.deliveryMode==="side"&&t.reason?" · "+t.reason:""), "reply-status"),
         );
       row.append(avatar, content);
       messages.append(row);
@@ -334,6 +344,14 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
       }
     }
     controls.append(targets);
+    if (!g.fixture) {
+      const select = el('select'), label = el('label','Deliver this message ');
+      select.name = 'destination';
+      for (const [value,title] of [['','Use room default'],['side','Side chat'],['main','Main thread']]) {
+        const option = el('option', title); option.value = value; select.append(option);
+      }
+      label.append(select); controls.append(label);
+    }
     if (demoAvailable && g.fixture) {
       const roundsLabel = el(
           "label",
@@ -376,6 +394,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
           id: g.id,
           text: data.get("text"),
           targets: data.getAll("target"),
+          ...(data.get("destination") ? {destination:data.get("destination")} : {}),
           fixtureDialogueTurns: Number(data.get("rounds") ?? 0),
           deliveryId,
         });
