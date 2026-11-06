@@ -86,3 +86,5 @@ On a qualified Codex App Server connection, a side question uses an ephemeral fo
 Claude Code offers interactive `/btw`; automatic invocation and answer capture are not qualified. If a provider, its native transport or a Codex control socket cannot open a side chat, the message remains visible in the room with its delivery status. It never silently falls through to the main chat. An unconfirmed side answer is not retried. Select **Main thread** explicitly for work direction or when intentionally using the existing Claude delivery route.
 
 Run `node scripts/codex-side-proof.mjs` with a supported Codex CLI to reproduce the isolated App Server test. It uses a synthetic loopback model, temporary native home and separate fixture thread; it never attaches to an existing user session or makes a paid model request.
+
+A CLI upgrade can leave the already-running Codex daemon on an earlier version. Desktop checks the version reported by the daemon itself. It can use a reviewed daemon contract even when the installed CLI is newer. Unknown mixed versions stay blocked; the companion never restarts or upgrades the native daemon.

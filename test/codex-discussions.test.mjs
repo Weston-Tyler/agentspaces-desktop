@@ -479,3 +479,27 @@ test('side delivery stores one attributed room answer without steering or queuin
   assert.equal(f.hub.dispatch(args).duplicate,true);
   assert.throws(()=>f.hub.dispatch({...args,destination:'main'}),/reused/);
 });
+
+test('a reviewed mixed-version daemon uses loaded-thread delivery, never a restart or cold resume', async t => {
+  const f=setup();t.after(()=>f.hub.close());
+  f.engine.store.data.desktopPreferences={allowNativeFullAccess:true};
+  f.engine.probe=async()=>{};
+  f.engine.tools=[{provider:'codex',host:'remote',version:'codex-cli 0.167.0',adapterCompatible:true}];
+  f.hub.verifyProvider=true;
+  const factory=f.hub.adapterFactory;
+  let queued=0;
+  f.hub.adapterFactory=options=>{
+    const adapter=factory(options);
+    adapter.serverInfo={userAgent:'fixture/0.166.0'};
+    adapter.bindLoadedThread=async()=>{};
+    adapter.queueMessage=async(args)=>{queued++;assert.equal(args.threadId,THREAD);};
+    return adapter;
+  };
+  f.hub.dispatch(f.args);
+  const effect=await f.hub.wait(f.args.requestId);
+  assert.equal(effect.status,'queued-awaiting-reply');
+  assert.equal(effect.daemonVersion,'0.166.0');
+  assert.equal(effect.nativeContractSource,'reviewed-daemon-version');
+  assert.equal(queued,1);
+  assert.equal(f.counters.bind,0);
+});

@@ -13,6 +13,27 @@ export const observedVersion = output => /\b\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?\b/
 export const qualifiedNativeVersion = (host, provider, output) => qualifiedVersions[host]?.[provider]?.includes(observedVersion(output)) === true;
 export const nativeAdapterCompatible = tool => tool?.adapterCompatible ?? tool?.versionMatches ?? false;
 
+// Generated read/queue contract and isolated side-turn proof from the actual
+// 0.166.0 runtime. A CLI upgrade may replace the binary on disk while its
+// daemon keeps serving loaded work. Never infer features for unknown versions.
+const reviewedDaemonContracts = {
+  '0.166.0': { queue:true, steering:true, sideChat:true },
+};
+export function codexDaemonCapabilities(host, tool, userAgent) {
+  const version = observedVersion(userAgent), cliVersion = observedVersion(tool?.version);
+  if (version && cliVersion === version && tool?.compatibilityStatus === 'protocol-incompatible')
+    return { version, cliVersion, source:'unqualified', queue:false, steering:false, sideChat:false };
+  const reviewed = reviewedDaemonContracts[version];
+  if (reviewed) return { version, cliVersion, source:'reviewed-daemon-version', ...reviewed };
+  if (version && cliVersion === version && nativeAdapterCompatible(tool)) return {
+    version, cliVersion, source:'matching-cli', queue:true,
+    steering:tool.protocol?.steering?.compatible===true, sideChat:tool.protocol?.sideChat?.compatible===true,
+  };
+  return { version, cliVersion, source:'unqualified', queue:!!version && qualifiedNativeVersion(host,'codex',version),
+    steering:false, sideChat:false };
+}
+
+
 export const nativeReadAdapterCompatible = tool => tool?.installed === false ? false : tool?.readAdapterCompatible ?? nativeAdapterCompatible(tool);
 
 export async function nativeCompatibility(host, provider, output, { protocolCheck = checkCodexProtocol } = {}) {

@@ -3,7 +3,7 @@ import {deliveryIntent,formatAgentMessage} from './agent-message.mjs';
 import { REMOTE_HOST } from "./remote-host.mjs";
 import { createHash } from "node:crypto";
 import { CodexQueueAdapter } from "./codex-queue.mjs";
-import { nativeAdapterCompatible, observedVersion, qualifiedNativeVersion } from './native-versions.mjs';
+import { codexDaemonCapabilities, nativeAdapterCompatible } from './native-versions.mjs';
 const transientTransport = new Set(['native_delivery_capacity_busy', 'local_native_loaded_target_required', 'companion_update_deferred', 'native_proxy_disconnected', 'native_proxy_not_connected', 'native_websocket_handshake_failed', 'native_websocket_not_ready', 'native_rpc_timeout']);
 const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 // Direct user-addressed conversation transport. These receipts are not work
@@ -72,13 +72,11 @@ export class CodexDiscussionHub {
     if (this.bindings.has(source.id)) return this.bindings.get(source.id);
     const promise = (async () => {
       if (source.host === "local" && this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true) throw Object.assign(new Error("Existing native policy acceptance is required for local loaded delivery"), { code: "local_native_policy_acceptance_required" });
-      let steeringProtocol=false,checkedCliVersion=null;
+      let tool;
       if (this.verifyProvider) {
         await this.engine.probe(source.host);
-        const tool = this.engine.tools.find(tool => tool.host === source.host && tool.provider === 'codex');
+        tool = this.engine.tools.find(tool => tool.host === source.host && tool.provider === 'codex');
         if (effect) { effect.cliVersion = tool?.version ?? null; effect.compatibilityStatus = tool?.compatibilityStatus ?? null; }
-        steeringProtocol=tool?.protocol?.steering?.compatible===true;checkedCliVersion=observedVersion(tool?.version);
-        if (!nativeAdapterCompatible(tool)) throw Object.assign(new Error('Native protocol is unavailable or incompatible'), { code: 'native_protocol_unavailable' });
       }
       const options = { host: source.host,
         persistReceipt: async receipt => { this.engine.store.data.codexDiscussionNativeReceipts[receipt.clientId] = receipt; this.engine.store.save(); },
@@ -91,10 +89,16 @@ export class CodexDiscussionHub {
         if (this.adapters.get(source.id) === adapter) { this.bindings.delete(source.id); this.adapters.delete(source.id); }
       });
       await adapter.open();
-      const daemonVersion = observedVersion(adapter.serverInfo?.userAgent);
-      if(this.verifyProvider)adapter.steeringSupported=steeringProtocol&&!!daemonVersion&&daemonVersion===checkedCliVersion;
-      if (effect) effect.daemonVersion = daemonVersion;
-      if (this.verifyProvider && daemonVersion && observedVersion(effect?.cliVersion) !== daemonVersion && !qualifiedNativeVersion(source.host, 'codex', daemonVersion)) throw Object.assign(new Error('Unverified daemon/CLI protocol mismatch'), { code: 'native_daemon_version_mismatch' });
+      if (this.verifyProvider) {
+        const caps = codexDaemonCapabilities(source.host, tool, adapter.serverInfo?.userAgent);
+        adapter.steeringSupported = caps.steering;
+        if (effect) { effect.daemonVersion = caps.version; effect.nativeContractSource = caps.source; }
+        if (!caps.queue) {
+          const code = caps.version && caps.cliVersion && caps.version !== caps.cliVersion
+            ? 'native_daemon_version_mismatch' : 'native_protocol_unavailable';
+          throw Object.assign(new Error('Running native daemon is not qualified'), { code });
+        }
+      }
       if (effect) this.validate(effect.sessionId, effect.discussionId, effect.messageId);
       const current = this.engine.session(source.id), grant = this.engine.permissions(current);
       if (!grant.enrolled || !grant.content || !grant.share || !grant.retrieve || current.nativeThreadId !== source.nativeThreadId || current.account !== source.account || current.project !== source.project) throw new Error("Native source grant or identity changed");
@@ -161,20 +165,22 @@ export class CodexDiscussionHub {
       if (this.sideActive.size >= 4 || this.sideActive.has(sessionId))
         throw denied('native_side_capacity','The side chat is busy; the message remains in the room');
       this.sideActive.add(sessionId); occupied = true;
-      let checked;
+      let tool;
       if (this.verifyProvider) {
         await this.engine.probe(source.host);
-        const tool = this.engine.tools.find(t=>t.host===source.host&&t.provider==='codex');
-        if (tool?.protocol?.sideChat?.compatible !== true)
-          throw denied('native_side_protocol_unavailable','This Codex client does not expose a qualified side-chat protocol');
-        checked = observedVersion(tool.version);
+        tool = this.engine.tools.find(t=>t.host===source.host&&t.provider==='codex');
       }
       fence();
       adapter = this.adapterFactory({host:source.host});
       this.sideAdapters.add(adapter);
       await adapter.open();
-      if (this.verifyProvider && (!checked || observedVersion(adapter.serverInfo?.userAgent) !== checked))
-        throw denied('native_side_protocol_unavailable','The running Codex server differs from the checked side-chat client');
+      if (this.verifyProvider) {
+        const caps = codexDaemonCapabilities(source.host, tool, adapter.serverInfo?.userAgent);
+        effect.cliVersion = caps.cliVersion;
+        effect.daemonVersion = caps.version;
+        effect.nativeContractSource = caps.source;
+        if (!caps.sideChat) throw denied('native_side_protocol_unavailable','The running Codex server has no verified side-chat contract');
+      }
       const answer = await answerCodexSide(adapter,{
         parentId:source.nativeThreadId,cwd,signal,timeoutMs:budget.timeoutMs,maxOutputTokens:budget.maxOutputTokens,fence,
         question:formatAgentMessage({group,message,requestId,replyMode:'side',origin:this.engine.companionAddress}),
@@ -290,7 +296,7 @@ export class CodexDiscussionHub {
         effect.nextRetryAt = new Date(Date.now() + Math.min(300000, 15000 * 2 ** Math.min(effect.retryCount ?? 0, 5))).toISOString();
         effect.reason = 'Connection interrupted before message submission; waiting to reconnect';
       }
-      const reasons = { local_native_policy_acceptance_required: 'Existing native policy acceptance is required; no connection or resume attempted', local_native_loaded_target_required: 'Waiting for a loaded native target on the existing control socket; no local resume attempted', native_protocol_unavailable: 'Native protocol check failed; message was not queued', native_daemon_version_mismatch: 'Native daemon version differs from the checked CLI; message was not queued' };
+      const reasons = { local_native_policy_acceptance_required: 'Existing native policy acceptance is required; no connection or resume attempted', local_native_loaded_target_required: 'Waiting for a loaded native target on the existing control socket; no local resume attempted', native_protocol_unavailable: 'Native protocol check failed; message was not queued', native_daemon_version_mismatch: 'Running Codex daemon differs from the checked CLI and has no reviewed contract; message was not queued' };
       if (!answerAttempted && reasons[effect.reasonCode]) effect.reason = reasons[effect.reasonCode];
       const observationEnded = (nativeReceipt ?? error.receipt)?.observationEnded === true;
       if(effect.deliveryMode==='steer'&&effect.uncertainOutcome)effect.reason='Steering acceptance is uncertain; no duplicate was queued';
