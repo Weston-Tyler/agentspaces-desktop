@@ -19,6 +19,7 @@ test('real HTTP contribution settles the addressed steer without capturing or du
  let fake,steerCount=0;
  app=await startServer({root,port:0,engine,codexAdapterFactory:options=>fake={events:new EventEmitter(),open:async()=>{},close(){},bindLoadedThread:async()=>({nativeThreadId:source.nativeThreadId}),steer:async args=>{steerCount++;await options.persistReceipt({clientId:args.clientId,nativeThreadId:args.threadId,nativeTurnId:'active-owner-turn',deliveryMode:'steer',status:'steered',expectExplicitReply:true});return {supported:true,nativeTurnId:'active-owner-turn'};},answer:async()=>{throw Error('No new conversation turn or model call allowed');}}});
  const group=engine.discussions.create({title:'Synthetic steering',sessionIds:[source.id,'sample-claude-new']});
+  engine.discussions.setPolicy({id:group.id,destination:'main'});
  const call=async(path,body,token=app.admin)=>{const r=await fetch(app.address+path,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body)});return {status:r.status,body:await r.json()};};
  const posted=await call('/api/discussions/post',{id:group.id,text:'Review the synthetic regression evidence',targets:[source.id],deliveryId:'http-steered-message-001'});assert.equal(posted.status,200);
  const message=posted.body.messages[0],requestId=message.targets[0].requestId;assert.equal((await app.codexAgents.wait(requestId)).status,'steered-awaiting-reply');assert.equal(steerCount,1);

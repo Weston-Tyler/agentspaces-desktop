@@ -397,3 +397,109 @@ test('a changed working directory cannot settle an earlier explicit reply reques
  const binding=f.engine.connector(f.engine.issueConnector(f.source.id).token);f.engine.discussions.contribute({id:f.group.id,text:'Reply after identity changed',nativeTurnId:'unreported',deliveryId:'changed-source-reply-01',replyTo:f.args.messageId},binding);
  assert.equal(f.hub.observeContribution(f.group,f.group.messages.at(-1)),false);assert.equal(f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].status,'steered-awaiting-reply');
 });
+
+function makeLocal(f){
+ f.source.host='local';f.engine.store.data.projects[f.source.project].targets['local:codex']={path:f.source.cwd,host:'local',provider:'codex'};
+ const member=f.engine.discussions.group(f.args.discussionId).members.find(m=>m.sessionId===f.source.id);member.host='local';
+ f.engine.store.data.desktopPreferences={allowNativeFullAccess:true};return f;
+}
+test('local discussion delivery uses a loaded target and retains sharing revocation fences',async t=>{
+ const f=makeLocal(setup());t.after(()=>f.hub.close());const factory=f.hub.adapterFactory;let loaded=0;
+ f.hub.adapterFactory=options=>{assert.equal(options.host,'local');const a=factory(options);a.bindLoadedThread=async()=>{loaded++;};return a;};
+ f.hub.dispatch(f.args);assert.equal((await f.hub.wait(f.args.requestId)).status,'native-agent-replied');assert.equal(loaded,1);assert.equal(f.counters.bind,0);
+ const g=makeLocal(setup());t.after(()=>g.hub.close());g.engine.grant(g.source.id,{share:false});assert.throws(()=>g.hub.dispatch(g.args));assert.equal(g.counters.factory,0);
+});
+test('local dormant or unavailable targets are retained as undispatched and never cold-resumed',async t=>{
+ const f=makeLocal(setup());t.after(()=>f.hub.close());const factory=f.hub.adapterFactory;
+ f.hub.adapterFactory=options=>{const a=factory(options);a.bindLoadedThread=async()=>{throw fail('native_loaded_target_not_available');};return a;};
+ f.hub.dispatch(f.args);const r=await f.hub.wait(f.args.requestId);assert.equal(r.status,'native-agent-unavailable');assert.equal(r.reasonCode,'local_native_loaded_target_required');assert.equal(r.undispatched,true);assert.equal(r.uncertainOutcome,false);assert(r.nextRetryAt);assert.equal(f.counters.bind,0);assert.equal(f.counters.answer,0);
+});
+test('local routing cannot acquire existing native policy acceptance implicitly',async t=>{
+ const f=makeLocal(setup());t.after(()=>f.hub.close());f.engine.store.data.desktopPreferences.allowNativeFullAccess=false;f.hub.dispatch(f.args);const r=await f.hub.wait(f.args.requestId);assert.equal(r.reasonCode,'local_native_policy_acceptance_required');assert.equal(f.counters.factory,0);assert.equal(f.counters.bind,0);assert.equal(f.counters.answer,0);assert.equal(r.nextRetryAt,undefined);
+});
+
+test('completed delivery history does not block the next native message and exact duplicates stay deduplicated',async t=>{
+ const f=setup();t.after(()=>f.hub.close());
+ for(let i=0;i<1000;i++)f.engine.store.data.codexDiscussionDeliveries['old-'+i]={requestId:'old-'+i,status:'native-agent-replied',inputHash:'retained-'+i};
+ f.hub.dispatch(f.args);await f.hub.wait(f.args.requestId);assert.equal(f.counters.answer,1);assert.equal(Object.keys(f.engine.store.data.codexDiscussionDeliveries).length,1001);
+ assert.equal(f.hub.pending.size,0);assert.equal(f.hub.aborters.size,0);
+ assert.equal(f.hub.dispatch(f.args).duplicate,true);assert.equal(f.counters.answer,1);assert.equal(f.engine.store.data.codexDiscussionDeliveries['old-0'].inputHash,'retained-0');
+});
+test('busy native admission defers durably, then recovers once without replaying duplicates',async t=>{
+ const f=setup();t.after(()=>{f.hub.aborters.clear();f.hub.close();});f.args.budget={timeoutMs:90000,maxOutputTokens:800};
+ for(let i=0;i<1000;i++)f.hub.aborters.set('active-'+i,new AbortController());
+ const waiting=f.hub.dispatch(f.args);assert.equal(waiting.status,'waiting-for-native-delivery-capacity');assert.equal(waiting.undispatched,true);assert.equal(f.counters.factory,0);assert.equal(f.hub.dispatch(f.args).duplicate,true);
+ assert.equal((await f.hub.recoverUndispatched()).skipped,true);f.hub.aborters.clear();f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].nextRetryAt=new Date(0).toISOString();
+ assert.deepEqual((await f.hub.recoverUndispatched()).recovered,[f.args.requestId]);await f.hub.wait(f.args.requestId);assert.equal(f.counters.answer,1);assert.equal(f.hub.pending.size,0);assert.equal(f.hub.dispatch(f.args).duplicate,true);assert.equal(f.counters.answer,1);
+});
+test('deferred native capacity never bypasses subsequent sharing revocation',async t=>{
+ const f=setup();t.after(()=>{f.hub.aborters.clear();f.hub.close();});f.args.budget={timeoutMs:90000,maxOutputTokens:800};for(let i=0;i<1000;i++)f.hub.aborters.set('active-'+i,new AbortController());f.hub.dispatch(f.args);f.hub.aborters.clear();f.engine.store.data.codexDiscussionDeliveries[f.args.requestId].nextRetryAt=new Date(0).toISOString();f.engine.grant(f.source.id,{share:false});assert.deepEqual((await f.hub.recoverUndispatched()).recovered,[]);assert.equal(f.counters.factory,0);assert.equal(f.counters.answer,0);
+});
+
+test('side delivery stores one attributed room answer without steering or queuing its parent', async t => {
+  const f=setup(), child='12345678-1234-4234-8234-123456789012', calls=[];
+  t.after(()=>f.hub.close());
+  f.engine.store.data.desktopPreferences={allowNativeFullAccess:true};
+  const factory=f.hub.adapterFactory;
+  f.hub.adapterFactory=options=>{
+    const adapter=factory(options);
+    adapter.request=async(method,params)=>{
+      calls.push([method,params.threadId]);
+      if(method==='thread/read')return {thread:{id:THREAD,cwd:f.source.cwd,status:{type:'active'}}};
+      if(method==='config/read')return {config:{}};
+      if(method==='thread/fork')return {thread:{id:child,forkedFromId:THREAD,cwd:f.source.cwd,ephemeral:true},cwd:f.source.cwd,sandbox:{type:'readOnly'},approvalPolicy:'never'};
+      if(method==='mcpServerStatus/list')return {data:[],nextCursor:null};
+      if(method==='turn/start'){
+        const receipt=f.engine.store.data.codexDiscussionDeliveries[f.args.requestId];
+        assert.equal(receipt.status,'side-chat-submitting');assert.equal(receipt.uncertainOutcome,true);
+        adapter.events.emit('notification',{method:'item/completed',params:{threadId:child,turnId:TURN,item:{type:'agentMessage',phase:'final_answer',text:'Fixture side reply'}}});
+        adapter.events.emit('notification',{method:'turn/completed',params:{threadId:child,turn:{id:TURN,status:'completed'}}});
+        return {turn:{id:TURN}};
+      }
+      if(method==='thread/unsubscribe')return {};
+      throw Error('Unexpected RPC');
+    };
+    return adapter;
+  };
+  const args={...f.args,destination:'side'};
+  f.hub.dispatch(args);
+  const effect=await f.hub.wait(args.requestId);
+  assert.equal(effect.status,'native-agent-replied');
+  assert.equal(effect.sideThreadId,child);
+  assert.equal(effect.uncertainOutcome,false);
+  const group=f.engine.discussions.group(args.discussionId);
+  const replies=group.messages.filter(m=>m.replyTo===args.messageId);
+  assert.equal(replies.length,1);
+  assert.equal(replies[0].text,'Fixture side reply');
+  assert.equal(replies[0].nativeSideReply,true);
+  assert.equal(replies[0].source.nativeThreadId,THREAD);
+  assert.equal(replies[0].replyNotificationVersion,0);
+  assert.deepEqual(calls.filter(([m])=>m==='turn/start'),[['turn/start',child]]);
+  assert.equal(f.counters.bind,0);assert.equal(f.counters.answer,0);
+  assert.equal(f.hub.dispatch(args).duplicate,true);
+  assert.throws(()=>f.hub.dispatch({...args,destination:'main'}),/reused/);
+});
+
+test('a reviewed mixed-version daemon uses loaded-thread delivery, never a restart or cold resume', async t => {
+  const f=setup();t.after(()=>f.hub.close());
+  f.engine.store.data.desktopPreferences={allowNativeFullAccess:true};
+  f.engine.probe=async()=>{};
+  f.engine.tools=[{provider:'codex',host:'remote',version:'codex-cli 0.167.0',adapterCompatible:true}];
+  f.hub.verifyProvider=true;
+  const factory=f.hub.adapterFactory;
+  let queued=0;
+  f.hub.adapterFactory=options=>{
+    const adapter=factory(options);
+    adapter.serverInfo={userAgent:'fixture/0.166.0'};
+    adapter.bindLoadedThread=async()=>{};
+    adapter.queueMessage=async(args)=>{queued++;assert.equal(args.threadId,THREAD);};
+    return adapter;
+  };
+  f.hub.dispatch(f.args);
+  const effect=await f.hub.wait(f.args.requestId);
+  assert.equal(effect.status,'queued-awaiting-reply');
+  assert.equal(effect.daemonVersion,'0.166.0');
+  assert.equal(effect.nativeContractSource,'reviewed-daemon-version');
+  assert.equal(queued,1);
+  assert.equal(f.counters.bind,0);
+});

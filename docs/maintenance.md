@@ -55,3 +55,17 @@ do not overwrite newer private work state with an older backup. First upgrades
 from versions without this interface require equivalent manual readiness checks.
 Host shutdowns, native app restarts and embedded process migration are outside
 this guarantee. The companion never promises a zero-disconnect update.
+
+### Native helper updates and bridge recovery
+
+Native helper installation uses stable managed entry points and a private verified
+runtime manifest. Once a chat has loaded the managed entry, source updates are
+picked up at MCP request boundaries without restarting its conversation or
+cancelling a native turn. Previously loaded legacy helpers need one native MCP
+reconnect; compatibility entries preserve verified old command paths for it.
+
+Bridge health requires a signed round trip through its saved port. An owned SSH
+process which stops forwarding is invalidated and replaced with bounded retries.
+This recovery neither changes source grants nor interrupts product workers.
+Owner-required authentication is reported, never bypassed. The optional desktop
+window is not required for either mechanism.

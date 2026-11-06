@@ -162,3 +162,23 @@ test('discovery caps cumulative signed bytes before verification and decoding', 
   assert.equal(view.truncated,true);
   assert.equal(view.cards.length,1);
 });
+
+test('signed ModelCards remain observational, with signed identity, scope, freshness and query checks', () => {
+  const {fabric,peer,id} = fixture();
+  const model = {id:'aspace://fixture-group/model/fixture-model@1',issuer:id.peerId,group:peer.group,
+    issued:new Date(now-1000).toISOString(),ttl:'PT15M',name:'Fixture model',version:'1',tasks:['embed'],engine:'onnx'};
+  const store = value => peer.acceptAd(wire.storedAd('ModelCard',value,id));
+  const cached = store(model);
+  cached.ad.name='changed unsigned cache';
+  const view = fabric.discovery({query:'fixture model'});
+  assert.equal(view.models.length,1);
+  assert.equal(view.models[0].name,'Fixture model');
+  assert.equal(view.models[0].invocationAuthorized,false);
+  assert.deepEqual(fabric.discovery({query:'other'}).models,[]);
+  assert.deepEqual(fabric.discovery().cards,[]);
+  for(const change of [{group:'other'},{issued:new Date(now+1000).toISOString()},{id:'aspace://fixture-group/agent/not-a-model'}]){
+    peer.ads.clear();store({...model,...change});assert.deepEqual(fabric.discovery().models,[]);
+  }
+  peer.ads.clear();store(model).stored.signature=new Uint8Array(64);
+  assert.deepEqual(fabric.discovery().models,[]);
+});

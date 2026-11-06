@@ -6,6 +6,30 @@ import { join, dirname, resolve, basename } from "node:path";
 import { createHash } from "node:crypto";
 const names = ["ThreadReadParams", "ThreadReadResponse", "ThreadListParams", "ThreadListResponse", "ThreadQueueAddParams", "ThreadQueueAddResponse", "ThreadQueueListParams", "ThreadQueueListResponse", "ThreadQueueDeleteParams", "ThreadQueueDeleteResponse", "ThreadTurnsListParams", "ThreadTurnsListResponse", "ThreadResumeParams", "ThreadResumeResponse"];
 const steeringNames=["TurnSteerParams","TurnSteerResponse"];
+const sideNames=["ThreadForkParams","ThreadForkResponse","TurnStartParams","TurnStartResponse","ThreadUnsubscribeParams","ListMcpServerStatusParams","ListMcpServerStatusResponse","ConfigReadParams","ConfigReadResponse"];
+const optionalNames=[...steeringNames,...sideNames];
+function sideContract(schemas){
+ try{
+  const [fork, response, start, started, close, inventory, inventoryResponse, config, configResponse] = sideNames.map(name=>schemas[name]);
+  requestFields(fork,['threadId','cwd','ephemeral','excludeTurns','sandbox','approvalPolicy','config','developerInstructions']);
+  checkType(fork,'threadId','string');
+  for(const field of ['ephemeral','excludeTurns'])checkType(fork,field,'boolean',{required:false,nullable:true});
+  checkType(fork,'sandbox','string',{required:false,nullable:true,enums:['read-only']});
+  for(const field of ['thread.id','thread.cwd','cwd'])checkType(response,field,'string');
+  checkType(response,'thread.ephemeral','boolean',{required:false});
+  checkType(response,'thread.forkedFromId','string',{required:false,nullable:true});
+  checkType(response,'sandbox.@readOnly.type','string',{enums:['readOnly']});
+  requestFields(start,['threadId','input']);
+  checkType(start,'threadId','string');checkType(start,'input.[].@text.text','string');
+  checkType(started,'turn.id','string');checkType(close,'threadId','string');
+  checkType(inventory,'threadId','string',{required:false,nullable:true});
+  checkType(inventory,'detail','string',{required:false,nullable:true,enums:['toolsAndAuthOnly']});
+  checkType(inventoryResponse,'data','array');
+  checkType(config,'cwd','string',{required:false,nullable:true});
+  checkType(configResponse,'config','object');
+  return {compatible:true};
+ }catch{return {compatible:false,reason:'optional_side_chat_contract_unavailable'};}
+}
 const fail = reason => Object.assign(new Error(reason), { reason });
 const cache = new Map(), pending = new Map();
 const MAX = 2097152;
@@ -140,7 +164,7 @@ function run(spawnProcess, command, args, input = "", capture = false) {
     const finish = (error, result) => { if (done) return; done = true; clearTimeout(timer); error ? no(fail("protocol_probe_unavailable")) : yes(result); };
     const timer = setTimeout(() => { child?.kill(); finish(true); }, 20000);
     try {
-      child = spawnProcess(command, args, { windowsHide: true, shell: false, stdio: ["pipe", "pipe", "pipe"] });
+      child = spawnProcess(command, args, { windowsHide: true, shell: false, stdio: process.platform === "win32" ? ["overlapped", "overlapped", "overlapped"] : ["pipe", "pipe", "pipe"] });
       child.stderr.on("data", () => {});
       child.stdout.on("data", chunk => { size += chunk.length; if (size > MAX) { child.kill(); finish(true); } else if (capture) data += chunk.toString(); });
       child.on("error", () => finish(true)); child.on("close", code => finish(code !== 0, data));
@@ -150,14 +174,14 @@ function run(spawnProcess, command, args, input = "", capture = false) {
 }
 async function collect({ host, spawnProcess }) {
   if (host === REMOTE_HOST) {
-    const script = "import{spawn}from'node:child_process';import{mkdtemp,readFile,rm}from'node:fs/promises';import{tmpdir}from'node:os';import{join,resolve,dirname,basename}from'node:path';const root=await mkdtemp(join(tmpdir(),'agentspaces-protocol-'));try{await new Promise((yes,no)=>{const c=spawn('codex',['app-server','generate-json-schema','--experimental','--out',root],{stdio:['ignore','ignore','ignore']});const t=setTimeout(()=>{c.kill();no(new Error())},18000);c.on('error',()=>{clearTimeout(t);no(new Error())});c.on('close',n=>{clearTimeout(t);n===0?yes():no(new Error())})});const names=" + JSON.stringify([...names,...steeringNames]) + ";const schemas={};for(const n of names){try{schemas[n]=JSON.parse(await readFile(join(root,'v2',n+'.json'),'utf8'))}catch{if(!['TurnSteerParams','TurnSteerResponse'].includes(n))throw new Error()}};const text=JSON.stringify(schemas);if(Buffer.byteLength(text)>2097152)throw new Error();process.stdout.write(text)}finally{if(dirname(resolve(root))!==resolve(tmpdir())||!/^agentspaces-protocol-[A-Za-z0-9_-]+$/.test(basename(root)))throw new Error();await rm(root,{recursive:true,force:true})}";
+    const script = "import{spawn}from'node:child_process';import{mkdtemp,readFile,rm}from'node:fs/promises';import{tmpdir}from'node:os';import{join,resolve,dirname,basename}from'node:path';const root=await mkdtemp(join(tmpdir(),'agentspaces-protocol-'));try{await new Promise((yes,no)=>{const c=spawn('codex',['app-server','generate-json-schema','--experimental','--out',root],{stdio:['ignore','ignore','ignore']});const t=setTimeout(()=>{c.kill();no(new Error())},18000);c.on('error',()=>{clearTimeout(t);no(new Error())});c.on('close',n=>{clearTimeout(t);n===0?yes():no(new Error())})});const names=" + JSON.stringify([...names,...optionalNames]) + ";const schemas={};for(const n of names){try{schemas[n]=JSON.parse(await readFile(join(root,'v2',n+'.json'),'utf8'))}catch{if(!"+JSON.stringify(optionalNames)+".includes(n))throw new Error()}};const text=JSON.stringify(schemas);if(Buffer.byteLength(text)>2097152)throw new Error();process.stdout.write(text)}finally{if(dirname(resolve(root))!==resolve(tmpdir())||!/^agentspaces-protocol-[A-Za-z0-9_-]+$/.test(basename(root)))throw new Error();await rm(root,{recursive:true,force:true})}";
     try { return JSON.parse(await run(spawnProcess, "ssh", [SSH_ALIAS, "node --input-type=module -"], script, true)); } catch { throw fail("protocol_probe_unavailable"); }
   }
   const folder = await mkdtemp(join(tmpdir(), "agentspaces-protocol-"));
   try {
     await run(spawnProcess, "codex", ["app-server", "generate-json-schema", "--experimental", "--out", folder]);
     const schemas = {};
-    for (const name of [...names,...steeringNames]) { try{const text = await readFile(join(folder, "v2", name + ".json"), "utf8"); if (Buffer.byteLength(text) > MAX) throw fail("protocol_probe_unavailable"); schemas[name] = JSON.parse(text);}catch(error){if(!steeringNames.includes(name))throw error;} }
+    for (const name of [...names,...optionalNames]) { try{const text = await readFile(join(folder, "v2", name + ".json"), "utf8"); if (Buffer.byteLength(text) > MAX) throw fail("protocol_probe_unavailable"); schemas[name] = JSON.parse(text);}catch(error){if(!optionalNames.includes(name))throw error;} }
     return schemas;
   } catch { throw fail("protocol_probe_unavailable"); }
   finally { await cleanup(folder); }
@@ -173,7 +197,7 @@ export async function checkCodexProtocol(host, { version, spawnProcess = spawn, 
     try {
       const schemas = await collectSchemas({ host, version: safeVersion, spawnProcess });
       const contractHash = verify(schemas);
-      verdict = { compatible: true, status: "protocol-compatible", version: safeVersion, reason: "contract_subset_verified", contractHash, steering:steeringContract(schemas), checkedAt: new Date().toISOString() };
+      verdict = { compatible: true, status: "protocol-compatible", version: safeVersion, reason: "contract_subset_verified", contractHash, steering:steeringContract(schemas), sideChat:sideContract(schemas), checkedAt: new Date().toISOString() };
     } catch (error) {
       const reason = ["missing_schema", "required_field_changed", "type_changed", "unknown_request_requirement", "method_contract_changed"].includes(error.reason) ? error.reason : "protocol_probe_unavailable";
       verdict = { compatible: false, status: reason === "protocol_probe_unavailable" ? "protocol-probe-unavailable" : "protocol-incompatible", version: safeVersion, reason, contractHash: null, checkedAt: new Date().toISOString() };

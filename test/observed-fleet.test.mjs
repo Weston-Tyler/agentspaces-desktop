@@ -18,3 +18,24 @@ test('large signed discovery projections cannot recreate oversized scoped respon
  const e=engine();e.fabric.discovery=()=>({cards:Array.from({length:100},(_,i)=>({id:String(i),description:'x'.repeat(6000)})),coverage:{complete:false}});
  const value=observedFleet(e);assert.ok(Buffer.byteLength(JSON.stringify(value))<=512*1024);assert.equal(value.response.truncated,true);assert.equal(value.discovery.truncated,true);
 });
+
+test('workspace card observation requires the exact active scope and never inherits revoked access',()=>{
+ const e=engine(),scope={id:'fixture-active',account:'fixture-account'},source={id:'native',fixture:false,scopeId:scope.id,account:scope.account};
+ const session=e.session.bind(e),permissions=e.permissions.bind(e);
+ e.session=id=>id==='native'?source:session(id);
+ let retrieve=true,allowed=true;
+ e.permissions=s=>s===source?{enrolled:true,retrieve}:permissions(s);
+ e.workspace={index:{profile:{...scope,active:true,policy:'local-retrieval'}},sessionAllowed:()=>allowed};
+ e.fabricWorkspace=scope;
+ const binding={sessionId:'native'};
+ assert.doesNotThrow(()=>observedFleet(e,{},binding));
+ for(const [revoke,restore] of [
+  [()=>retrieve=false,()=>retrieve=true],
+  [()=>allowed=false,()=>allowed=true],
+  [()=>source.account='other',()=>source.account=scope.account],
+  [()=>e.workspace.index.profile.active=false,()=>e.workspace.index.profile.active=true],
+ ]){
+  revoke();assert.throws(()=>observedFleet(e,{},binding),/scope denied/);restore();
+ }
+ assert.throws(()=>observedFleet(e,{}, {sessionId:'permitted'}),/scope denied/);
+});

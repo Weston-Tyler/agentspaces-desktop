@@ -11,6 +11,10 @@ export async function readSdk(request, sdk) {
     (!request.project.path && !request.project.allMetadataGrant)
   )
     throw new Error("Explicit project metadata grant required");
+  if(request.action==='list'&&request.archived)throw new Error('Claude SDK metadata does not expose archive state; cannot qualify an archived-only filter');
+  const methods=request.action==='list'?['listSessions']:request.action==='info'?['getSessionInfo']:request.action==='read'?['getSessionInfo','getSessionMessages']:null;
+  if(!methods)throw new Error('Read-only helper refuses this action');
+  if(methods.some(name=>typeof sdk?.[name]!=='function'))throw new Error('Claude SDK required read interface is unavailable');
   const p = request.project;
   if (request.action === 'info') {
     const info = await sdk.getSessionInfo(request.nativeThreadId);

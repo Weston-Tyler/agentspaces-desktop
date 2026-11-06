@@ -26,7 +26,7 @@
     "package:linux": "node scripts/build-package.mjs linux"
   },
   "dependencies": {
-    "@agentspaces/client": "git+https://github.com/badmonkeyai/agentspaces-typescript.git#fa20e215a002a7085f9f8f526be1af6bb8b82304",
+    "@agentspaces/client": "git+https://github.com/badmonkeyai/agentspaces-typescript.git#b28f01194da107ba9544392c1e280dcd3bc1fda1",
     "@anthropic-ai/claude-agent-sdk": "0.3.293",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@xterm/addon-fit": "0.11.0",

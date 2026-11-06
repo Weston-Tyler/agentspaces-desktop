@@ -354,3 +354,82 @@ test('a genuine Stop event records its own lifecycle event rather than fabricati
    await assert.rejects(resolveClaudeSource(configPath,{ancestors:async()=>[processRecord]}),{code:'native_executable_invalid'});
   }
  });
+
+test('documented native session metadata identifies a real ancestor without fabricating a hook record',async()=>{
+ const {configPath,root,device}=await setup();await writeFile(configPath,JSON.stringify({...device,nativeExecutable:'/fictional/old-native-runtime'}));
+ const options={ancestors:async()=>[processRecord],listNativeSessions:async()=>[{sessionId:UUID,kind:'interactive',pid:processRecord.pid,cwd:'/fictional/project',startedAt:123}],inspectNative:async()=>processRecord};
+ const found=await resolveClaudeSource(configPath,options);assert.equal(found.nativeThreadId,UUID);assert.equal(found.nativeEvidence.kind,'claude-native-session-metadata');
+ assert.equal((await readdir(root)).includes('bindings'),false);
+});
+test('metadata fallback rejects peer PIDs, reused processes, malformed sources and ambiguous identities',async()=>{
+ const {configPath,device}=await setup();await writeFile(configPath,JSON.stringify({...device,nativeExecutable:'/fictional/old-native-runtime'}));
+ const row={sessionId:UUID,kind:'interactive',pid:processRecord.pid,cwd:'/fictional/project',startedAt:123};
+ for(const rows of [[{...row,pid:999999}],[{...row,sessionId:'bad'}],[{...row,cwd:'relative'}],[row,{...row,sessionId:OTHER}]])await assert.rejects(resolveClaudeSource(configPath,{ancestors:async()=>[processRecord],listNativeSessions:async()=>rows,inspectNative:async()=>processRecord}));
+ await assert.rejects(resolveClaudeSource(configPath,{ancestors:async()=>[processRecord],listNativeSessions:async()=>[row],inspectNative:async()=>({...processRecord,startedAt:'reused'})}));
+});
+test('a genuine hook caches a device-bound native runtime observation, preserving identity checks across upgrades',async()=>{
+ const {configPath,device,participantConfig}=await setup();await writeFile(configPath,JSON.stringify({...device,nativeExecutable:'/fictional/old-native-runtime'}));
+ const options={configPath,ancestors:async()=>[processRecord],listNativeSessions:async()=>[{sessionId:UUID,kind:'interactive',pid:processRecord.pid,cwd:'/fictional/project',startedAt:123}],inspectNative:async()=>processRecord,requestImpl:async()=>({participantConfig})};
+ const result=await runNativeSessionHook(event(),options);assert(result.recorded);
+ assert.equal((await resolveClaudeSource(configPath,{...options,listNativeSessions:async()=>{throw Error('Cached observation should suffice');}})).nativeThreadId,UUID);
+ await assert.rejects(runNativeSessionHook(event({session_id:OTHER}),options),{code:'native_source_uuid_mismatch'});
+ await writeFile(configPath,JSON.stringify({...device,token:'b'.repeat(64),nativeExecutable:'/fictional/old-native-runtime'}));
+ await assert.rejects(resolveClaudeSource(configPath,{...options,listNativeSessions:async()=>[]}));
+});
+
+test('metadata discovery never runs an unsupported native command as a prompt', {skip:process.platform==='win32'},async()=>{
+ const {configPath,root,device}=await setup();const binary=join(root,'claude'),marker=join(root,'unexpected-query');
+ const {chmod}=await import('node:fs/promises');
+ await writeFile(binary,'#!/usr/bin/env node\nif(process.argv.includes("--help")){console.log("Usage: claude [options] [prompt]");}else{require("node:fs").writeFileSync('+JSON.stringify(marker)+',"unexpected");}\n',{mode:0o755});await chmod(binary,0o755);
+ await writeFile(configPath,JSON.stringify({...device,nativeExecutable:binary,nativeLauncher:binary}));
+ await assert.rejects(resolveClaudeSource(configPath,{ancestors:async()=>[processRecord]}));assert.equal((await readdir(root)).includes('unexpected-query'),false);
+});
+test('native metadata cannot resurrect a source after its genuine end hook',async()=>{
+ const {configPath,device,participantConfig}=await setup();
+ const options={configPath,ancestors:async()=>[processRecord],requestImpl:async()=>({participantConfig})};
+ await runNativeSessionHook(event(),options);await runNativeSessionHook(event({hook_event_name:'SessionEnd'}),options);
+ await writeFile(configPath,JSON.stringify({...device,nativeExecutable:'/fictional/other-native'}));
+ await assert.rejects(resolveClaudeSource(configPath,{ancestors:async()=>[processRecord],listNativeSessions:async()=>[{sessionId:UUID,kind:'interactive',pid:processRecord.pid,cwd:'/fictional/project',startedAt:123}],inspectNative:async()=>processRecord}));
+});
+
+test('transient registration recovery never replays the requested tool write',async()=>{
+ const {configPath,participantConfig}=await setup('codex');let registrations=0,writes=0;
+ const bootstrap=await createNativeBootstrap({configPath,registrationRetryMs:0,requestImpl:async(_,path)=>{
+  if(path==='/api/native/register'){if(++registrations<3)throw Object.assign(Error('transient'),{code:'scoped_transport_unavailable'});return {participantConfig};}
+  writes++;return {stored:true};
+ }});
+ const req={params:{name:'contribute_to_discussion',_meta:{threadId:UUID},arguments:{id:OTHER,text:'Synthetic message',nativeTurnId:'test',deliveryId:'synthetic-recovery-write'}}};
+ await bootstrap.callTool(req);assert.equal(registrations,3);assert.equal(writes,1);await bootstrap.server.close();
+});
+test('revocation and native request cancellation do not retry registration or start a tool operation',async()=>{
+ const {configPath,participantConfig}=await setup('codex');let calls=0;const denied=await createNativeBootstrap({configPath,registrationRetryMs:0,requestImpl:async()=>{calls++;throw Object.assign(Error('revoked'),{code:'native_registration_source_revoked'});}});
+ await assert.rejects(denied.callTool(request()),{code:'native_registration_source_revoked'});assert.equal(calls,1);await denied.server.close();
+ const controller=new AbortController();let writes=0;
+ const cancelled=await createNativeBootstrap({configPath,registrationRetryMs:0,requestImpl:async(_,path)=>{if(path==='/api/native/register'){controller.abort();return {participantConfig};}writes++;return {};}});
+ await assert.rejects(cancelled.callTool(request(),{signal:controller.signal}),{code:'native_source_request_cancelled'});assert.equal(writes,0);await cancelled.server.close();
+});
+
+test('an unobserved tool-write result is never replayed during registration recovery',async()=>{
+ const {configPath,participantConfig}=await setup('codex');let registrations=0,writes=0;
+ const bootstrap=await createNativeBootstrap({configPath,registrationRetryMs:0,requestImpl:async(_,path)=>{if(path==='/api/native/register'){registrations++;return {participantConfig};}writes++;throw Object.assign(Error('Result unknown'),{code:'scoped_transport_unavailable'});}});
+ const req={params:{name:'contribute_to_discussion',_meta:{threadId:UUID},arguments:{id:OTHER,text:'Synthetic write',nativeTurnId:'test',deliveryId:'synthetic-unknown-result'}}};
+ await assert.rejects(bootstrap.callTool(req),{code:'scoped_transport_unavailable'});assert.equal(registrations,1);assert.equal(writes,1);await bootstrap.server.close();
+});
+test('safe update draining is retryable only during idempotent source registration',async t=>{
+ const {scopedRequest}=await import('../app/native-session-hook.mjs');
+ const server=http.createServer((_,res)=>{res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'companion_update_draining',undispatched:true,retryAllowed:true}));});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const config={address:'http://127.0.0.1:'+server.address().port,authority:'127.0.0.1:'+server.address().port,token:deviceToken};
+ await assert.rejects(scopedRequest(config,'/api/native/register',{}),{code:'scoped_transport_unavailable'});
+ await assert.rejects(scopedRequest(config,'/api/discussions/contribute',{}),{code:'scoped_registration_or_tool_denied'});
+});
+
+test('connection errors distinguish an undispatched operation from an uncertain write result',async()=>{
+ const {configPath,participantConfig}=await setup('codex');
+ const unavailable=()=>Object.assign(Error('Synthetic network failure'),{code:'scoped_transport_unavailable'});
+ const first=await createNativeBootstrap({configPath,registrationRetryMs:0,requestImpl:async()=>{throw unavailable();}});
+ assert.match((await first.callToolSafe(request())).content[0].text,/was not dispatched/);await first.server.close();
+ const second=await createNativeBootstrap({configPath,registrationRetryMs:0,requestImpl:async(_,path)=>{if(path==='/api/native/register')return {participantConfig};throw unavailable();}});
+ const req={params:{name:'contribute_to_discussion',_meta:{threadId:UUID},arguments:{id:OTHER,text:'Synthetic',nativeTurnId:'test',deliveryId:'synthetic-uncertain-result'}}};
+ assert.match((await second.callToolSafe(req)).content[0].text,/reconcile its exact delivery ID/);await second.server.close();
+});

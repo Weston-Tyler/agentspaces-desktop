@@ -65,6 +65,7 @@ async function setup(t, { defer = false, policyFailure = false } = {}) {
     { method: "POST", headers, body: JSON.stringify(value) });
   const create = await post("/api/discussions/create", { title: "HTTP native reply fixture", sessionIds: [source.id, "sample-claude-new"] });
   assert.equal(create.status, 200); const group = await create.json();
+  engine.discussions.setPolicy({id:group.id,destination:'main'});
   return { app, engine, source, group, counts, bindings, release, post, ownerHeaders };
 }
 async function currentGroup(app, headers, id) {

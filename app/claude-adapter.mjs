@@ -10,10 +10,12 @@ export class ClaudeReadAdapter {
     sdkLoader = () => import("@anthropic-ai/claude-agent-sdk"),
     spawnProcess = spawn,
     sdkPin = CLAUDE_SDK_PIN,
+    platform = process.platform,
   } = {}) {
     if (!["local", REMOTE_HOST].includes(host))
       throw new Error("Unsupported host");
     this.host = host;
+    this.platform = platform;
     this.sdkLoader = sdkLoader;
     this.spawnProcess = spawnProcess;
     if (!exactDependencyVersion(sdkPin)) throw new Error("Exact read SDK version required");
@@ -36,7 +38,7 @@ export class ClaudeReadAdapter {
       const child = this.spawnProcess(
         "ssh",
         [SSH_ALIAS, "node", "--input-type=module", "-"],
-        { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
+        { windowsHide: true, shell: false, stdio: Array(3).fill(this.platform === "win32" ? "overlapped" : "pipe") },
       );
       this.child = child;
       let output = "";
@@ -61,7 +63,7 @@ export class ClaudeReadAdapter {
         clearTimeout(timer);
         try {
           const result = JSON.parse(output);
-          if (result.error) throw new Error(result.error);
+          if (result?.error) throw new Error(result.error);
           yes(result);
         } catch (e) {
           no(new Error(e.message || "Remote read failed"));

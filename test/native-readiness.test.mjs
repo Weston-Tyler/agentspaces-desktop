@@ -12,3 +12,6 @@ test('installed native hook and an armed hook are distinct readiness states with
  state=ensureNativeConnection(f.engine,f.channels,'exact-binding').readiness;
  assert.equal(state.status,'native-hook-armed');assert.equal(state.nativeAcceptance,'not-attested');
 });
+test('local Codex readiness does not mistake configured proxy support for a live native endpoint',()=>{
+ const f=fixture();f.source.provider='codex';f.source.host='local';const r=nativeWakeReadiness(f.engine,f.channels,f.source.id);assert.equal(r.status,'native-control-connection-required');assert.equal(r.transportConnected,false);assert.equal(r.nativeAcceptance,'not-attested');
+});

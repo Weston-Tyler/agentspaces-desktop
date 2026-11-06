@@ -1,4 +1,4 @@
-import {formatAgentMessage} from './agent-message.mjs';
+import {formatAgentMessage,contributionReceipt} from './agent-message.mjs';
 import { createHash } from "node:crypto";
 
 const fail = code => Object.assign(new Error(code), { code });
@@ -102,7 +102,7 @@ export class ChannelHub {
     // The room already owns the text. Reconnect may only recover that exact
     // persisted message, not an unrecorded or subsequently edited payload.
     if (message.text !== text) throw fail('channel_message_content_mismatch');
-    if (Object.keys(receipts).length >= 1000) throw fail("channel_receipt_limit");
+    if (Object.values(receipts).filter(item=>item.status==='waiting-for-native-transport').length >= 1000) throw fail("channel_inbox_capacity_busy");
     receipts[requestId] = receipt; this.engine.store.save();
     if (this.connections.has(sessionId)) await this.sendPending(receipt);
     return { ...receipt };
@@ -146,7 +146,9 @@ export class ChannelHub {
     const receipt = this.engine.store.data.channelReceipts[requestId];
     if (!receipt || receipt.sessionId !== binding.sessionId || receipt.discussionId !== discussionId) throw fail("channel_reply_request_source_mismatch");
     if (["dispatch-allocated", "waiting-for-native-transport", "channel-access-changed; not dispatched"].includes(receipt.status)) throw fail("channel_request_not_delivered");
-    const view = this.engine.discussions.contribute({ id: discussionId, text, nativeTurnId: nativeTurnId ?? "unreported", deliveryId, replyTo: receipt.messageId }, binding);
+    this.engine.discussions.contribute({ id: discussionId, text, nativeTurnId: nativeTurnId ?? "unreported", deliveryId, replyTo: receipt.messageId }, binding);
+    const group=this.engine.discussions.group(discussionId),message=group.messages.find(item=>item.deliveryId===deliveryId);
+    const view=contributionReceipt(group,message);
     receipt.replyDeliveryId = deliveryId;
     receipt.replyAt = new Date().toISOString();
     receipt.status = "native-participant-contributed";

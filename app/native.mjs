@@ -1,10 +1,8 @@
 import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
-import { spawn, execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import { resolve, posix } from "node:path";
 import { hostOS } from "./platform.mjs";
 import { NATIVE_VERSION_PINS, nativeCompatibility } from './native-versions.mjs';
-const exec = promisify(execFile);
 export const compatibility = NATIVE_VERSION_PINS.local;
 export function openNativeSignIn(provider, host = "local") {
   if (process.platform !== "win32")
@@ -42,19 +40,33 @@ export function openNativeSignIn(provider, host = "local") {
       "Provider-owned flow; no authentication result or credentials collected",
   };
 }
-export async function detectTools(host = "local") {
+// Read-only discovery must not inherit an interactive SSH terminal or wait for stdin.
+export function readNativeVersion(host, provider, { spawnProcess = spawn, platform = process.platform, timeoutMs = 5000 } = {}) {
+  if (!["local", REMOTE_HOST].includes(host) || !["codex", "claude"].includes(provider)) throw new Error("Unsupported native provider or host");
+  return new Promise((resolveVersion, reject) => {
+    let child, output = "", size = 0, settled = false;
+    const finish = (code, value) => { if (settled) return; settled = true; clearTimeout(timer); code ? reject(Object.assign(new Error(code), { code })) : resolveVersion(value); };
+    const timer = setTimeout(() => { finish("native_version_probe_timeout"); child?.kill(); }, timeoutMs);
+    const remoteCommand = provider === "claude" ? 'if [ -x "$HOME/.local/bin/claude" ]; then exec "$HOME/.local/bin/claude" --version; else exec claude --version; fi' : "codex --version";
+    try {
+      child = spawnProcess(host === "local" ? provider : "ssh", host === "local" ? ["--version"] : ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", SSH_ALIAS, remoteCommand], {
+        windowsHide: true, shell: false, stdio: ["ignore", platform === "win32" ? "overlapped" : "pipe", platform === "win32" ? "overlapped" : "pipe"],
+      });
+      child.stdout.on("data", chunk => { size += Buffer.byteLength(chunk); if (size > 16384) { finish("native_version_probe_oversized"); child.kill(); } else output += chunk.toString(); });
+      child.stderr.on("data", () => {}); // Native/SSH diagnostics may contain private login URLs.
+      child.on("error", error => finish(host === "local" && error.code === "ENOENT" ? "native_executable_missing" : "native_version_probe_unavailable"));
+      child.on("close", code => finish(code === 0 && output.trim() ? null : host !== "local" && code === 127 ? "native_executable_missing" : "native_version_probe_unavailable", output.trim()));
+    } catch { finish("native_version_probe_unavailable"); }
+  });
+}
+export async function detectTools(host = "local", { readVersion = readNativeVersion, qualify = nativeCompatibility } = {}) {
   if (!["local", REMOTE_HOST].includes(host)) throw new Error("Unsupported host");
   return Promise.all(
     ["codex", "claude"].map(async (provider) => {
       try {
-        const { stdout } = await exec(
-          host === "local" ? provider : "ssh",
-          host === "local" ? ["--version"] : [SSH_ALIAS, provider, "--version"],
-          { timeout: 5000, windowsHide: true },
-        );
-        const version = stdout.trim();
+        const version = await readVersion(host, provider);
         const pin = NATIVE_VERSION_PINS[host][provider];
-        const compatible = await nativeCompatibility(host, provider, version);
+        const compatible = await qualify(host, provider, version);
         return {
           provider,
           host,
@@ -77,11 +89,13 @@ export async function detectTools(host = "local") {
             (host === REMOTE_HOST ? "ssh " + SSH_ALIAS + " " : "") +
             (provider === "codex" ? "codex login" : "claude auth login"),
         };
-      } catch {
+      } catch (error) {
         return {
           provider,
           host,
           installed: false,
+          installationObserved: error.code === "native_executable_missing",
+          discoveryError: ["native_executable_missing", "native_version_probe_timeout", "native_version_probe_oversized"].includes(error.code) ? error.code : "native_version_probe_unavailable",
           authentication: "Not inspected",
           capabilities: { execution: "Unavailable" },
         };
@@ -117,7 +131,7 @@ export class CodexReadAdapter {
       this.host === "local"
         ? ["app-server", "--stdio"]
         : [SSH_ALIAS, "codex", "app-server", "--stdio"],
-      { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+      { stdio: process.platform === "win32" ? ["overlapped", "overlapped", "overlapped"] : ["pipe", "pipe", "pipe"], windowsHide: true },
     );
     this.child.stderr.on("data", () => {}); // Provider logs can contain private material. Never persist them.
     this.child.stdout.on("data", (d) => {

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, realpathSync, chmodSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { installOnCurrentHost } from "../app/native-auto-install.mjs";
+import { installOnCurrentHost, NativeAutoInstaller } from "../app/native-auto-install.mjs";
 import { dependencyVersions } from "../app/dependency-versions.mjs";
 const TOKEN = "a".repeat(64);
 function fixture(provider = "claude") {
@@ -189,4 +189,51 @@ test('invalid existing Stop hook settings refuse before registration or private 
  const original=readFileSync(f.nativePath,'utf8');
  await assert.rejects(installOnCurrentHost({...f.options,sources:{...f.options.sources,inbox:'// Synthetic inbox'}}),/Existing native hook settings/);
  assert.equal(f.calls.length,0);assert.equal(readFileSync(f.nativePath,'utf8'),original);
+});
+
+test('stable native entries keep registration paths and hooks unchanged across helper updates',async()=>{
+ const f=fixture(),options={...f.options,sources:{...f.options.sources,entry:'// Synthetic stable entry protocol 1'}};
+ const first=await installOnCurrentHost(options),before=readFileSync(join(f.home,'.claude/settings.json'),'utf8');
+ const oldPayload=readFileSync(join(first.runtimePath,'native-bootstrap-mcp.mjs'),'utf8');
+ const second=await installOnCurrentHost({...options,sources:{...options.sources,bootstrap:'// Synthetic updated implementation'}});
+ assert.equal(readFileSync(join(first.runtimePath,'native-bootstrap-mcp.mjs'),'utf8'),oldPayload,'in-flight implementations remain immutable');
+ assert.equal(second.bootstrapPath,first.bootstrapPath);assert.equal(f.calls.filter(c=>c.args[1]==='add').length,1);
+ assert.equal(readFileSync(join(f.home,'.claude/settings.json'),'utf8'),before);
+ const pointer=JSON.parse(readFileSync(join(f.home,'.agentspaces-desktop-native/automatic/managed/current.json'),'utf8'));
+ assert.equal(pointer.protocol,1);assert.notEqual(pointer.runtime,first.runtimePath?.split(/[\\/]/).at(-1));
+});
+test('verified legacy helper paths forward cached native configurations to the managed entry',async()=>{
+ const f=fixture(),first=await installOnCurrentHost(f.options),entry='// Synthetic managed compatibility entry';
+ const originalConfig=readFileSync(f.nativePath,'utf8'),originalHooks=readFileSync(join(f.home,'.claude/settings.json'),'utf8');
+ await installOnCurrentHost({...f.options,sources:{...f.options.sources,entry}});
+ assert.equal(readFileSync(first.bootstrapPath,'utf8'),entry);
+ const settings=JSON.parse(readFileSync(join(f.home,'.claude/settings.json'),'utf8'));
+ assert(settings.hooks.UserPromptSubmit.some(g=>g.hooks.some(h=>h.command.includes(first.bootstrapPath.replace('native-bootstrap-mcp.mjs','native-session-hook.mjs')))));
+ assert.equal(readFileSync(f.nativePath,'utf8'),originalConfig);assert.equal(readFileSync(join(f.home,'.claude/settings.json'),'utf8'),originalHooks);
+ await installOnCurrentHost({...f.options,sources:{...f.options.sources,entry:entry+' v2',bootstrap:'// another implementation'}});
+ assert.equal(readFileSync(f.nativePath,'utf8'),originalConfig);assert.equal(f.calls.filter(c=>c.args[1]==='add').length,1);
+ assert.equal(readFileSync(first.bootstrapPath,'utf8'),entry+' v2');
+});
+
+test('same-host helper installs serialize their shared manifest without serializing native work',async()=>{
+ const data={nativeAutomaticInstallations:{},nativeRegistrationDevices:{}},engine={store:{data,save(){}}};let active=0,max=0;
+ const installer=new NativeAutoInstaller(engine,{address:'http://127.0.0.1:43127',sourceBindings:{issueDevice:({host,provider})=>({host,provider,token:TOKEN}),device:()=>({})},installLocal:async()=>{active++;max=Math.max(max,active);await new Promise(resolve=>setTimeout(resolve,10));active--;return {status:'native-config-installed'};}});
+ await Promise.all([installer.install({host:'local',provider:'codex'}),installer.install({host:'local',provider:'claude'})]);assert.equal(max,1);
+});
+
+test('a client using a cached legacy command reaches updates without native configuration changes',async t=>{
+ const {Client}=await import('@modelcontextprotocol/sdk/client/index.js'),{StdioClientTransport}=await import('@modelcontextprotocol/sdk/client/stdio.js');
+ const f=fixture();
+ const code=version=>`export async function createNativeBootstrap(){return {listTools:()=>[{name:'fixture',description:'Synthetic metadata',inputSchema:{type:'object'}}],callTool:async()=>({content:[{type:'text',text:'${version}'}]})};}`;
+ const first=await installOnCurrentHost({...f.options,sources:{...f.options.sources,bootstrap:code('old')}}),nativeBefore=readFileSync(f.nativePath,'utf8');
+ const entry=readFileSync(new URL('../app/native-managed-entry.mjs',import.meta.url),'utf8');
+ const options={...f.options,sources:{...f.options.sources,bootstrap:code('old'),entry}};
+ await installOnCurrentHost(options);
+ const base=join(f.home,'.agentspaces-desktop-native','automatic');symlinkSync(realpathSync(new URL('../node_modules',import.meta.url)),join(base,'node_modules'),process.platform==='win32'?'junction':'dir');
+ const transport=new StdioClientTransport({command:process.execPath,args:[first.bootstrapPath,'--config',first.configPath],stderr:'pipe'}),client=new Client({name:'legacy-fixture-client',version:'1.0.0'});
+ await client.connect(transport);t.after(()=>client.close());const pid=transport.pid;
+ assert.equal((await client.callTool({name:'fixture',arguments:{}})).content[0].text,'old');
+ await installOnCurrentHost({...options,sources:{...options.sources,bootstrap:code('new')}});
+ assert.equal((await client.callTool({name:'fixture',arguments:{}})).content[0].text,'new');assert.equal(transport.pid,pid);
+ assert.equal(readFileSync(f.nativePath,'utf8'),nativeBefore);assert.equal(f.calls.filter(c=>c.args[1]==='add').length,1);
 });

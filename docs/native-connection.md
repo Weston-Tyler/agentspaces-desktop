@@ -30,13 +30,13 @@ Older already-running hook helpers retain their previous retry behavior until
 their native client loads the refreshed helper; folder-change compatibility is
 provided by the companion immediately.
 
-Automatic Claude setup prefers the installed per-user native launcher over an older system npm installation. It privately records the launcher and its resolved executable. Lifecycle checks follow that exact launcher after upgrades while retaining the setup-time executable for already running sessions; process identity and source grants still have to match. Setup never creates a lifecycle record on behalf of a session. A genuine `SessionStart`, `UserPromptSubmit` or managed `Stop` hook must run before source-neutral tools can identify it.
+Automatic Claude setup prefers the installed per-user native launcher over an older system npm installation. It privately records the launcher and its resolved executable. Lifecycle checks follow that exact launcher after upgrades while retaining the setup-time executable for already running sessions; process identity and source grants still have to match. Setup never creates a lifecycle record on behalf of a session. On clients exposing supported native session metadata, a read-only `agents --json` observation can identify an already running session by its real ancestor PID without writing a hook record. Clients without that interface still require a genuine `SessionStart`, `UserPromptSubmit` or managed `Stop` hook.
 
 An owner-qualified remote runtime can coexist with the standard launcher. Setup
 retains its exact existing executable pin only for the same host, provider,
 registration capability and managed launcher. It never scans arbitrary version
 directories or accepts an executable merely because its name resembles Claude.
-A matching live lifecycle record with an unqualified executable reports
+When native session discovery cannot establish a matching source, a matching live lifecycle record with an unqualified executable reports
 `native_lifecycle_executable_not_qualified`; this differs from a missing record
 or reused PID. Record age or a provisional registration flag alone does not make
 a matching live process stale. Native source and permission checks still run on
@@ -60,7 +60,7 @@ The bootstrap advertises Claude's channel capability and opens a source-bound We
 | `native-hook-armed` | Source-bound native background waiter is connected. A message requests a native wake; acceptance is not attested. |
 | `native-opt-in-required` | Optional direct channel lacks its managed launch flag. Use the managed hook route when qualified, or enable the channel at the next owner-controlled launch. |
 | `native-opt-in-or-connection-required` | Service has no live channel for this source; call `ensure_native_connection` inside that thread for the more specific state. |
-| `native_lifecycle_binding_missing` / `native_lifecycle_binding_stale_or_missing` | This actual session must run its installed `SessionStart` or `UserPromptSubmit` hook. Network retries cannot invent identity. |
+| `native_lifecycle_binding_missing` / `native_lifecycle_binding_stale_or_missing` | Use supported native session metadata or a genuine installed `SessionStart`/`UserPromptSubmit` hook in this actual session. Network retries cannot invent identity. |
 | `connecting` / `reconnecting` | Source identity and opt-in exist, but transport is not yet open. Retry is automatic and bounded in frequency. |
 | `source-grant-unavailable` | Enrollment, sharing or retrieval permission is unavailable. Self-service setup preserves owner refusals. |
 | `native-source-changed` / `native-source-unavailable` | Identity changed or disappeared; the channel stops forwarding. Repair the actual native lifecycle, not a copied binding. |
@@ -98,3 +98,127 @@ A genuine prompt or Stop hook must still establish the lifecycle record. A loade
 MCP server using an older matcher needs a native MCP reconnect before it can use
 the additional runtime set; this is separate from restarting the conversation.
 Do not claim a repaired source until its own connection check succeeds.
+
+## Verified connection recovery
+
+The companion verifies its remote bridge with a bounded, signed round trip through
+the actual saved forwarding port. A live SSH process alone is unverified. Failed
+probes remove the healthy state immediately; repeated failures replace only the
+owned transport and retry its original port with bounded backoff. No source is
+reenrolled, no native client is resumed or cancelled, and no model is polled.
+Authentication-required, timeout and invalid-response states stay distinct.
+
+The loopback-only bridge-probe endpoint accepts a fresh nonce and returns only
+that nonce, running/stopping state and an HMAC proof. Its secret remains in the
+owning companion process. It exposes no PID, source, grants, credentials or
+workspace content and cannot perform owner or participant operations. The remote
+probe receives no owner administration credential. Normal source permissions
+remain required for all chat operations.
+
+## Stable managed helpers
+
+Managed MCP and lifecycle-hook commands now retain stable paths. A private,
+atomically replaced manifest selects a content-hashed implementation. The loader
+checks ownership, private file modes, path containment, protocol and every helper
+hash before importing code. It never falls back to an old helper when the new
+selection is invalid. Model selection is not part of this contract.
+
+Once the stable loader is connected, later implementation changes take effect at
+request boundaries and notify clients of tool-list changes. Existing requests
+finish on their original helper, and uncertain writes are never replayed.
+Genuine provider hooks continue to supply identity; qualification and registration
+are not fabricated by the loader.
+
+The installer recognizes old app-owned runtime directories by their exact content
+hash before writing compatibility entries for cached command paths. Verified
+existing native MCP commands and hook paths are retained, so migration does not
+remove/re-add a running native client's server or rewrite its global MCP settings.
+A private manifest tracks only these owned artifact aliases; immutable payloads
+used by in-flight calls are never rewritten. Unrecognized
+or linked paths are refused or left alone. Previously loaded legacy MCP code
+still requires one client-controlled reconnect to enter this mechanism; installing
+files cannot alter code already in a native client's memory. The installer reports
+source verification separately from installation and does not claim inbound wake
+merely because a helper was installed.
+
+| Check | Evidence required | A successful check does not establish |
+| --- | --- | --- |
+| Installed | Managed helper and native configuration verified | This chat loaded the helper |
+| Bridge ready | Fresh signed round trip to this companion | Source permission or wake delivery |
+| Registered | Genuine native identity and current source grants | A connected inbound listener |
+| Read/send ready | Source-bound API result and durable message receipt | A model read or answered the message |
+| Wake ready | Supported native route and exact delivery receipt | Completion of the requested work |
+
+The supported boundary is connected native Codex and Claude clients exposing the
+required integration interfaces. Codex protocol checks and the pinned Claude read
+SDK remain owning adapters. Unknown client behavior fails explicitly; consumer web
+history, unconnected cloud sessions and arbitrary future versions are not silently
+claimed as supported. Native account, organization and owner restrictions remain
+in force.
+
+### Claude sessions without a startup record
+
+The adapter first uses a matching live lifecycle record. When that is unavailable,
+it capability-checks the configured native launcher's documented
+[`agents --json` command](https://code.claude.com/docs/en/cli-reference#cli-commands).
+It checks the command's read-only help before invoking metadata discovery, then
+accepts only a supported schema identifying an exact live ancestor PID. It
+rechecks that process's start time and executable after discovery. Other PIDs,
+ambiguous identities, unsupported schemas and reused processes are refused.
+It never opens or resumes another controller, reads transcripts or starts a model.
+
+This observation can bind the source without writing a synthetic lifecycle record.
+A later genuine hook may cache its runtime observation, bound to this device
+capability, exact source, PID/start time and executable. A changed device capability
+does not inherit that cache. This is a local observation cache, not cryptographic
+attestation of the native client. Server-observed source metadata, workspace scope,
+exclusions and grants are still checked separately. No model name is involved.
+Native background wake still requires its supported genuine hook or channel.
+
+Source registration retries short transport outages, safe-update draining and
+metadata-persistence races with a fixed four-attempt bound. Registration is
+idempotent and always rechecks current source grants. The requested tool operation
+is dispatched only once after registration succeeds. Revocation, identity refusal
+and cancellation before dispatch do not retry, and an unobserved tool-write result
+is never automatically replayed. A native caller can cancel its own pending
+registration request; AgentSpaces does not cancel the native turn.
+
+
+Agent contribution replies return a bounded write receipt, the submitted message
+and its exact source/hash reference rather than the entire room history. This
+prevents an already stored post from appearing to fail merely because the room is
+large. History stays unchanged and remains available through paginated or exact
+message reads. Retrying the same delivery ID reconciles the same stored message;
+unknown write acceptance is never a reason to allocate a new delivery ID.
+
+Metadata reads and execution qualification are separate. Claude session discovery uses the pinned SDK and checks each required read method at the call boundary; an unfamiliar native version does not by itself hide its sessions. Missing SDK methods, scope refusal and unsupported filters still fail explicitly. This does not qualify model execution on that release. Codex continues to require its protocol contract. Native version probes use bounded, noninteractive SSH handles on Windows; a transport failure is reported as unavailable discovery, rather than confirmed missing software.
+
+### Auditing a whole catalog
+
+Count source records separately from unique native thread IDs: the same native ID
+can be observed on more than one host. Check current registration policy, explicit
+sharing denials, native metadata availability, source-binding integrity and native
+wake routes separately. A policy-eligible record has not necessarily self-registered
+or loaded the managed tools. Historical metadata is not a live listener.
+
+Owner diagnostics must not impersonate peers with their stored capabilities,
+fabricate hook records, broadcast test messages or resume dormant threads merely
+to fill in an audit table. Preserve sharing denials and mark missing native
+metadata or unsupported wake routes explicitly. Native metadata reads and a
+verified bridge do not establish a message/response round trip. Windows remote
+Claude SDK reads use overlapped SSH handles; an absent native metadata result
+remains `null`, rather than becoming a misleading transport/parsing error.
+
+### Local Codex control-socket delivery
+
+Local Codex conversations use the native `codex app-server proxy` against its
+existing control socket. AgentSpaces never starts a replacement app-server to
+make the proxy succeed. Local delivery requires a current compatible protocol,
+existing-native-policy acceptance and an exact loaded target accepting direct
+input. Windows paths use native Windows path rules. Missing control sockets and
+unloaded targets remain undispatched; bounded recovery rechecks permissions and
+native eligibility before submission. Local cold resume is refused, since a
+separate stdio controller may still own the thread. Unknown submission acceptance
+is reconciled rather than replayed. `native-control-connection-required` is not a
+verified wake receipt. Changing a native client's listener at its next supported
+launch is separate from installing this adapter; no current client is restarted.

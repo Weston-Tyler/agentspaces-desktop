@@ -26,6 +26,10 @@ export function mountProviderRouting(root,{api,notice}){
    fleetContent.append(el('h3','Signed capability cards'));
    if(!discovery.cards.length)fleetContent.append(el('p','No matching verified cards are cached.'));
    for(const card of discovery.cards)fleetContent.append(el('p',`${card.description||card.agentId} · ${card.reachable?'fabric route observed':'fabric reachability unknown'} · native identity and wake access unbound`));
+   if(discovery.models?.length){
+    fleetContent.append(el('h3','Signed model cards'));
+    for(const card of discovery.models)fleetContent.append(el('p',`${card.name}${card.version?' '+card.version:''} · ${card.tasks.join(', ')||'tasks unspecified'} · advertised by a peer`));
+   }
    if(discovery.truncated||observed.response?.truncated)fleetContent.append(el('p','This response is truncated; use a narrower query and inspect coverage.'));
    fleetContent.append(el('p','Coverage: partial local observations. Missing publishers and expired records remain unknown.'));
    if(!usage?.enabled)fleetContent.append(el('p','Fleet usage is off. Select a usage space when connecting the optional fabric.'));

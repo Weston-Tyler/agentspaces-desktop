@@ -1,3 +1,5 @@
+import { contributionReceipt } from './agent-message.mjs';
+import { createBridgeHealth, probeRemoteBridge } from './bridge-health.mjs';
 import { observedFleet } from './observed-fleet.mjs';
 import { UpdateGate } from './update-gate.mjs';
 import {nativeWakeReadiness,ensureNativeConnection} from './native-readiness.mjs';
@@ -77,6 +79,7 @@ export async function startServer({
   codexAdapterFactory,
   participantInstallRemote,
   participantTunnelFactory,
+  participantVerifyBridge,
   sourceMetadataResolver = resolveNativeSourceMetadata,
   automaticInstallLocal,
   automaticInstallRemote,
@@ -101,6 +104,7 @@ export async function startServer({
   const ownerBrowser = new OwnerBrowserSession(store), recentHistory = new RecentHistory(store);
   const admin = randomBytes(32).toString("hex"),
     instance = randomBytes(16).toString("hex");
+  const bridgeHealth = createBridgeHealth();
   let closing = false;
   const headlessJobs = new HeadlessJobs(engine,{...headlessJobOptions,admitLaunch:()=>engine.dispatchAllowed()});
   const activeAnswers = new Map();
@@ -140,11 +144,13 @@ export async function startServer({
   } });
   const broadcasts = new AgentBroadcast(engine);
   const routeBatches = async result => {
+    const batches = [];
     for (const batch of result.batches) {
-      const group = engine.discussions.group(batch.discussionId);
-      await routeConversation(engine, { codexAgents, channels }, group, group.messages.find(m => m.id === batch.messageId));
+      const group = engine.discussions.group(batch.discussionId), message = group.messages.find(m => m.id === batch.messageId);
+      await routeConversation(engine, { codexAgents, channels }, group, message);
+      batches.push({...batch,posting:messageDelivery(message)});
     }
-    return result;
+    return {...result,batches};
   };
   const continuationWaker=new ContinuationWaker(engine,{inspect:id=>codexAgents.inspectContinuation(id),route:(group,message)=>routeConversation(engine,{codexAgents,channels},group,message),dispatchAllowed:()=>!closing&&(!engine.dispatchAllowed||engine.dispatchAllowed())});
   let connections, participantConnections, sourceBindings, automaticConnections;
@@ -203,6 +209,10 @@ export async function startServer({
       const bytes = readFileSync(vendorFiles[url.pathname] ?? join(ui, file));
       res.end(url.pathname === "/" ? bytes.toString("utf8").replace("<head>", '<head><meta name="terminal-style-nonce" content="' + styleNonce + '">') : bytes);
       return;
+    }
+    if (req.method === 'GET' && url.pathname === '/api/native/bridge-probe') {
+      const reply = bridgeHealth.respond(url.searchParams.get('nonce'), closing ? 'stopping' : 'running');
+      json(res, reply ? 200 : 400, reply ?? { error: 'Invalid probe nonce' }); return;
     }
     const cookie = /\bas_session=([a-f0-9]+)/.exec(
       req.headers.cookie ?? "",
@@ -461,12 +471,13 @@ export async function startServer({
           result = { sourceId: caller.id, host: caller.host, provider: caller.provider,wakeReadiness:engine.nativeWakeReadiness(caller.id),
             groups: { discover: true, create: true, join: true, invite: true, read: true, contribute: true, firstAccessJoinsOpenRoom: true },
             nativeThreads: { provider: 'codex', creationStartsTurn: false, hosts: (profile?.hosts ?? []).map(host => ({ host, available: creationGranted && engine.tools.some(t => t.host === host && t.provider === 'codex' && t.installed && nativeAdapterCompatible(t)), policy: 'inherit-native-configuration' })) },
+            conversationDelivery: {default:'side',ownerRoomOverride:true,ownerMessageOverride:true,mainFallback:false,sideProviders:{codex:'qualified App Server required',claude:'interactive /btw only; automatic capture unavailable'}},
             workspace: { search: workspaceGranted, inspect: workspaceGranted && !!profile.indexFiles, compare: workspaceGranted && !!profile.indexFiles },
             findings: { discover: true, retrieveShared: true },
             ownerSurfaces: ['account connections', 'source permissions', 'room policy', 'native login/consent', 'service lifecycle', 'model budgets'],
             unsupportedSources: ['unconnected cloud sessions', 'consumer web history'],
             headlessJobs: headlessJobs.capabilities(),
-            availableTools: ['read_provider_status','report_native_availability','preview_provider_handoff','request_provider_handoff','ensure_native_connection','request_headless_job','list_headless_jobs','read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
+            availableTools: ['read_provider_status','report_native_availability','preview_provider_handoff','request_provider_handoff','ensure_native_connection','request_headless_job','list_headless_jobs','read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','read_fabric_observations','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
           break;
         }
@@ -474,6 +485,7 @@ export async function startServer({
           result = await peerMessages.send(data, connector);
           const group = engine.discussions.group(result.discussionId), message = group.messages.find(m => m.id === result.messageId);
           await routeConversation(engine, { codexAgents, channels }, group, message);
+          result.posting = messageDelivery(message);
           break;
         }
         case '/api/agent/broadcast':
@@ -504,7 +516,7 @@ export async function startServer({
         case "/api/native/channel/reply":
           if (!connector) throw new Error("Participant-bound native channel capability required");
           result = channels.reply(data, connector);
-          { const group = engine.discussions.group(data.discussionId), message = group.messages.find(message => message.deliveryId === data.deliveryId); await routeConversation(engine, { codexAgents, channels }, group, message); result.posting = messageDelivery(message); }
+          { const group = engine.discussions.group(data.discussionId), message = group.messages.find(message => message.deliveryId === data.deliveryId); await routeConversation(engine, { codexAgents, channels }, group, message); result.posting = messageDelivery(message); result.discussion=contributionReceipt(group,message,result.posting); }
           break;
         case "/api/ask/providers":
           result = await detectAnswerProviders({ host: data.host ?? "local" });
@@ -613,7 +625,13 @@ export async function startServer({
             break;
           }
           result = engine.discussions.contribute(data, connector);
-          { const group = engine.discussions.group(data.id), message = group.messages.find(message => message.deliveryId === data.deliveryId); await routeConversation(engine, { codexAgents, channels }, group, message); result.posting = messageDelivery(message); }
+          {
+            const group = engine.discussions.group(data.id), message = group.messages.find(message => message.deliveryId === data.deliveryId);
+            await routeConversation(engine, { codexAgents, channels }, group, message); result.posting = messageDelivery(message);
+            if(connector&&message){
+              result=contributionReceipt(group,message,result.posting);
+            }
+          }
           break;
         case "/api/sample":
           if (!allowDemo) throw new Error("Sample data is available only in a separate demo runtime");
@@ -708,6 +726,7 @@ export async function startServer({
           fabric.close();
           engine.fabricObservationOptions = undefined;
           engine.fabricProject = null;
+          engine.fabricWorkspace = null;
           store.audit("Fabric disconnected");
           result = fabric.diagnostics();
           break;
@@ -777,7 +796,7 @@ export async function startServer({
   const address = `http://127.0.0.1:${server.address().port}`;
   engine.companionAddress=address;
   connections = new NativeConnections(engine, { root, address, remoteInstall });
-  participantConnections = new ParticipantConnections(engine, { root, address, installRemote: participantInstallRemote, tunnelFactory: participantTunnelFactory });
+  participantConnections = new ParticipantConnections(engine, { root, address, installRemote: participantInstallRemote, tunnelFactory: participantTunnelFactory, verifyBridge: participantVerifyBridge ?? (async options => { const nonce = randomBytes(32).toString('hex'); return bridgeHealth.verify(await probeRemoteBridge({ ...options, nonce }), nonce); }) });
   sourceBindings = new SourceBindings(engine, { root, address, resolveMetadata: sourceMetadataResolver });
   automaticConnections = new NativeAutoInstaller(engine, { sourceBindings, participantConnections, address, installLocal: automaticInstallLocal, installRemote: automaticInstallRemote, refreshNative: host => codexAgents.refreshTools(host) });
   if (desktopDiscovery && store.data.desktopPreferences?.nativeAutoSetup) automaticConnections.setup().catch(() => {});

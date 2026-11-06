@@ -143,7 +143,7 @@ test('SSH transports use configured alias while exposing only retained identity 
     await assert.rejects(new ClaudeReadAdapter({host:'legacy-lab',spawnProcess:spawn}).discover({path:'/Work',metadataGrant:true}));
     assert.equal(calls,3);
     const data={participantBridge:{host:'legacy-lab',remotePort:45000,authority:'127.0.0.1:43127'},connectors:{synthetic:{sessionId:'codex@legacy-lab:source'}}};const before=structuredClone(data);
-    const bridge=new ParticipantConnections({store:{data,save(){}}},{root:process.cwd(),address:'http://127.0.0.1:43127',tunnelFactory:async args=>{assert.equal(args.host,'legacy-lab');assert.equal(args.remotePort,45000);return {child:new EventEmitter(),close(){}};}});
+    const bridge=new ParticipantConnections({store:{data,save(){}}},{root:process.cwd(),address:'http://127.0.0.1:43127',verifyBridge:async()=>true,tunnelFactory:async args=>{assert.equal(args.host,'legacy-lab');assert.equal(args.remotePort,45000);return {child:new EventEmitter(),close(){}};}});
     await bridge.restorePromise;assert.equal(bridge.health().status,'connected');assert.deepEqual(data,before);bridge.close();
     const script=remoteInstallScript({config:{host:'legacy-lab'},sources:{},versions:{}});
     const imports=[...script.matchAll(/^import\\s.*?from\\s+['"]([^'"]+)['"]/gm)].map(match=>match[1]);

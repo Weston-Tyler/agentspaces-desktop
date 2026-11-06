@@ -1,9 +1,10 @@
+import {answerCodexSide} from './codex-side-chat.mjs';
 import {deliveryIntent,formatAgentMessage} from './agent-message.mjs';
 import { REMOTE_HOST } from "./remote-host.mjs";
 import { createHash } from "node:crypto";
 import { CodexQueueAdapter } from "./codex-queue.mjs";
-import { nativeAdapterCompatible, observedVersion, qualifiedNativeVersion } from './native-versions.mjs';
-const transientTransport = new Set(['companion_update_deferred', 'native_proxy_disconnected', 'native_proxy_not_connected', 'native_websocket_handshake_failed', 'native_websocket_not_ready', 'native_rpc_timeout']);
+import { codexDaemonCapabilities, nativeAdapterCompatible } from './native-versions.mjs';
+const transientTransport = new Set(['native_delivery_capacity_busy', 'local_native_loaded_target_required', 'companion_update_deferred', 'native_proxy_disconnected', 'native_proxy_not_connected', 'native_websocket_handshake_failed', 'native_websocket_not_ready', 'native_rpc_timeout']);
 const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 // Direct user-addressed conversation transport. These receipts are not work
 // claims, a task queue, a scheduler or upstream completion authority.
@@ -11,6 +12,8 @@ export class CodexDiscussionHub {
   constructor(engine, { adapterFactory, onContribution } = {}) {
     this.engine = engine; this.adapterFactory = adapterFactory ?? (options => new CodexQueueAdapter(options)); this.verifyProvider = !adapterFactory; this.adapters = new Map(); this.bindings = new Map(); this.pending = new Map(); this.aborters = new Map(); this.closed = false;
     this.onContribution = onContribution;
+    this.sideActive = new Set();
+    this.sideAdapters = new Set();
     engine.store.data.codexDiscussionDeliveries ??= {};
     engine.store.data.codexDiscussionNativeReceipts ??= {};
     engine.store.data.codexDiscussionProofs ??= {};
@@ -18,7 +21,7 @@ export class CodexDiscussionHub {
   }
   async inspectContinuation(sessionId) {
     const source=this.engine.session(sessionId),grant=this.engine.permissions(source);
-    if(source.fixture||source.provider!=='codex'||source.host!==REMOTE_HOST)return {state:'unsupported',reason:'This native route does not expose qualified idle state'};
+    if(source.fixture||source.provider!=='codex'||!['local',REMOTE_HOST].includes(source.host))return {state:'unsupported',reason:'This native route does not expose qualified idle state'};
     if(!grant.enrolled||!grant.retrieve||!grant.share||!grant.content)return {state:'unknown',reason:'Native source grant unavailable'};
     if(this.engine.store.data.desktopPreferences?.allowNativeFullAccess!==true)return {state:'unsupported',reason:'Owner opt-in to existing native client policy is required'};
     let adapter;
@@ -46,7 +49,7 @@ export class CodexDiscussionHub {
   validate(sessionId, discussionId, messageId) {
     if (this.closed) throw new Error("Native conversation service is closed");
     const source = this.engine.session(sessionId), grant = this.engine.permissions(source);
-    if (source.fixture || source.provider !== "codex" || source.host !== REMOTE_HOST) throw new Error("Shared native Codex connection is available on remote only");
+    if (source.fixture || source.provider !== "codex" || !["local", REMOTE_HOST].includes(source.host)) throw new Error("Supported local or remote native Codex source required");
     if (!grant.enrolled || !grant.content || !grant.share || !grant.retrieve) throw new Error("Native agent connection was revoked or unavailable");
     if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(source.nativeThreadId ?? "")) throw new Error("Original native thread identity is unavailable");
     const group = this.engine.discussions.group(discussionId);
@@ -68,13 +71,12 @@ export class CodexDiscussionHub {
   async bind(source, effect) {
     if (this.bindings.has(source.id)) return this.bindings.get(source.id);
     const promise = (async () => {
-      let steeringProtocol=false,checkedCliVersion=null;
+      if (source.host === "local" && this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true) throw Object.assign(new Error("Existing native policy acceptance is required for local loaded delivery"), { code: "local_native_policy_acceptance_required" });
+      let tool;
       if (this.verifyProvider) {
         await this.engine.probe(source.host);
-        const tool = this.engine.tools.find(tool => tool.host === source.host && tool.provider === 'codex');
+        tool = this.engine.tools.find(tool => tool.host === source.host && tool.provider === 'codex');
         if (effect) { effect.cliVersion = tool?.version ?? null; effect.compatibilityStatus = tool?.compatibilityStatus ?? null; }
-        steeringProtocol=tool?.protocol?.steering?.compatible===true;checkedCliVersion=observedVersion(tool?.version);
-        if (!nativeAdapterCompatible(tool)) throw Object.assign(new Error('Native protocol is unavailable or incompatible'), { code: 'native_protocol_unavailable' });
       }
       const options = { host: source.host,
         persistReceipt: async receipt => { this.engine.store.data.codexDiscussionNativeReceipts[receipt.clientId] = receipt; this.engine.store.save(); },
@@ -87,10 +89,16 @@ export class CodexDiscussionHub {
         if (this.adapters.get(source.id) === adapter) { this.bindings.delete(source.id); this.adapters.delete(source.id); }
       });
       await adapter.open();
-      const daemonVersion = observedVersion(adapter.serverInfo?.userAgent);
-      if(this.verifyProvider)adapter.steeringSupported=steeringProtocol&&!!daemonVersion&&daemonVersion===checkedCliVersion;
-      if (effect) effect.daemonVersion = daemonVersion;
-      if (this.verifyProvider && daemonVersion && observedVersion(effect?.cliVersion) !== daemonVersion && !qualifiedNativeVersion(source.host, 'codex', daemonVersion)) throw Object.assign(new Error('Unverified daemon/CLI protocol mismatch'), { code: 'native_daemon_version_mismatch' });
+      if (this.verifyProvider) {
+        const caps = codexDaemonCapabilities(source.host, tool, adapter.serverInfo?.userAgent);
+        adapter.steeringSupported = caps.steering;
+        if (effect) { effect.daemonVersion = caps.version; effect.nativeContractSource = caps.source; }
+        if (!caps.queue) {
+          const code = caps.version && caps.cliVersion && caps.version !== caps.cliVersion
+            ? 'native_daemon_version_mismatch' : 'native_protocol_unavailable';
+          throw Object.assign(new Error('Running native daemon is not qualified'), { code });
+        }
+      }
       if (effect) this.validate(effect.sessionId, effect.discussionId, effect.messageId);
       const current = this.engine.session(source.id), grant = this.engine.permissions(current);
       if (!grant.enrolled || !grant.content || !grant.share || !grant.retrieve || current.nativeThreadId !== source.nativeThreadId || current.account !== source.account || current.project !== source.project) throw new Error("Native source grant or identity changed");
@@ -102,6 +110,7 @@ export class CodexDiscussionHub {
         catch (error) { if (effect?.continuation||error.code !== 'native_loaded_target_not_available') throw error; }
       }
       if(effect?.continuation&&!loaded)throw new Error('Standing wake requires a loaded native target; no resume attempted');
+      if (!loaded && source.host === "local") throw Object.assign(new Error("Local native delivery requires a loaded target on its existing control socket"), { code: "local_native_loaded_target_required" });
       if (!loaded) await adapter.bindExistingThread({ threadId: source.nativeThreadId, cwd, grant: nativeGrant });
       if (loaded && this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true) throw new Error('Existing native policy grant changed');
       const connector = this.engine.issueConnector(source.id), binding = this.engine.connector(connector.token);
@@ -110,21 +119,98 @@ export class CodexDiscussionHub {
     this.bindings.set(source.id, promise);
     try { return await promise; } catch (error) { this.bindings.delete(source.id); this.adapters.get(source.id)?.close(); this.adapters.delete(source.id); throw error; }
   }
-  dispatch({ sessionId, discussionId, messageId, text, requestId, budget = { timeoutMs: 90000, maxOutputTokens: 800 } }) {
+  dispatch({ sessionId, discussionId, messageId, text, requestId, destination = 'main', budget = { timeoutMs: 90000, maxOutputTokens: 800 } }) {
     this.validate(sessionId, discussionId, messageId);
     this.validateContinuation(sessionId,discussionId,messageId);
     if (!/^[a-zA-Z0-9_-]{8,128}$/.test(requestId ?? "") || typeof text !== "string" || !text.trim() || text.length > 8000) throw new Error("Invalid native conversation message");
     if (!Number.isInteger(budget.timeoutMs) || budget.timeoutMs < 1 || budget.timeoutMs > 90000 || !Number.isInteger(budget.maxOutputTokens) || budget.maxOutputTokens < 1 || budget.maxOutputTokens > 800) throw new Error("Invalid native conversation budget");
-    const inputHash = hash({ sessionId, discussionId, messageId, text, budget });
+    if (!['main','side'].includes(destination)) throw new Error('Unknown native delivery destination');
+    const inputHash = hash({ sessionId, discussionId, messageId, text, budget, ...(destination==='side'?{destination}:{}) });
     const effects = this.engine.store.data.codexDiscussionDeliveries, previous = effects[requestId];
     if (previous) { if (previous.inputHash !== inputHash) throw new Error("Native message identity reused for different content"); return { ...previous, duplicate: true, replayed: false }; }
-    if (Object.keys(effects).length >= 1000) throw new Error("Native conversation receipt limit reached");
     const continuation=!!this.engine.discussions.group(discussionId).messages.find(message=>message.id===messageId)?.continuation;
-    const effect = { requestId, sessionId, discussionId, messageId, inputHash, continuation, status: "connecting-native-agent", retryAllowed: false, at: new Date().toISOString() };
+    const effect = { requestId, sessionId, discussionId, messageId, inputHash, continuation, ...(destination==='side'?{destination,deliveryMode:'side'}:{}), status: "connecting-native-agent", retryAllowed: false, at: new Date().toISOString() };
+    if (this.aborters.size >= 1000) {
+      Object.assign(effect,{status:'waiting-for-native-delivery-capacity',reasonCode:'native_delivery_capacity_busy',reason:'Waiting for native delivery capacity; no input submitted',undispatched:true,uncertainOutcome:false,recoveryDeadline:new Date(Date.now()+86400000).toISOString(),nextRetryAt:new Date(Date.now()+15000).toISOString()});
+      effects[requestId]=effect;this.engine.store.save();return {...effect};
+    }
     effects[requestId] = effect; this.engine.store.save();
     const abort = new AbortController(); this.aborters.set(requestId, abort);
-    const run = this.run(effect, text, budget, abort.signal).finally(() => this.aborters.delete(requestId));
+    const run = (destination==='side' ? this.runSide(effect, budget, abort.signal) : this.run(effect, text, budget, abort.signal)).finally(() => { this.aborters.delete(requestId); this.pending.delete(requestId); });
     this.pending.set(requestId, run); return { ...effect };
+  }
+  async runSide(effect, budget, signal) {
+    let adapter, occupied = false, submitted = false;
+    const { discussionId, messageId, sessionId, requestId } = effect;
+    const group = this.engine.discussions.group(discussionId);
+    const message = group.messages.find(m=>m.id===messageId);
+    const target = message.targets?.find(t=>t.sessionId===sessionId);
+    const save = (status, extra = {}) => {
+      Object.assign(effect,{status,...extra});
+      if (target) Object.assign(target,{status,deliveryMode:'side',...Object.fromEntries(['reason','reasonCode','undispatched'].filter(k=>extra[k]!==undefined).map(k=>[k,extra[k]]))});
+      this.engine.store.save();
+    };
+    const denied = (code, reason) => Object.assign(Error(code), { code, publicReason:reason });
+    try {
+      const source = this.validate(sessionId,discussionId,messageId), cwd = source.cwd ?? this.engine.target(source).path;
+      const boundary = row => hash([row.nativeThreadId,row.host,row.account,row.project,row.scopeId??null,row.cwd??this.engine.target(row).path]);
+      const expected = boundary(source);
+      const fence = () => {
+        if (this.engine.dispatchAllowed?.() === false || this.engine.store.data.desktopPreferences?.allowNativeFullAccess !== true)
+          throw denied('native_side_policy_required','Native execution consent or the companion connection is unavailable');
+        if (boundary(this.validate(sessionId,discussionId,messageId)) !== expected)
+          throw denied('native_side_boundary_changed','The native source changed');
+      };
+      fence();
+      if (this.sideActive.size >= 4 || this.sideActive.has(sessionId))
+        throw denied('native_side_capacity','The side chat is busy; the message remains in the room');
+      this.sideActive.add(sessionId); occupied = true;
+      let tool;
+      if (this.verifyProvider) {
+        await this.engine.probe(source.host);
+        tool = this.engine.tools.find(t=>t.host===source.host&&t.provider==='codex');
+      }
+      fence();
+      adapter = this.adapterFactory({host:source.host});
+      this.sideAdapters.add(adapter);
+      await adapter.open();
+      if (this.verifyProvider) {
+        const caps = codexDaemonCapabilities(source.host, tool, adapter.serverInfo?.userAgent);
+        effect.cliVersion = caps.cliVersion;
+        effect.daemonVersion = caps.version;
+        effect.nativeContractSource = caps.source;
+        if (!caps.sideChat) throw denied('native_side_protocol_unavailable','The running Codex server has no verified side-chat contract');
+      }
+      const answer = await answerCodexSide(adapter,{
+        parentId:source.nativeThreadId,cwd,signal,timeoutMs:budget.timeoutMs,maxOutputTokens:budget.maxOutputTokens,fence,
+        question:formatAgentMessage({group,message,requestId,replyMode:'side',origin:this.engine.companionAddress}),
+        beforeStart:childId=>{
+          fence();
+          save('side-chat-submitting',{sideThreadId:childId,undispatched:false,uncertainOutcome:true});
+          submitted = true;
+        },
+      });
+      fence();
+      if (signal.aborted) throw Error('Side answer observation ended');
+      const deliveryId='codex-side-'+hash(requestId);
+      const binding={sessionId,account:source.account,project:source.project,scopeId:source.scopeId??null};
+      this.engine.discussions.contribute({id:discussionId,text:answer.text,nativeTurnId:answer.nativeTurnId,deliveryId,replyTo:messageId},binding,{nativeSideReply:true});
+      save('native-agent-replied',{nativeThreadId:source.nativeThreadId,nativeTurnId:answer.nativeTurnId,
+        replyMessageId:group.messages.find(m=>m.deliveryId===deliveryId)?.id,uncertainOutcome:false,usage:answer.usage});
+    } catch(error) {
+      // Never send the question to the parent, even if the fork expired, a
+      // model response is lost, or the user changes the room default.
+      save(submitted?'side-chat-reply-unconfirmed':'side-chat-unavailable',{
+        reasonCode: error.code?.startsWith('native_side_') ? error.code : 'native_side_unavailable',
+        reason: error.publicReason ?? (submitted?'Side chat reply was not confirmed; no retry or main-thread delivery':'Native side chat unavailable; kept in the room'),
+        undispatched:!submitted,uncertainOutcome:submitted,
+      });
+    } finally {
+      if (occupied) this.sideActive.delete(sessionId);
+      this.sideAdapters.delete(adapter);
+      adapter?.close();
+    }
+    return {...effect};
   }
   async run(effect, text, budget, signal) {
     let answerAttempted = false;
@@ -202,7 +288,7 @@ export class CodexDiscussionHub {
       if (!nativeReceipt && error.uncertainOutcome === false) { effect.undispatched = true; effect.uncertainOutcome = false; }
       // Do not retain native diagnostics, prompts, tool arguments or secrets.
       effect.reason = "Native agent unavailable, busy, needs attention or access changed";
-      const safeCodes = [...transientTransport, 'native_protocol_unavailable', 'native_daemon_version_mismatch', 'native_loaded_target_not_available', 'native_existing_thread_busy_or_unavailable', 'native_rpc_rejected', 'native_rpc_timeout', 'native_steer_ack_uncertain', 'native_queue_ack_uncertain'];
+      const safeCodes = [...transientTransport, 'local_native_policy_acceptance_required', 'native_protocol_unavailable', 'native_daemon_version_mismatch', 'native_loaded_target_not_available', 'native_existing_thread_busy_or_unavailable', 'native_rpc_rejected', 'native_rpc_timeout', 'native_steer_ack_uncertain', 'native_queue_ack_uncertain'];
       effect.reasonCode = safeCodes.includes(error.code) ? error.code : 'native_access_or_binding_unavailable';
       if (typeof error.rpcMethod === 'string') effect.failedMethod = error.rpcMethod;
       if (effect.undispatched && !effect.uncertainOutcome && !nativeReceipt && transientTransport.has(effect.reasonCode)) {
@@ -210,7 +296,7 @@ export class CodexDiscussionHub {
         effect.nextRetryAt = new Date(Date.now() + Math.min(300000, 15000 * 2 ** Math.min(effect.retryCount ?? 0, 5))).toISOString();
         effect.reason = 'Connection interrupted before message submission; waiting to reconnect';
       }
-      const reasons = { native_protocol_unavailable: 'Native protocol check failed; message was not queued', native_daemon_version_mismatch: 'Native daemon version differs from the checked CLI; message was not queued' };
+      const reasons = { local_native_policy_acceptance_required: 'Existing native policy acceptance is required; no connection or resume attempted', local_native_loaded_target_required: 'Waiting for a loaded native target on the existing control socket; no local resume attempted', native_protocol_unavailable: 'Native protocol check failed; message was not queued', native_daemon_version_mismatch: 'Running Codex daemon differs from the checked CLI and has no reviewed contract; message was not queued' };
       if (!answerAttempted && reasons[effect.reasonCode]) effect.reason = reasons[effect.reasonCode];
       const observationEnded = (nativeReceipt ?? error.receipt)?.observationEnded === true;
       if(effect.deliveryMode==='steer'&&effect.uncertainOutcome)effect.reason='Steering acceptance is uncertain; no duplicate was queued';
@@ -241,13 +327,14 @@ export class CodexDiscussionHub {
   }
   wait(requestId) { return this.pending.get(requestId) ?? Promise.resolve(this.engine.store.data.codexDiscussionDeliveries[requestId]); }
   async recoverUndispatched({ includeLegacy = false } = {}) {
-    if (this.recoveryRunning || this.closed || this.engine.dispatchAllowed?.() === false) return { recovered: [], skipped: true };
-    const candidates = Object.values(this.engine.store.data.codexDiscussionDeliveries).filter(effect => effect.undispatched === true && !this.engine.store.data.codexDiscussionNativeReceipts[effect.requestId] && !effect.nativeTurnId && !this.aborters.has(effect.requestId) && ((transientTransport.has(effect.reasonCode) && !effect.uncertainOutcome && Date.parse(effect.recoveryDeadline) > Date.now() && Date.parse(effect.nextRetryAt) <= Date.now()) || ((effect.retryCount ?? 0) < 3 && (effect.reasonCode === 'native_protocol_unavailable' || (includeLegacy && !effect.reasonCode)))));
+    if (this.recoveryRunning || this.closed || this.aborters.size >= 1000 || this.engine.dispatchAllowed?.() === false) return { recovered: [], skipped: true };
+    const candidates = Object.values(this.engine.store.data.codexDiscussionDeliveries).filter(effect => effect.destination!=='side' && effect.undispatched === true && !this.engine.store.data.codexDiscussionNativeReceipts[effect.requestId] && !effect.nativeTurnId && !this.aborters.has(effect.requestId) && ((transientTransport.has(effect.reasonCode) && !effect.uncertainOutcome && Date.parse(effect.recoveryDeadline) > Date.now() && Date.parse(effect.nextRetryAt) <= Date.now()) || ((effect.retryCount ?? 0) < 3 && (effect.reasonCode === 'native_protocol_unavailable' || (includeLegacy && !effect.reasonCode)))));
     if (!candidates.length) return { recovered: [] };
     this.recoveryRunning = true;
     const recovered = [], sessions = new Set();
     try {
       for (const effect of candidates) {
+        if (this.aborters.size >= 1000) break;
         if (recovered.length >= 4 || sessions.has(effect.sessionId)) continue;
         let source, message;
         try {
@@ -264,7 +351,7 @@ export class CodexDiscussionHub {
           effect.undispatched = false; effect.uncertainOutcome = false; effect.status = 'connecting-native-agent'; this.engine.store.save();
           const target = message.targets?.find(target => target.sessionId === effect.sessionId); if (target) target.status = effect.status;
           const abort = new AbortController(); this.aborters.set(effect.requestId, abort);
-          const run = this.run(effect, message.text, budget, abort.signal).finally(() => this.aborters.delete(effect.requestId));
+          const run = this.run(effect, message.text, budget, abort.signal).finally(() => { this.aborters.delete(effect.requestId); this.pending.delete(effect.requestId); });
           this.pending.set(effect.requestId, run); recovered.push(effect.requestId); sessions.add(effect.sessionId);
         } catch { /* Current permissions or ancestry no longer admit delivery. */ }
       }
@@ -321,7 +408,7 @@ export class CodexDiscussionHub {
     } finally { this.reconciling = false; }
   }
   async refreshTools(host) {
-    if (host !== REMOTE_HOST) return { status: 'new-session-load-required' };
+    if (!['local',REMOTE_HOST].includes(host)) return { status: 'native-host-unavailable' };
     const adapter = this.adapterFactory({ host });
     try { await adapter.open(); await adapter.request('config/mcpServer/reload', null); return { status: 'refresh-requested-for-next-native-turn' }; }
     catch { return { status: 'native-refresh-unavailable' }; }
@@ -333,7 +420,7 @@ export class CodexDiscussionHub {
     this.closePromise = (async () => {
       const pending = [...this.pending.values()], closures = [];
       const detach = () => {
-        for (const adapter of [...this.adapters.values()]) {
+        for (const adapter of [...this.adapters.values(), ...this.sideAdapters]) {
           try { closures.push(Promise.resolve(adapter.close()).catch(() => {})); } catch { /* Preserve durable receipts if a transport close fails. */ }
         }
       };

@@ -51,9 +51,9 @@ their own source and inspect reading and wake readiness separately. Current sour
 preflight a private copy of saved state and defer shutdown around active embedded
 work. All machine-specific configuration remains outside this public repository.
 
-Current source uses the upstream **0.4.0 client (wire v3)**. The alpha.4 download remains version-specific; source updates are separately installed. Setup shows the declared dependency pin, runtime wire version and connection counters. Optional loopback fleet observations expose signed capability cards, observed model usage and advisory votes; local semantic ranking makes no model calls. The work board shows bounded upstream activity without replaying work. See [the upstream integration guide](docs/upstream-v3.md) for opt-in setup, migration checks and compatibility limits.
+Current source uses the upstream **0.5.0 TypeScript client (wire v3)** with its latest pinned TLS fixes. The alpha.4 download remains version-specific; source updates are separately installed. Setup shows the declared dependency pin, runtime wire version and connection counters. Optional loopback fleet observations expose signed AgentCards and ModelCards, observed model usage and advisory votes; local semantic ranking makes no model calls. The work board shows bounded upstream activity without replaying work. See [AgentSpaces 0.5 integration](docs/upstream-05.md) for opt-in setup, migration checks and compatibility limits.
 
-The [0.4.0 transport guide](docs/upstream-040.md) explains compatibility and optional Java DTLS/QUIC gateway links. Native thread delivery retains its existing SSH/channel routes, with an optional [QUIC carrier for actual native chats and context](docs/native-quic.md). No JVM or UDP listener is started by Desktop.
+The [earlier 0.4.0 transport guide](docs/upstream-040.md) explains compatibility and optional Java DTLS/QUIC gateway links. Native thread delivery retains its existing SSH/channel routes, with an optional [QUIC carrier for actual native chats and context](docs/native-quic.md). No JVM or UDP listener is started by Desktop.
 
 ## Get started
 
@@ -64,7 +64,7 @@ Download the [v0.1.0-alpha.4 builds](https://github.com/Weston-Tyler/agentspaces
 3. Choose **Connect work on this device**. SSH is optional; select another computer only after configuring its connection.
 4. Ask about existing work, or open a group and address the relevant threads.
 
-New native messages lead with the sender and actual message text. Addressed messages can steer into a verified active Codex turn; routine broadcasts stay queued. Native work is never cancelled. See [message delivery](docs/message-delivery.md) for fallback behavior and provider limits.
+New native messages lead with the sender and actual message text. Side chat is the discussion default where a qualified native route exists. The owner can select Main thread for deliberate steering or queuing. Unavailable side chats stay visible in the room. Native work is never cancelled. See [message delivery](docs/message-delivery.md) for fallback behavior and provider limits.
 
 For example, ask an agent: “Find the Codex thread about retry handling and ask it for its results.” In a group, send `@all Please report your branch, tests and blockers.` To reach topical peers, use `@recent(30d) @topic("chillit recipe") Please update the recipe table.` See [agent addressing](docs/agent-addressing.md) for exact semantics and connected-source limits.
 

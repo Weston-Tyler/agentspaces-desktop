@@ -42,6 +42,7 @@ async function httpSetup(t) {
   const post = (path, data, headers = owner) => fetch(app.address + path, { method: "POST", headers, body: JSON.stringify(data) });
   const response = await post("/api/discussions/create", { title: "Bounded cross-provider dialogue", sessionIds: [codex.id, claude.id] });
   assert.equal(response.status, 200); const group = await response.json();
+  engine.discussions.setPolicy({id:group.id,destination:'main'});
   const connector = engine.issueConnector(claude.id), binding = engine.connector(connector.token), notices = [];
   const channel = app.channels.connect(binding, async message => { notices.push(message); }); t.after(channel.close);
   return { app, engine, codex, claude, group, post, connector, notices, nativeCalls, count: () => answers };
@@ -91,6 +92,7 @@ function routingFixture() {
   engine.catalog = Array.from({ length: 12 }, (_, i) => ({ ...template, id: "routing-source-" + i }));
   for (const source of engine.catalog) engine.grant(source.id, { enrolled: true, content: true, share: true, retrieve: true });
   const created = engine.discussions.create({ title: "Bounded routing fixture", sessionIds: engine.catalog.map(s => s.id) });
+  engine.discussions.setPolicy({id:created.id,destination:'main'});
   const group = engine.discussions.group(created.id), deliveries = new Map(); let deliveryCalls = 0;
   const transports = { codexAgents: { dispatch() { throw new Error("No Codex transport expected"); } },
     channels: { isConnected: () => true, async deliver(value) {

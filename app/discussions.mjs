@@ -1,3 +1,4 @@
+import { validDestination } from './agent-message.mjs';
 import { implicitRoomWake } from "./room-subscriptions.mjs";
 import { REMOTE_HOST } from "./remote-host.mjs";
 import { randomUUID, createHash } from "node:crypto";
@@ -58,15 +59,17 @@ export class Discussions {
   }
   policy(g) {
     const agentInitiation = g.policy?.agentInitiation === true;
-    return { agentInitiation, selfRegistration: g.policy?.selfRegistration === true, maxForwardHops: agentInitiation ? 8 : 2, maxDeliveries: agentInitiation ? 32 : 16 };
+    return { agentInitiation, destination: g.policy?.destination ?? 'side', selfRegistration: g.policy?.selfRegistration === true, maxForwardHops: agentInitiation ? 8 : 2, maxDeliveries: agentInitiation ? 32 : 16 };
   }
-  setPolicy({ id, agentInitiation, selfRegistration }, participantBinding = null) {
+  setPolicy({ id, agentInitiation, selfRegistration, destination }, participantBinding = null) {
     if (participantBinding) throw new Error("Only the local owner may change discussion policy");
-    if (agentInitiation === undefined && selfRegistration === undefined || agentInitiation !== undefined && typeof agentInitiation !== "boolean" || selfRegistration !== undefined && typeof selfRegistration !== "boolean") throw new Error("Discussion policy flags must be boolean");
+    if (agentInitiation === undefined && selfRegistration === undefined && destination === undefined || agentInitiation !== undefined && typeof agentInitiation !== "boolean" || selfRegistration !== undefined && typeof selfRegistration !== "boolean") throw new Error("Discussion policy flags must be boolean");
+    if (!validDestination(destination)) throw new Error("Use side or main delivery");
     const g = this.group(id);
     const current = this.policy(g), changes = {};
     if (agentInitiation !== undefined && current.agentInitiation !== agentInitiation) Object.assign(changes, { agentInitiation, agentInitiationFromMessage: g.messages.length });
     if (selfRegistration !== undefined && current.selfRegistration !== selfRegistration) changes.selfRegistration = selfRegistration;
+    if (destination !== undefined && current.destination !== destination) changes.destination = destination;
     if (Object.keys(changes).length) {
       g.policy = { ...g.policy, ...changes }; g.version++;
       this.store.audit("Discussion policy changed", { discussionId: id, ...changes });
@@ -359,6 +362,8 @@ export class Discussions {
       replyTo = null,
       targets = [],
       synthetic = false,
+      destination,
+      nativeSideReply,
     },
   ) {
     if (g.messages.length >= MAX_DISCUSSION_MESSAGES) throw new Error("Discussion storage capacity reached (10000 messages); history retained. This is not the per-exchange wake limit.");
@@ -372,7 +377,9 @@ export class Discussions {
       targets,
       synthetic,
       deliveryId,
-      replyNotificationVersion: 1,
+      replyNotificationVersion: nativeSideReply ? 0 : 1,
+      ...(destination ? { destination } : {}),
+      ...(nativeSideReply ? { nativeSideReply: true } : {}),
       text,
       wire: {
         role: member ? "assistant" : "user",
@@ -391,7 +398,7 @@ export class Discussions {
           targets: JSON.stringify(targets),
           attribution: synthetic
             ? "synthetic"
-            : member
+            : nativeSideReply ? "Codex ephemeral side answer; parent thread unchanged" : member
               ? "connector-bound; turn self-reported"
               : "local owner",
           replyTo: replyTo ?? "",
@@ -404,20 +411,20 @@ export class Discussions {
     this.store.save();
     return m;
   }
-  async postAddressed({ id, text, targets = [], deliveryId, fixtureDialogueTurns = 0 }) {
+  async postAddressed({ id, text, targets = [], deliveryId, fixtureDialogueTurns = 0, destination }) {
     const parsed = parseAgentSelectors(text);
     if (parsed.directives.length) {
       if (fixtureDialogueTurns) throw new Error("Synthetic dialogue cannot use catalog selectors");
       const group = this.group(id);
       if (!Array.isArray(targets) || targets.some(target => !group.members.some(member => member.sessionId === target))) throw new Error("Reply target is not a discussion participant");
-      const broadcast = await new AgentBroadcast(this.engine).sendOwner({ discussionId: id, text, deliveryId, ...(targets.length ? { sessionIds: targets } : {}) });
+      const broadcast = await new AgentBroadcast(this.engine).sendOwner({ discussionId: id, text, deliveryId, ...(destination ? { destination } : {}), ...(targets.length ? { sessionIds: targets } : {}) });
       return { view: this.view(group), broadcast, batches: broadcast.batches };
     }
-    const view = this.post({ id, text, targets, deliveryId, fixtureDialogueTurns }), group = this.group(id);
+    const view = this.post({ id, text, targets, deliveryId, fixtureDialogueTurns, destination }), group = this.group(id);
     const message = group.messages.find(item => item.deliveryId === deliveryId);
     return { view, broadcast: null, batches: [{ discussionId: id, messageId: message.id, targetSessionIds: message.targets.map(target => target.sessionId), createdGroup: false }] };
   }
-  post({ id, text, targets = [], deliveryId, fixtureDialogueTurns = 0 }, { exactTargets = false } = {}) {
+  post({ id, text, targets = [], deliveryId, fixtureDialogueTurns = 0, destination }, { exactTargets = false } = {}) {
     const g = this.group(id);
     if (!g.members.every((m) => this.allowed(m)))
       throw denied("discussion_source_unavailable", "Discussion source scope revoked or stale");
@@ -446,7 +453,8 @@ export class Discussions {
       if (!g.members.some((m) => m.alias === alias))
         throw new Error("Unknown mention @" + alias);
     const implicit = !exactTargets && !targets.length && !aliases.length;
-    const requestHash = fingerprint({text:text.trim(),targets,fixtureDialogueTurns,exactTargets});
+    if (!validDestination(destination)) throw new Error("Use side or main delivery");
+    const requestHash = fingerprint({text:text.trim(),targets,fixtureDialogueTurns,exactTargets,...(destination ? { destination } : {})});
     const prior = g.messages.find(m => m.deliveryId === deliveryId);
     if (prior?.requestHash) {
       if (prior.requestHash !== requestHash) throw new Error("Delivery identifier reused for different content");
@@ -466,6 +474,7 @@ export class Discussions {
       text: text.trim(),
       targets: selected.map((m) => m.sessionId),
       fixtureDialogueTurns,
+      ...(destination ? { destination } : {}),
     });
     const old = g.messages.find((m) => m.deliveryId === deliveryId);
     if (old) {
@@ -489,6 +498,7 @@ export class Discussions {
       text: text.trim(),
       deliveryId,
       targets: targetStates,
+      destination,
     });
     user.deliveryClass=implicit?'broadcast':'addressed';
     user.inputHash = inputHash;
@@ -525,7 +535,7 @@ export class Discussions {
     this.store.save();
     return this.view(g);
   }
-  contribute({ id, text, nativeTurnId, deliveryId, replyTo = null }, binding) {
+  contribute({ id, text, nativeTurnId, deliveryId, replyTo = null }, binding, { nativeSideReply = false } = {}) {
     this.context(id, binding);
     const g = this.group(id),
       member = g.members.find((m) => m.sessionId === binding.sessionId);
@@ -550,6 +560,7 @@ export class Discussions {
       nativeTurnId,
       replyTo,
       sessionId: member.sessionId,
+      ...(nativeSideReply ? { nativeSideReply } : {}),
     });
     const old = g.messages.find((m) => m.deliveryId === deliveryId);
     if (old) {
@@ -566,6 +577,7 @@ export class Discussions {
       turnId: nativeTurnId,
       deliveryId,
       replyTo,
+      nativeSideReply,
     });
     m.inputHash = inputHash;
     this.store.save();

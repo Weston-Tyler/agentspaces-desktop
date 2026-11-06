@@ -1,5 +1,5 @@
 import { REMOTE_HOST, SSH_ALIAS } from "./remote-host.mjs";
-import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, lstatSync, realpathSync, chmodSync, statSync, accessSync, constants } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, renameSync, lstatSync, realpathSync, chmodSync, statSync, accessSync, constants } from 'node:fs';
 import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -67,7 +67,7 @@ export function mergeClaudeHooks(settings, command, { previousCommand, inboxComm
   return result;
 }
 export async function installOnCurrentHost({ config, sources, versions, home = homedir(), nodeBinary = process.env.AGENTSPACES_NODE_BINARY ?? (process.versions.electron ? executable('node') : process.execPath), runCLI = cli, resolveExecutable = executable, installDependencies = true } = {}) {
-  if (config?.schemaVersion !== 1 || !['codex', 'claude'].includes(config.provider) || !/^[a-f0-9]{64}$/.test(config.token ?? '') || !sources?.bootstrap || !sources?.hook || !sources?.channel || sources.inbox !== undefined && (typeof sources.inbox !== 'string' || !sources.inbox.length || sources.inbox.length > 1048576)) throw new Error('Invalid automatic installation payload');
+  if (config?.schemaVersion !== 1 || !['codex', 'claude'].includes(config.provider) || !/^[a-f0-9]{64}$/.test(config.token ?? '') || !sources?.bootstrap || !sources?.hook || !sources?.channel || sources.entry !== undefined && (typeof sources.entry !== 'string' || !sources.entry.length || sources.entry.length > 1048576) || sources.inbox !== undefined && (typeof sources.inbox !== 'string' || !sources.inbox.length || sources.inbox.length > 1048576)) throw new Error('Invalid automatic installation payload');
   if (!versions || ['mcp', 'zod', 'claude','ws'].some(key => {
     const value = versions[key];
     return typeof value !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(value) || value.includes('-') && value.slice(value.indexOf('-') + 1).split('.').some(part => /^\d+$/.test(part) && part.length > 1 && part.startsWith('0'));
@@ -86,8 +86,9 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
     if (!/^S-\d+(?:-\d+)+$/.test(sid)) throw new Error('Private native runtime owner unavailable');
     execFileSync('icacls.exe', [base, '/inheritance:r', '/grant:r', '*' + sid + ':(OI)(CI)F'], { windowsHide: true, stdio: 'pipe' });
   } else chmodSync(base, 0o700);
-  const runtime = join(base, 'runtime-' + digest(sources.bootstrap + sources.hook + sources.channel + (sources.inbox ?? ''))); noLinks(runtime); mkdirSync(runtime, { recursive: true, mode: 0o700 });
-  savePrivate(join(runtime, 'native-bootstrap-mcp.mjs'), sources.bootstrap); savePrivate(join(runtime, 'native-session-hook.mjs'), sources.hook);savePrivate(join(runtime,'native-bootstrap-channel.mjs'),sources.channel);
+  const bootstrapSource = sources.entry ? '// Managed implementation v1\n' + sources.bootstrap : sources.bootstrap;
+  const runtime = join(base, 'runtime-' + digest(bootstrapSource + sources.hook + sources.channel + (sources.inbox ?? ''))); noLinks(runtime); mkdirSync(runtime, { recursive: true, mode: 0o700 });
+  savePrivate(join(runtime, 'native-bootstrap-mcp.mjs'), bootstrapSource); savePrivate(join(runtime, 'native-session-hook.mjs'), sources.hook);savePrivate(join(runtime,'native-bootstrap-channel.mjs'),sources.channel);
   if (sources.inbox) savePrivate(join(runtime, 'native-inbox-hook.mjs'), sources.inbox);
   const manifest = { private: true, type: 'module', dependencies: { '@modelcontextprotocol/sdk': versions.mcp, zod: versions.zod, '@anthropic-ai/claude-agent-sdk': versions.claude,ws:versions.ws } };
   savePrivate(join(base, 'package.json'), JSON.stringify(manifest));
@@ -136,7 +137,8 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
     }
   }
   savePrivate(configPath, JSON.stringify(device));
-  const bootstrap = join(runtime, 'native-bootstrap-mcp.mjs'), name = 'agentspaces-desktop';
+  const managed = join(base, 'managed'), stableBootstrap = join(managed, 'native-bootstrap-mcp.mjs');
+  let bootstrap = sources.entry ? stableBootstrap : join(runtime, 'native-bootstrap-mcp.mjs');const name = 'agentspaces-desktop';
   const nativePath = config.provider === 'codex' ? join(home, '.codex', 'config.toml') : join(home, '.claude.json');
   noLinks(nativePath);
   let existing;
@@ -150,10 +152,64 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
   const oldBootstrap = transport?.args?.find(arg => typeof arg === 'string' && arg.endsWith('native-bootstrap-mcp.mjs'));
   if (oldBootstrap) noLinks(oldBootstrap);
   const oldRuntime = oldBootstrap && dirname(oldBootstrap);
+  const oldHook=oldRuntime&&join(oldRuntime,'native-session-hook.mjs');if(oldHook)noLinks(oldHook);
   const oldChannel=oldRuntime&&join(oldRuntime,'native-bootstrap-channel.mjs');if(oldChannel)noLinks(oldChannel);
   const oldInbox = oldRuntime && join(oldRuntime, 'native-inbox-hook.mjs'); if (oldInbox) noLinks(oldInbox);
   const ownedOldRuntime = oldRuntime && dirname(oldRuntime) === base && /runtime-[a-f0-9]{64}$/.test(oldRuntime) && existsSync(oldBootstrap) && existsSync(join(oldRuntime, 'native-session-hook.mjs')) && oldRuntime.endsWith(digest(readFileSync(oldBootstrap, 'utf8') + readFileSync(join(oldRuntime, 'native-session-hook.mjs'), 'utf8') + (existsSync(oldChannel)?readFileSync(oldChannel,'utf8'):'') + (existsSync(oldInbox)?readFileSync(oldInbox,'utf8'):'')));
-  if (existing && ((!transport?.args?.includes(bootstrap) && !ownedOldRuntime) || !transport?.args?.includes(configPath) || transport?.command !== nodeBinary)) throw new Error('Existing MCP name is not this managed installation');
+  const pointerPath=join(managed,'current.json');noLinks(pointerPath);
+  let savedPointer;
+  if(existsSync(pointerPath)){
+    try{savedPointer=JSON.parse(readFileSync(pointerPath,'utf8'));}catch{throw new Error('Managed native entry ownership changed');}
+    if(savedPointer.schema!==1||savedPointer.protocol!==1||!/^[a-f0-9]{64}$/.test(savedPointer.entryHash??''))throw new Error('Managed native entry ownership changed');
+  }
+  const aliasRecords=savedPointer?.aliases??{};
+  if(!aliasRecords||typeof aliasRecords!=='object'||Array.isArray(aliasRecords)||Object.keys(aliasRecords).length>100)throw new Error('Managed native aliases are invalid');
+  const ownsAlias=dir=>{
+    if(!/^runtime-[a-f0-9]{64}$/.test(dir))return false;
+    const hashes=aliasRecords[dir],names=Object.keys(hashes??{});
+    if(!names.includes('native-bootstrap-mcp.mjs')||names.some(name=>!['native-bootstrap-mcp.mjs','native-session-hook.mjs','native-inbox-hook.mjs'].includes(name)||!/^[a-f0-9]{64}$/.test(hashes[name])))return false;
+    return names.every(name=>{const path=join(base,dir,name);noLinks(path);return existsSync(path)&&digest(readFileSync(path,'utf8'))===hashes[name];});
+  };
+  for(const dir of Object.keys(aliasRecords))if(!ownsAlias(dir))throw new Error('Managed native alias ownership changed');
+  const ownedAlias=oldRuntime&&dirname(oldRuntime)===base&&ownsAlias(oldRuntime.slice(base.length+1));
+  let ownedStable = false;
+  if (oldBootstrap === stableBootstrap) {
+    try { ownedStable = !!savedPointer && ['native-bootstrap-mcp.mjs','native-session-hook.mjs','native-inbox-hook.mjs'].every(name => { const path=join(managed,name);noLinks(path);return digest(readFileSync(path,'utf8')) === savedPointer.entryHash; }); } catch { ownedStable = false; }
+    if (!ownedStable) throw new Error('Managed native entry ownership changed');
+  }
+  if (existing && ((!transport?.args?.includes(bootstrap) && !ownedOldRuntime && !ownedStable && !ownedAlias) || !transport?.args?.includes(configPath) || transport?.command !== nodeBinary)) throw new Error('Existing MCP name is not this managed installation');
+  // Keep verified existing native commands: migration must not remove/re-add a
+  // provider's MCP server or rewrite its global configuration during active work.
+  if(sources.entry&&(ownedOldRuntime||ownedAlias)&&oldRuntime!==runtime)bootstrap=oldBootstrap;
+  if (sources.entry) {
+    noLinks(managed); mkdirSync(managed,{recursive:true,mode:0o700});
+    const sourceNames=['native-bootstrap-mcp.mjs','native-session-hook.mjs','native-bootstrap-channel.mjs',...(sources.inbox?['native-inbox-hook.mjs']:[])];
+    const pointer={schema:1,protocol:1,runtime:runtime.slice(base.length+1),entryHash:digest(sources.entry),aliases:{},sources:Object.fromEntries(sourceNames.map(name=>[name,digest(readFileSync(join(runtime,name),'utf8'))]))};
+    for (const name of ['native-bootstrap-mcp.mjs','native-session-hook.mjs','native-inbox-hook.mjs']) savePrivate(join(managed,name),sources.entry);
+    // Publish the verified payload before updating any cached legacy commands.
+    // Existing managed payload directories remain immutable for in-flight calls.
+    savePrivate(join(managed,'current.json'),JSON.stringify(pointer));
+    // Native clients can cache old command paths. Only cryptographically
+    // recognized, app-owned artifact directories get a compatibility entry.
+    // Loaded processes are untouched; the next native reconnect/hook follows it.
+    for (const dir of readdirSync(base).filter(name=>/^runtime-[a-f0-9]{64}$/.test(name)).slice(0,100)) {
+      const legacy=join(base,dir);if(legacy===runtime)continue;noLinks(legacy);
+      const files=['native-bootstrap-mcp.mjs','native-session-hook.mjs','native-bootstrap-channel.mjs','native-inbox-hook.mjs'];
+      if(existsSync(join(legacy,'native-bootstrap-mcp.mjs'))&&readFileSync(join(legacy,'native-bootstrap-mcp.mjs'),'utf8').startsWith('// Managed implementation v1\n'))continue;
+      let text='';try{for(const name of files){const path=join(legacy,name);noLinks(path);if(existsSync(path))text+=readFileSync(path,'utf8');else if(files.indexOf(name)<2)throw Error('missing');}}catch{continue;}
+      if(!ownsAlias(dir)&&dir!=='runtime-'+digest(text))continue;
+      pointer.aliases[dir]={};
+      savePrivate(join(legacy,'native-bootstrap-mcp.mjs'),sources.entry);pointer.aliases[dir]['native-bootstrap-mcp.mjs']=digest(sources.entry);
+      for(const name of ['native-session-hook.mjs','native-inbox-hook.mjs']) if(existsSync(join(legacy,name))) {
+        // Preserve the old module's named exports during concurrent cold starts;
+        // executing a cached hook path still uses the current managed payload.
+        const target='../'+pointer.runtime+'/'+name;
+        const shim="export * from "+JSON.stringify(target)+";\nimport {runManagedEntry} from '../managed/"+name+"';\nimport {pathToFileURL} from 'node:url';\nif(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)runManagedEntry().catch(e=>{process.stderr.write(JSON.stringify({error:e.code??'managed_runtime_unavailable'})+'\\n');process.exitCode=1;});\n";
+        savePrivate(join(legacy,name),shim);pointer.aliases[dir][name]=digest(shim);
+      }
+    }
+    savePrivate(join(managed,'current.json'),JSON.stringify(pointer));
+  }
   if (!existing || oldBootstrap !== bootstrap) {
     privateBackup(nativePath);
     const args = config.provider === 'codex' ? ['mcp', 'add', name, '--', nodeBinary, bootstrap, '--config', configPath] : ['mcp', 'add', '--scope', 'user', '--transport', 'stdio', name, '--', nodeBinary, bootstrap, '--config', configPath];
@@ -165,14 +221,15 @@ export async function installOnCurrentHost({ config, sources, versions, home = h
   }
   if (config.provider === 'claude') {
     const quote = value => process.platform === 'win32' ? '"' + value.replaceAll('"', '') + '"' : "'" + value.replaceAll("'", "'\\''") + "'";
-    const command = [nodeBinary, join(runtime, 'native-session-hook.mjs'), '--config', configPath].map(quote).join(' ');
-    const previousCommand = ownedOldRuntime ? [nodeBinary, join(oldRuntime, 'native-session-hook.mjs'), '--config', configPath].map(quote).join(' ') : undefined;
-    const inboxCommand = hookWakeInstalled ? [nodeBinary, join(runtime, 'native-inbox-hook.mjs'), '--config', configPath].map(quote).join(' ') : undefined;
-    const previousInboxCommand = ownedOldRuntime && existsSync(oldInbox) ? [nodeBinary, oldInbox, '--config', configPath].map(quote).join(' ') : undefined;
+    const helperDir=sources.entry?(bootstrap===oldBootstrap&&oldRuntime!==managed?oldRuntime:managed):runtime;
+    const command = [nodeBinary, join(helperDir, 'native-session-hook.mjs'), '--config', configPath].map(quote).join(' ');
+    const previousCommand = ownedOldRuntime || ownedStable || ownedAlias ? [nodeBinary, join(oldRuntime, 'native-session-hook.mjs'), '--config', configPath].map(quote).join(' ') : undefined;
+    const inboxCommand = hookWakeInstalled ? [nodeBinary, join(existsSync(join(helperDir,'native-inbox-hook.mjs'))?helperDir:managed, 'native-inbox-hook.mjs'), '--config', configPath].map(quote).join(' ') : undefined;
+    const previousInboxCommand = (ownedOldRuntime || ownedStable || ownedAlias) && existsSync(oldInbox) ? [nodeBinary, oldInbox, '--config', configPath].map(quote).join(' ') : undefined;
     const merged = mergeClaudeHooks(settings, command, { previousCommand, inboxCommand, previousInboxCommand });
     if (JSON.stringify(merged) !== JSON.stringify(settings)) { privateBackup(settingsPath); savePrivate(settingsPath, JSON.stringify(merged, null, 2)); }
   }
-  return { host: config.host, provider: config.provider, status: 'native-config-installed', configPath, bootstrapPath: bootstrap, hookWakeInstalled, nativeVersion, activeSessionReloaded: false, inboundChannelConnected: false };
+  return { host: config.host, provider: config.provider, status: 'native-config-installed', configPath, bootstrapPath: bootstrap, runtimePath: runtime, helperRefresh: sources.entry ? 'verified-managed-entry' : 'native-reconnect-required', hookWakeInstalled, nativeVersion, activeSessionReloaded: false, inboundChannelConnected: false };
 }
 
 export function remoteInstallScript(payload) {
@@ -182,7 +239,7 @@ export function remoteInstallScript(payload) {
 async function remoteInstall(payload) {
   const script = remoteInstallScript(payload);
   return new Promise((yes, no) => {
-    const child = spawn('ssh', [SSH_ALIAS, 'node --input-type=module -'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); let output = '', settled = false;
+    const child = spawn('ssh', ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', SSH_ALIAS, 'node --input-type=module -'], { windowsHide: true, stdio: process.platform === 'win32' ? ['overlapped', 'overlapped', 'overlapped'] : ['pipe', 'pipe', 'pipe'] }); let output = '', settled = false;
     const finish = (error, result) => { if (settled) return; settled = true; clearTimeout(timer); if (error) { child.kill(); no(error); } else yes(result); };
     const timer = setTimeout(() => finish(new Error('Automatic remote setup timed out')), 60000);
     child.stderr.on('data', () => {}); child.stdout.on('data', data => { output += data; if (output.length > 16384) finish(new Error('Automatic remote setup response too large')); });
@@ -193,16 +250,18 @@ async function remoteInstall(payload) {
 }
 export class NativeAutoInstaller {
   constructor(engine, { sourceBindings, participantConnections, address, installLocal = installOnCurrentHost, installRemote = remoteInstall, refreshNative = async () => ({ status: 'new-session-load-required' }) } = {}) {
-    Object.assign(this, { engine, sourceBindings, participantConnections, address, installLocal, installRemote, refreshNative }); this.pending = new Map();
+    Object.assign(this, { engine, sourceBindings, participantConnections, address, installLocal, installRemote, refreshNative }); this.pending = new Map(); this.hostPending = new Map();
     engine.store.data.nativeAutomaticInstallations ??= {};
   }
   async install({ host, provider }) {
     const key = host + ':' + provider;
     if (this.pending.has(key)) return this.pending.get(key);
-    const run = this.run({ host, provider }).finally(() => this.pending.delete(key)); this.pending.set(key, run); return run;
+    const prior=this.hostPending.get(host)??Promise.resolve();
+    const run=prior.catch(()=>{}).then(()=>this.run({host,provider})).finally(()=>{this.pending.delete(key);if(this.hostPending.get(host)===run)this.hostPending.delete(host);});
+    this.pending.set(key,run);this.hostPending.set(host,run);return run;
   }
   summary() {
-    return Object.entries(this.engine.store.data.nativeAutomaticInstallations).map(([key, value]) => ({ host: key.split(':')[0], provider: key.split(':')[1], status: value.status, nativeRefresh: value.nativeRefresh ?? 'not-requested', activeSessionReloaded: false, inboundChannelConnected: false }));
+    return Object.entries(this.engine.store.data.nativeAutomaticInstallations).map(([key, value]) => ({ host: key.split(':')[0], provider: key.split(':')[1], status: value.status, nativeRefresh: value.nativeRefresh ?? 'not-requested', helperRefresh: value.helperRefresh ?? 'legacy-entry', connectionVerifiedByInstallation: false, activeSessionReloaded: false, inboundChannelConnected: false }));
   }
   async setup() {
     const profile = this.sourceBindings.profile(), results = [];
@@ -225,14 +284,14 @@ export class NativeAutoInstaller {
     if (old?.device) { this.sourceBindings.device(old.device.token); device = old.device; }
     else { const issued = this.sourceBindings.issueDevice({ host, provider }); device = { schemaVersion: 1, ...issued, address: this.address, authority: new URL(this.address).host }; }
     device = { ...device, address: this.address, authority: new URL(this.address).host };
-    if (host === REMOTE_HOST) { tunnel = await this.participantConnections.tunnel(); device = { ...device, address: 'http://127.0.0.1:' + tunnel.remotePort }; }
-    const sources = { bootstrap: readFileSync(new URL('./native-bootstrap-mcp.mjs', import.meta.url), 'utf8'), hook: readFileSync(new URL('./native-session-hook.mjs', import.meta.url), 'utf8'),channel:readFileSync(new URL('./native-bootstrap-channel.mjs',import.meta.url),'utf8'), inbox: readFileSync(new URL('./native-inbox-hook.mjs', import.meta.url), 'utf8') };
     try {
+    if (host === REMOTE_HOST) { tunnel = await this.participantConnections.tunnel(); device = { ...device, address: 'http://127.0.0.1:' + tunnel.remotePort }; }
+    const sources = { entry: readFileSync(new URL('./native-managed-entry.mjs', import.meta.url), 'utf8'), bootstrap: readFileSync(new URL('./native-bootstrap-mcp.mjs', import.meta.url), 'utf8'), hook: readFileSync(new URL('./native-session-hook.mjs', import.meta.url), 'utf8'),channel:readFileSync(new URL('./native-bootstrap-channel.mjs',import.meta.url),'utf8'), inbox: readFileSync(new URL('./native-inbox-hook.mjs', import.meta.url), 'utf8') };
       const result = await (host === REMOTE_HOST ? this.installRemote : this.installLocal)({ config: device, sources, versions });
       this.sourceBindings.device(device.token); // Recheck after installation; never undo a revocation.
       const refresh = provider === 'codex' ? await this.refreshNative(host) : { status: 'new-session-load-required' };
-      result.nativeRefresh = refresh.status;
-      records[key] = { device, status: result.status, nativeRefresh: result.nativeRefresh, hookWakeInstalled: result.hookWakeInstalled === true, nativeVersion: result.nativeVersion ?? null, activeSessionReloaded: false, inboundChannelConnected: false, at: new Date().toISOString(), configPath: result.configPath, bootstrapPath: result.bootstrapPath }; this.engine.store.save();
+      result.nativeRefresh = provider === 'claude' && result.helperRefresh === 'verified-managed-entry' ? 'managed-entry-installed-source-check-required' : refresh.status;
+      records[key] = { device, status: result.status, nativeRefresh: result.nativeRefresh, helperRefresh: result.helperRefresh, hookWakeInstalled: result.hookWakeInstalled === true, nativeVersion: result.nativeVersion ?? null, activeSessionReloaded: false, inboundChannelConnected: false, at: new Date().toISOString(), configPath: result.configPath, bootstrapPath: result.bootstrapPath }; this.engine.store.save();
       if (host === REMOTE_HOST) this.participantConnections.retain(tunnel);
       return result;
     } catch {

@@ -1,6 +1,6 @@
 import { readFile, lstat, readlink, mkdir, writeFile, rename, readdir, realpath } from "node:fs/promises";
 import { resolve, dirname, join, basename, posix, win32 } from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
@@ -32,7 +32,7 @@ export async function readDeviceConfig(path) {
 }
 export async function scopedRequest(config, path, body) {
   return new Promise((yes, no) => {
-    const text = JSON.stringify(body), req = http.request(new URL(path, config.address), { method: "POST", headers: { Host: config.authority, Authorization: "Bearer " + config.token, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(text) } }, res => {
+    const text = JSON.stringify(body), req = http.request(new URL(path, config.address), { method: "POST", ...(config.signal?{signal:config.signal}:{}), headers: { Host: config.authority, Authorization: "Bearer " + config.token, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(text) } }, res => {
       const chunks = []; let bytes = 0;
       res.on("data", chunk => {
         bytes += chunk.length;
@@ -42,8 +42,8 @@ export async function scopedRequest(config, path, body) {
       res.on("end", () => {
         const value = Buffer.concat(chunks).toString("utf8");
         if (res.statusCode !== 200) {
-          let code; try { code = JSON.parse(value).code; } catch {}
-          return no(fail((path === "/api/native/register" && publicRegistrationErrors.has(code)) || publicDiscussionErrors.has(code) ? code : "scoped_registration_or_tool_denied"));
+          let code; try { const reply=JSON.parse(value);code=reply.code;if(path==='/api/native/register'&&res.statusCode===503&&reply.error==='companion_update_draining'&&reply.undispatched===true&&reply.retryAllowed===true)code='scoped_transport_unavailable'; } catch {}
+          return no(fail((path === "/api/native/register" && (publicRegistrationErrors.has(code)||retryableNativeRegistration({code}))) || publicDiscussionErrors.has(code) ? code : "scoped_registration_or_tool_denied"));
         }
         try { yes(JSON.parse(value)); } catch { no(fail("scoped_response_invalid")); }
       });
@@ -53,7 +53,7 @@ export async function scopedRequest(config, path, body) {
     const timedOut = () => { no(fail("scoped_transport_timeout")); req.destroy(); };
     const timer = setTimeout(timedOut, timeout);
     req.once("close", () => clearTimeout(timer));
-    req.setTimeout(timeout, timedOut); req.on("error", () => no(fail("scoped_transport_unavailable"))); req.end(text);
+    req.setTimeout(timeout, timedOut); req.on("error", err => no(fail(err.code==='ABORT_ERR'?'native_source_request_cancelled':'scoped_transport_unavailable'))); req.end(text);
   });
 }
 // Keep only whether the exact managed channel was selected, never native argv.
@@ -115,22 +115,62 @@ async function nativeExecutableMatcher(config, chain) {
   // arbitrary version-directory member. Record PID/start-time/exe stay exact.
   return process => config.nativeExecutable ? allowed.has(process.exe) || allowed.has(observed.get(process.exe)) : new RegExp("^" + config.provider + "(?:\\.exe)?$", "i").test(basename(process.exe.replaceAll("\\", "/")));
 }
-export async function resolveClaudeSource(configPath, { ancestors = processAncestors, readRecord = privateFile } = {}) {
+const nativeSessionCapabilities = new Map();
+async function listNativeClaudeSessions(config) {
+  const binary=config.nativeLauncher??config.nativeExecutable;
+  if(!binary)return [];
+  try {
+    const path=await realpath(binary),stat=await lstat(path);
+    if(!stat.isFile()||process.platform!=='win32'&&(stat.uid!==process.getuid()||stat.mode&0o022))return [];
+    const key=path+':'+stat.mtimeMs;let supported=nativeSessionCapabilities.get(key);
+    if(supported===undefined){
+      const {stdout}=await exec(binary,['agents','--help'],{timeout:2000,windowsHide:true,maxBuffer:32768});
+      supported=/Usage:\s+claude agents\b/.test(stdout)&&/--json\b/.test(stdout)&&/JSON array/.test(stdout);
+      if(nativeSessionCapabilities.size>=16)nativeSessionCapabilities.clear();nativeSessionCapabilities.set(key,supported);
+    }
+    if(!supported)return [];
+    const {stdout}=await exec(binary,['agents','--json'],{timeout:3000,windowsHide:true,maxBuffer:262144});const rows=JSON.parse(stdout);
+    return Array.isArray(rows)&&rows.length<=500?rows:[];
+  }catch{return [];}
+}
+function runtimeBinding(config,id,process){
+  return createHmac('sha256',config.token).update(JSON.stringify([config.host,config.provider,id,process.pid,process.startedAt,process.exe])).digest('hex');
+}
+function observedRuntime(config,record){
+  if(!/^[a-f0-9]{64}$/.test(record.nativeRuntimeBinding??''))return false;
+  return timingSafeEqual(Buffer.from(record.nativeRuntimeBinding,'hex'),Buffer.from(runtimeBinding(config,record.nativeThreadId,record.process),'hex'));
+}
+async function observeNativeClaudeSource(config,chain,{listNativeSessions=listNativeClaudeSessions,inspectNative=inspectProcess}={}){
+  let rows;try{rows=await listNativeSessions(config);}catch{return null;}
+  if(!Array.isArray(rows)||rows.length>500)return null;
+  for(const parent of chain){
+    const candidates=rows.filter(row=>row?.pid===parent.pid&&['interactive','background'].includes(row.kind)&&nativeUuid.test(row.sessionId??'')&&Number.isSafeInteger(row.startedAt)&&row.startedAt>0&&typeof row.cwd==='string'&&row.cwd.length<=2000&&!row.cwd.includes('\0')&&(posix.isAbsolute(row.cwd)||win32.isAbsolute(row.cwd)));
+    if(candidates.length>1)throw fail('native_lifecycle_binding_ambiguous');if(!candidates.length)continue;
+    let current;try{current=await inspectNative(parent.pid);}catch{return null;}
+    if(current.pid!==parent.pid||current.startedAt!==parent.startedAt||current.exe!==parent.exe)return null;
+    const source=candidates[0];
+    return {schemaVersion:1,provider:config.provider,host:config.host,nativeThreadId:source.sessionId,cwd:source.cwd,workingCwd:source.cwd,process:{pid:current.pid,startedAt:current.startedAt,exe:current.exe},channelOptIn:current.channelOptIn===true,nativeEvidence:{kind:'claude-native-session-metadata'},attribution:'native CLI session metadata matched to live process ancestry; locally observed'};
+  }
+  return null;
+}
+export async function resolveClaudeSource(configPath, { ancestors = processAncestors, readRecord = privateFile, listNativeSessions, inspectNative } = {}) {
   const config = await readDeviceConfig(configPath);
   if (config.provider !== "claude") throw fail("claude_device_required");
   const chain = await ancestors(), matchesExecutable = await nativeExecutableMatcher(config, chain), root = join(dirname(resolve(configPath)), "bindings");
-  let files; try { files = await readdir(root); } catch { throw fail("native_lifecycle_binding_missing"); }
-  const matches = []; let unqualified = false;
+  let files; try { files = await readdir(root); } catch { files=[]; }
+  const matches = [], ended=[]; let unqualified = false;
   for (const file of files.slice(0, 2000)) {
     if (!/^[a-f0-9]{64}\.json$/.test(file)) continue;
     let record; try { record = await readRecord(join(root, file)); } catch { continue; }
-    if (record.schemaVersion !== 1 || record.hookEvent === "SessionEnd" || record.provider !== config.provider || record.host !== config.host || !nativeUuid.test(record.nativeThreadId ?? "") || !record.process) continue;
+    if (record.schemaVersion !== 1 || record.provider !== config.provider || record.host !== config.host || !nativeUuid.test(record.nativeThreadId ?? "") || !record.process) continue;
     const current = chain.find(p => p.pid === record.process.pid);
+    if(record.hookEvent==='SessionEnd'){if(current&&current.startedAt===record.process.startedAt&&current.exe===record.process.exe)ended.push(record.nativeThreadId);continue;}
     if (current && current.startedAt === record.process.startedAt && current.exe === record.process.exe) {
-      if (matchesExecutable(current)) matches.push({...record,channelOptIn:current.channelOptIn===true});
+      if (matchesExecutable(current)||observedRuntime(config,record)) matches.push({...record,channelOptIn:current.channelOptIn===true});
       else unqualified = true;
     }
   }
+  if(matches.length!==1){const observed=await observeNativeClaudeSource(config,chain,{listNativeSessions,inspectNative});if(observed&&!ended.includes(observed.nativeThreadId))return observed;}
   if (matches.length !== 1) throw fail(matches.length ? "native_lifecycle_binding_ambiguous" : unqualified ? 'native_lifecycle_executable_not_qualified' : "native_lifecycle_binding_stale_or_missing");
   return matches[0];
 }
@@ -167,11 +207,17 @@ async function currentDiscussionContext(device, participant, requestImpl) {
   // context, even if a malformed server payload accidentally echoes them.
   return text.replaceAll(device.token, "[redacted]").replaceAll(participant.token, "[redacted]");
 }
-export async function runNativeSessionHook(input, { configPath = process.env.AGENTSPACES_DEVICE_CONFIG, ancestors = processAncestors, requestImpl = scopedRequest } = {}) {
+export async function runNativeSessionHook(input, { configPath = process.env.AGENTSPACES_DEVICE_CONFIG, ancestors = processAncestors, requestImpl = scopedRequest, listNativeSessions, inspectNative } = {}) {
   if (!configPath) throw fail("device_config_required");
   let event; try { event = typeof input === "string" ? JSON.parse(input) : input; } catch { throw fail("native_hook_invalid"); }
   if (!event || typeof event.session_id !== "string" || !event.session_id || event.session_id.length > 200 || typeof event.cwd !== "string" || (!posix.isAbsolute(event.cwd) && !win32.isAbsolute(event.cwd)) || event.cwd.length > 2000 || !["SessionStart", "UserPromptSubmit", "SessionEnd", "Stop"].includes(event.hook_event_name)) throw fail("native_hook_invalid");
-  const config = await readDeviceConfig(configPath), chain = await ancestors(), matchesExecutable = await nativeExecutableMatcher(config, chain), native = chain.find(matchesExecutable);
+  const config = await readDeviceConfig(configPath), chain = await ancestors(), matchesExecutable = await nativeExecutableMatcher(config, chain);
+  let native=chain.find(matchesExecutable),nativeObservation;
+  if(!native&&config.provider==='claude'){
+    try{nativeObservation=await resolveClaudeSource(configPath,{ancestors:async()=>chain,listNativeSessions,inspectNative});}catch(err){if(err.code==='native_lifecycle_binding_ambiguous')throw err;throw fail('native_process_not_identified');}
+    if(nativeObservation.nativeThreadId!==event.session_id)throw fail('native_source_uuid_mismatch');
+    native=chain.find(p=>p.pid===nativeObservation.process.pid&&p.startedAt===nativeObservation.process.startedAt&&p.exe===nativeObservation.process.exe);
+  }
   if (!native || !Number.isSafeInteger(native.pid) || typeof native.startedAt !== "string" || !native.startedAt) throw fail("native_process_not_identified");
   if (config.provider === "claude" && !nativeUuid.test(event.session_id)) throw fail("native_source_uuid_required");
   const root = join(dirname(resolve(configPath)), "bindings"), key = createHash("sha256").update(JSON.stringify([native.pid, native.startedAt, event.session_id])).digest("hex");
@@ -186,7 +232,7 @@ export async function runNativeSessionHook(input, { configPath = process.env.AGE
   let previous;
   try { previous = await privateFile(join(root, key + '.json')); } catch { /* A first genuine hook has no previous record. */ }
   const sourceCwd = previous?.nativeThreadId === event.session_id && previous.host === config.host && previous.provider === config.provider && previous.process?.pid === native.pid && previous.process.startedAt === native.startedAt && previous.process.exe === native.exe && validCwd(previous.sourceCwd) ? previous.sourceCwd : undefined;
-  const baseRecord = { schemaVersion: 1, provider: config.provider, host: config.host, cwd: sourceCwd ?? event.cwd, workingCwd: event.cwd, ...(sourceCwd ? {sourceCwd} : {}), process: { pid: native.pid, exe: native.exe, startedAt: native.startedAt }, hookEvent: event.hook_event_name, attribution: "local lifecycle observation; native caller not cryptographically verified" };
+  const baseRecord = { ...(nativeObservation?{nativeRuntimeBinding:runtimeBinding(config,event.session_id,native)}:{}), schemaVersion: 1, provider: config.provider, host: config.host, cwd: sourceCwd ?? event.cwd, workingCwd: event.cwd, ...(sourceCwd ? {sourceCwd} : {}), process: { pid: native.pid, exe: native.exe, startedAt: native.startedAt }, hookEvent: event.hook_event_name, attribution: "local lifecycle observation; native caller not cryptographically verified" };
   const saveRecord = async (record) => {
     await mkdir(root, { recursive: true, mode: 0o700 });
     if ((await lstat(root)).isSymbolicLink()) throw fail("private_path_symlink_refused");

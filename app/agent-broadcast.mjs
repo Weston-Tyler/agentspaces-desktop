@@ -1,4 +1,4 @@
-import {broadcastClass} from './agent-message.mjs';
+import {broadcastClass,validDestination} from './agent-message.mjs';
 import { createHash } from "node:crypto";
 import { parseAgentSelectors, selectAgents, selectAgentsForOwner } from "./agent-selection.mjs";
 
@@ -21,7 +21,8 @@ export class AgentBroadcast {
   }
   validate(input, { owner = false } = {}) {
     if (!input || typeof input !== "object" || Array.isArray(input)
-      || Object.keys(input).some(key => !["text", "nativeTurnId", "deliveryId", "query", "activeWithinDays", "sessionIds", "nativeThreadIds", "discussionId"].includes(key))
+      || Object.keys(input).some(key => !["text", "nativeTurnId", "deliveryId", "query", "activeWithinDays", "sessionIds", "nativeThreadIds", "discussionId", ...(owner ? ["destination"] : [])].includes(key))
+      || !validDestination(input.destination)
       || typeof input.text !== "string" || !input.text.trim() || input.text.length > 8000
       || !owner && (typeof input.nativeTurnId !== "string" || !input.nativeTurnId || input.nativeTurnId.length > 200)
       || owner && (input.nativeTurnId !== undefined || input.discussionId === undefined)
@@ -111,7 +112,7 @@ export class AgentBroadcast {
       // fans out into other rooms, or no eligible peer matches.
       if (!snapshot.batches.some(batch => batch.discussionId === request.discussionId)) snapshot.batches.unshift({ discussionId: request.discussionId, targetSessionIds: [], createdGroup: false, origin: true });
       for (const batch of snapshot.batches) if (batch.origin) batch.messageDeliveryId = request.deliveryId;
-      receipt = receipts[key] = { owner: true, sourceId: "owner", originId: request.discussionId, deliveryId: request.deliveryId, fingerprint, ...snapshot, state: "prepared" };
+      receipt = receipts[key] = { owner: true, sourceId: "owner", originId: request.discussionId, deliveryId: request.deliveryId, fingerprint, ...snapshot, destination: request.destination ?? this.engine.discussions.policy(this.engine.discussions.group(request.discussionId)).destination, state: "prepared" };
       this.engine.store.save();
     }
     this.recheckOwner(receipt);
@@ -127,9 +128,9 @@ export class AgentBroadcast {
       const existing = group.messages.find(message => message.deliveryId === batch.messageDeliveryId);
       if (existing && !existing.inputHash) {
         if (existing.source || existing.text !== request.text.trim() || existing.turnId !== null || existing.replyTo !== null) throw fail("agent_broadcast_delivery_id_conflict");
-        existing.inputHash = hash({ text: request.text.trim(), targets: group.members.filter(member => batch.targetSessionIds.includes(member.sessionId)).map(member => member.sessionId), fixtureDialogueTurns: 0 }); this.engine.store.save();
+        existing.inputHash = hash({ text: request.text.trim(), targets: group.members.filter(member => batch.targetSessionIds.includes(member.sessionId)).map(member => member.sessionId), fixtureDialogueTurns: 0, ...(existing.destination ? {destination:existing.destination} : {}) }); this.engine.store.save();
       }
-      this.engine.discussions.post({ id: group.id, text: request.text, targets: batch.targetSessionIds, deliveryId: batch.messageDeliveryId }, { exactTargets: true });
+      this.engine.discussions.post({ id: group.id, text: request.text, targets: batch.targetSessionIds, deliveryId: batch.messageDeliveryId, destination: receipt.destination ?? request.destination }, { exactTargets: true });
       const message = group.messages.find(item => item.deliveryId === batch.messageDeliveryId);
       if (!message.routing) {
         message.deliveryClass=broadcastClass(request);

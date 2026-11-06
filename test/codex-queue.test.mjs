@@ -405,3 +405,25 @@ test('silent native proxy handshake has its own deadline and detaches only its o
  try{await assert.rejects(Promise.race([adapter.open(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Object.assign(Error('test deadline'),{code:'test_deadline'})),250)})]),{code:'native_websocket_handshake_failed'});assert.ok(detached>=1);}
  finally{clearTimeout(timer);adapter.close();}
 });
+
+test('local Windows native targets use host paths and require a loaded proof without any cold resume',async()=>{
+ const id='11111111-2222-4333-8444-555555555555',cwd='C:\\fictional\\project',calls=[];
+ const adapter=new CodexQueueAdapter({host:'local',platform:'win32'});
+ adapter.request=async(method,params)=>{calls.push(method);assert.equal(method,'thread/read');assert.equal(params.includeTurns,false);return {thread:{id,cwd,status:{type:'active'},canAcceptDirectInput:true}};};
+ await adapter.bindLoadedThread({threadId:id,cwd,grant:{execution:true,allowExistingNativePolicy:true}});
+ assert.equal((await adapter.eligible(id)).eligible,true);
+ await assert.rejects(adapter.bindExistingThread({threadId:id,cwd,grant:true}),e=>e.code==='local_native_loaded_target_required');
+ assert(calls.every(m=>m==='thread/read'));
+ await assert.rejects(adapter.bindLoadedThread({threadId:id,cwd:'relative',grant:{execution:true,allowExistingNativePolicy:true}}),e=>e.code==='loaded_native_input_grant_required');
+});
+
+test('local native proxy uses the existing control socket and never starts a stdio controller or SSH',async()=>{
+ const server=createServer(),wss=new WebSocketServer({server});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const methods=[];wss.on('connection',peer=>peer.on('message',data=>{const req=JSON.parse(data.toString());methods.push(req.method);if(req.id)peer.send(JSON.stringify({id:req.id,result:{userAgent:'fixture'}}));}));
+ let launches=0;const adapter=new CodexQueueAdapter({host:'local',platform:'win32',spawnProcess:(command,args,options)=>{
+  launches++;assert.equal(command,'codex');assert.deepEqual(args,['app-server','proxy']);assert.deepEqual(options.stdio,['pipe','pipe','pipe']);assert.equal(options.shell,false);
+  const child=new EventEmitter(),socket=connect(server.address().port,'127.0.0.1');child.stdout=socket;child.stdin=socket;child.stderr=new PassThrough();child.kill=()=>socket.destroy();socket.on('close',()=>child.emit('close'));return child;
+ }});
+ try{await adapter.open();assert.equal(launches,1);assert(methods.every(m=>['initialize','initialized'].includes(m)));}
+ finally{adapter.close();for(const c of wss.clients)c.terminate();await new Promise(r=>server.close(r));wss.close();}
+});
