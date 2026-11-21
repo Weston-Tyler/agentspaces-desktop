@@ -151,7 +151,7 @@ export class Discussions {
   participant(binding) {
     if (!binding) throw new Error("Participant connector required");
     const caller = this.engine.session(binding.sessionId), grant = this.engine.permissions(caller);
-    if (caller.fixture || !["codex", "claude"].includes(caller.provider) || caller.id !== caller.provider + "@" + caller.host + ":" + caller.nativeThreadId || caller.account !== binding.account || caller.project !== binding.project || (caller.scopeId ?? null) !== (binding.scopeId ?? null) || !grant.enrolled || !grant.retrieve || !grant.share) throw denied("discussion_sharing_denied", "Current enrolled sharing participant required");
+    if (caller.fixture || !["codex", "claude", "grok"].includes(caller.provider) || caller.id !== caller.provider + "@" + caller.host + ":" + caller.nativeThreadId || caller.account !== binding.account || caller.project !== binding.project || (caller.scopeId ?? null) !== (binding.scopeId ?? null) || !grant.enrolled || !grant.retrieve || !grant.share) throw denied("discussion_sharing_denied", "Current enrolled sharing participant required");
     return caller;
   }
   sharingBoundary(caller, ids) {
@@ -249,7 +249,7 @@ export class Discussions {
     if (!this.policy(g).selfRegistration) throw new Error("Discussion self-registration unavailable");
     if (typeof sessionId !== "string" || !sessionId || sessionId.length > 300) throw new Error("Known native source identity required");
     const target = this.engine.session(sessionId);
-    if (target.fixture || !["codex", "claude"].includes(target.provider) || target.id !== target.provider + "@" + target.host + ":" + target.nativeThreadId || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(target.nativeThreadId ?? "")) throw new Error("Known native source identity required");
+    if (target.fixture || !["codex", "claude", "grok"].includes(target.provider) || target.id !== target.provider + "@" + target.host + ":" + target.nativeThreadId || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(target.nativeThreadId ?? "")) throw new Error("Known native source identity required");
     this.sharingBoundary(caller, [target.id]);
     const existing = g.members.find(m => m.sessionId === target.id);
     if (existing) return { id, title: g.title, version: g.version, participantAlias: existing.alias, sessionId: target.id, alreadyMember: true, invitedBy: caller.id };
@@ -258,7 +258,7 @@ export class Discussions {
   }
   inviteOwner({ id, sessionId }) {
     const group = this.group(id), target = this.engine.session(sessionId), grant = this.engine.permissions(target);
-    if (target.fixture || !["codex", "claude"].includes(target.provider) || target.id !== target.provider + "@" + target.host + ":" + target.nativeThreadId || !grant.enrolled || !grant.share || !grant.retrieve) throw new Error("Known enrolled native source required");
+    if (target.fixture || !["codex", "claude", "grok"].includes(target.provider) || target.id !== target.provider + "@" + target.host + ":" + target.nativeThreadId || !grant.enrolled || !grant.share || !grant.retrieve) throw new Error("Known enrolled native source required");
     if (group.members.some(member => member.sessionId === sessionId)) return;
     this.joinEligible(group, target); return this.admit(group, target, "owner");
   }

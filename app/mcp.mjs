@@ -87,7 +87,7 @@ server.registerTool(
       "Search metadata in the connector’s granted project. Metadata does not grant content access or execution.",
     inputSchema: {
       query: z.string().max(200).default(""),
-      provider: z.enum(["all", "codex", "claude"]).default("all"),
+      provider: z.enum(["all", "codex", "claude", "grok"]).default("all"),
       status: z.enum(["all", "current", "dormant", "archived"]).default("all"),
     },
     annotations: {

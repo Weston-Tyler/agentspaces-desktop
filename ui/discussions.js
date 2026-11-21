@@ -1,5 +1,6 @@
 import {discussionLocation,discussionHref} from './discussion-link.js';
 let activeId = null;
+const providerNames = { codex:'Codex', claude:'Claude Code', grok:'Grok Build' };
 function el(tag, text, cls) {
   const n = document.createElement(tag);
   if (text) n.textContent = text;
@@ -7,6 +8,7 @@ function el(tag, text, cls) {
   return n;
 }
 function replyLabel(status) {
+  if (status === 'available-in-native-inbox') return 'Available in Grok’s AgentSpaces inbox';
   const labels = { "side-chat-unavailable":"Side chat pending in AgentSpaces", "side-chat-submitting":"Waiting for side answer", "side-chat-reply-unconfirmed":"Side answer unconfirmed", 'queued-awaiting-reply': 'Queued in native chat · reply pending', 'steered-awaiting-reply': 'Steered into active turn · reply pending', 'native-participant-contributed': 'Replied from native thread', "waiting-for-native-transport": "Waiting for native wake connection", "channel-access-changed; not dispatched": "Access changed; message not sent", "connecting-native-agent": "Connecting…", "queued": "Queued in native chat", "conversation-budget-reached": "Automatic exchange paused", "awaiting-native-reply": "Waiting for reply", "native-agent-replied": "Replied", "needs-native-attention": "Needs attention in the native app", "native-reply-uncertain": "Reply status unknown", "native-reply-pending": "Reply pending; native work preserved", "native-agent-unavailable": "Agent unavailable", "delivered-to-native-transport": "Sent to native transport; awaiting response" };
   if (labels[status]) return labels[status];
   return /blocked|unavailable|access changed/.test(status ?? "") ? "Agent is not connected" : status;
@@ -100,8 +102,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
     query.setAttribute("aria-label", "Choose thread agents");
     const pick = () => {
       picker.replaceChildren();
-      for (const provider of ["codex", "claude"]) {
-        picker.append(el("h3", provider === "codex" ? "Codex" : "Claude Code"));
+      for (const [provider, name] of Object.entries(providerNames)) {
         const rows = state.sessions
           .filter(
             (s) =>
@@ -113,6 +114,7 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
                 .includes(search.toLowerCase()),
           )
           .slice(0, 60);
+        if (provider !== 'grok' || rows.length) picker.append(el("h3", name));
         for (const s of rows) {
           const row = el("label", null, "thread-option"),
             input = el("input"),
@@ -331,9 +333,10 @@ export async function mountDiscussions(root, state, { api, notice, demoAvailable
     };
     const targets = el("details", null, "reply-selector");
     targets.append(el("summary", "Choose agents to reply"));
-    for (const provider of ["codex", "claude"]) {
-      targets.append(el("h3", provider === "codex" ? "Codex" : "Claude Code"));
-      for (const m of g.members.filter((m) => m.provider === provider)) {
+    for (const [provider, name] of Object.entries(providerNames)) {
+      const members = g.members.filter(member => member.provider === provider);
+      if (provider !== 'grok' || members.length) targets.append(el("h3", name));
+      for (const m of members) {
         const row = el("label", "@" + m.alias + " · " + m.title, "check-row"),
           input = el("input");
         input.type = "checkbox";

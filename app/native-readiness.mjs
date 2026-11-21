@@ -6,6 +6,7 @@ export function nativeWakeReadiness(engine,channels,sessionId){
  const registered=Object.values(engine.store.data.nativeSourceBindings??{}).some(row=>row.identity?.sessionId===sessionId);
  const common={sourceId:sessionId,provider:source.provider,readAccessGranted,registered,nativeAcceptance:'not-attested',activeSessionReloaded:false};
  if(!readAccessGranted)return {...common,status:'source-grant-unavailable',transportConnected:false,reason:'Current source enrollment, sharing or retrieval permission is unavailable'};
+ if(source.provider==='grok')return {...common,status:'native-inbox-pull',transportConnected:false,transportKind:'pull',monitorRequired:true,nextStep:'Start Grok’s native monitor with inboxMonitor.arguments. It requests automatic renewal at a safe boundary before the ten-hour native cap, or after an MCP connection change. Call ensure_native_connection and rearm using its arguments without asking the human to reconnect. A private cursor covers renewal gaps. Native consent and scheduling apply; never interrupt or restart a conversation. A closed session cannot be woken by this route.'};
  if(source.provider==='claude'){
   const connected=channels.isConnected(sessionId);
   const kind=channels.transportKind?.(sessionId) ?? (connected?'channel':null);

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { Engine } from "../app/engine.mjs";
 import { Store } from "../app/store.mjs";
 import { PeerMessaging } from "../app/peer-messaging.mjs";
-import { routeConversation } from "../app/conversation-routing.mjs";
+import { readGrokInbox, routeConversation } from "../app/conversation-routing.mjs";
 
 const uuid = index => "00000000-0000-4000-8000-" + String(index).padStart(12, "0");
 function fixture(t) {
@@ -62,6 +62,36 @@ test("a peer without any room receives a bound post in a new two-party group", a
   assert.deepEqual(message.targets.map(target => target.sessionId), [f.sources[1].id]);
   assert.deepEqual(f.engine.store.data.connectors, connectors, "a known peer needs no new connector");
   assert(!JSON.stringify(f.engine.store.data.peerMessageReceipts).includes(f.input.text));
+});
+
+test('Grok posts as itself and can read scoped replies without starting a native turn', async t => {
+  const f = fixture(t);
+  f.engine.workspace.index.profile.providers.push('grok');
+  const grok = f.source(5,{provider:'grok',id:'grok@local:'+uuid(5)});
+  f.engine.workspace.restore([grok]);
+  const binding = f.engine.connector(f.engine.issueConnector(grok.id).token);
+  const sent = await f.service.send({...f.input,sessionId:f.sources[0].id},binding);
+  const room = f.engine.discussions.group(sent.discussionId);
+  assert.equal(room.messages[0].source.sessionId,grok.id);
+  f.engine.discussions.contribute({id:room.id,replyTo:sent.messageId,text:'Fixture reply',nativeTurnId:'unreported',deliveryId:'grok-reply-0001'},f.bindings[0]);
+  const message = room.messages.find(row=>row.deliveryId==='grok-reply-0001');
+  const noNative = () => assert.fail('Grok delivery must not call a native controller or wake route');
+  await routeConversation(f.engine,{codexAgents:{dispatch:noNative},channels:{isConnected:noNative}},room,message);
+  assert.equal(message.targets[0].status,'available-in-native-inbox');
+  const inbox = readGrokInbox(f.engine,binding);
+  assert.equal(inbox.nativeWake,false);
+  assert.deepEqual(inbox.items.map(row=>row.messageId),[message.id]);
+  assert.equal(inbox.items[0].addressed,true);
+  f.engine.discussions.contribute({id:room.id,text:'@grok1 A new question',nativeTurnId:'unreported',deliveryId:'grok-opening-0001'},f.bindings[0]);
+  const opening = room.messages.find(row=>row.deliveryId==='grok-opening-0001');
+  await routeConversation(f.engine,{codexAgents:{dispatch:noNative},channels:{isConnected:noNative}},room,opening);
+  const openingRef = readGrokInbox(f.engine,binding).items.find(row=>row.messageId===opening.id);
+  assert.equal(openingRef.replyTo,null);
+  assert.equal(openingRef.addressed,true);
+  const exact = f.engine.discussions.readPage({id:room.id,messageId:message.id,sha256:inbox.items[0].sha256},binding);
+  assert.equal(exact.messages[0].text,'Fixture reply');
+  f.engine.grant(f.sources[0].id,{share:false});
+  assert.deepEqual(readGrokInbox(f.engine,binding).items,[]);
 });
 
 test("the resulting message wakes only its peer through the existing route, once", async t => {

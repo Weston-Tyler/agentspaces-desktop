@@ -10,9 +10,12 @@ import { HeadlessJobs } from './headless-jobs.mjs';
 import { OwnerApprovalAuth } from './owner-approval-auth.mjs';
 import { notifyApproval } from './approval-notification.mjs';
 import http from "node:http";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { homedir } from 'node:os';
+import { realpath } from 'node:fs/promises';
+import { authorizeGrokRecovery } from './grok-source.mjs';
 import { join, resolve } from "node:path";
 import { Store } from "./store.mjs";
 import { Engine } from "./engine.mjs";
@@ -39,7 +42,7 @@ import { ChannelHub } from "./channel-hub.mjs";
 import { ensureDesktopDiscovery } from "./desktop-discovery.mjs";
 import { connectAllOwnedWork } from "./connect-all.mjs";
 import { CodexDiscussionHub } from "./codex-discussions.mjs";
-import { routeConversation, messageDelivery } from "./conversation-routing.mjs";
+import { routeConversation, messageDelivery, readGrokInbox } from "./conversation-routing.mjs";
 import { ParticipantConnections } from "./participant-connection.mjs";
 import { SourceBindings } from './source-bindings.mjs';
 import { resolveNativeSourceMetadata } from './native-source-metadata.mjs';
@@ -344,6 +347,7 @@ export async function startServer({
           "/api/native/thread/create",
           "/api/agent/capabilities",
           "/api/native/connection/ensure",
+          "/api/native/grok/inbox",
           "/api/agent/message",
           "/api/agent/broadcast",
           "/api/workspace/compare",
@@ -428,6 +432,31 @@ export async function startServer({
         case '/api/native/registration/device':
           result = sourceBindings.issueDevice({ host: data.host, provider: data.provider });
           break;
+        case '/api/native/grok/setup': {
+          if (!isAdmin) throw new Error('Local administration required');
+          if (!data || Object.keys(data).some(key => !['nativeExecutable','nativeVersion','configPath','recoverMcpPid'].includes(key)) ||
+              typeof data.nativeExecutable !== 'string' || !data.nativeExecutable.startsWith('/') ||
+              data.configPath !== join(homedir(), '.agentspaces-desktop-native', 'automatic', 'grok', 'device.json'))
+            throw new Error('Grok Build private local configuration required');
+          const options = sourceBindings.grokRuntimeOptions({
+            nativeExecutable: await realpath(data.nativeExecutable),
+            nodeExecutable: await realpath(process.execPath),
+            nativeVersion: data.nativeVersion,
+            entry: fileURLToPath(new URL('./native-bootstrap-mcp.mjs', import.meta.url)),
+            configPath: data.configPath,
+          });
+          if (data.recoverMcpPid !== undefined) {
+            options.recovery = await authorizeGrokRecovery(data.recoverMcpPid, options);
+            if (!options.recovery) throw new Error('The exact live Grok MCP is not eligible for managed recovery');
+          }
+          result = sourceBindings.issueGrokDevice(options);
+          if (options.recovery) {
+            const { pid, startedAt, nativeThreadId } = options.recovery;
+            result.managedRecovery = { pid, startedAt, nativeThreadId, entry:options.entry,
+              sha256:createHash('sha256').update(readFileSync(options.entry)).digest('hex') };
+          }
+          break;
+        }
         case '/api/native/automatic/install':
           result = await automaticConnections.install({ host: data.host, provider: data.provider });
           break;
@@ -464,6 +493,8 @@ export async function startServer({
         }
         case '/api/native/connection/ensure':
           result=ensureNativeConnection(engine,channels,connector,data);break;
+        case '/api/native/grok/inbox':
+          result=readGrokInbox(engine,connector,data);break;
         case '/api/agent/capabilities': {
           const caller = engine.discussions.participant(connector), profile = engine.workspace.index?.profile;
           const workspaceGranted = !!profile?.active && connector.scopeId === profile.id;
@@ -479,6 +510,7 @@ export async function startServer({
             headlessJobs: headlessJobs.capabilities(),
             availableTools: ['read_provider_status','report_native_availability','preview_provider_handoff','request_provider_handoff','ensure_native_connection','request_headless_job','list_headless_jobs','read_coordination_digest','list_room_subscriptions','change_room_subscription','list_work_continuations','list_agent_lanes','list_shared_artifacts','read_shared_artifact','publish_shared_artifact','read_fabric_observations','verify_owner_approval','list_decisions','change_decision','list_machine_queue','change_machine_request','list_work_items','change_work_item','register_native_source','discover_permitted_work','retrieve_permitted_finding','discover_group_discussions','discover_joinable_discussions','join_group_discussion','create_group_discussion','invite_group_participant','read_group_discussion','contribute_to_discussion','create_native_thread','search_workspace_context','read_workspace_artifact','compare_worktrees','describe_agent_capabilities','message_agent_thread','message_agents'],
             workAuthority: 'AgentSpaces work/claim/lease/result contracts', idleModelPolling: false };
+          if (caller.provider === 'grok') result.availableTools.push('read_native_inbox','prepare_native_inbox_monitor');
           break;
         }
         case '/api/agent/message': {
