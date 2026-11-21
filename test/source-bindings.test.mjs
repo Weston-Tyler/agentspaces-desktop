@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, mkdirSync, symlinkSync, realpathSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, mkdirSync, symlinkSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -27,6 +27,66 @@ test("registration device is host/provider-bound and cannot authenticate as any 
   assert.throws(() => f.service.issueDevice({ host: "other", provider: "claude" }));
   f.engine.workspace.index.profile.active = false;
   assert.throws(() => f.service.device(f.device.token), { code: "native_registration_scope_unavailable" });
+});
+test('Grok registration requires the exact live observation, including when a connector already exists', {skip:process.platform !== 'linux'}, async t => {
+  const f = fixture(t);
+  const config = f.service.issueGrokDevice({
+    nativeExecutable:'/fixture/grok', nodeExecutable:'/fixture/node', nativeVersion:'1.0.88',
+    entry:'/fixture/bootstrap.mjs', configPath:'/fixture/device.json',
+  });
+  const id = 'grok@local:' + thread;
+  f.service.observeGrok = async ({ pid, nativeThreadId }) => pid === 7 ? {
+    nativeObserved:true, nativeThreadId, cwd:'/fixture/work', host:'local', provider:'grok',
+  } : null;
+  const proof = { nativeThreadId:thread, sourceProof:{ kind:'grok-stdio', mcpPid:7 } };
+  await assert.rejects(f.service.register(config.token,{nativeThreadId:thread}), {code:'grok_native_session_required'});
+  await assert.rejects(f.service.register(f.device.token,{...proof,provider:'grok'}), {code:'native_registration_device_identity_mismatch'});
+  const bound = await f.service.register(config.token,proof);
+  assert.equal(bound.sessionId,id);
+  assert.equal((await f.service.register(config.token,proof)).token,bound.token);
+  await assert.rejects(f.service.register(config.token,{...proof,sourceProof:{...proof.sourceProof,mcpPid:8}}), {code:'grok_native_session_required'});
+  f.engine.grant(id,{share:false});
+  await assert.rejects(f.service.register(config.token,proof), {code:'native_registration_source_revoked'});
+});
+test('a running workspace inventory preserves newly enabled Grok setup', {skip:process.platform !== 'linux'}, async t => {
+  const f = fixture(t);
+  f.engine.probe = async () => {
+    assert(f.engine.workspace.running);
+    if (!f.engine.workspace.index.profile.providers.includes('grok')) {
+      f.service.issueGrokDevice({
+        nativeExecutable:'/fixture/grok', nodeExecutable:'/fixture/node', nativeVersion:'1.0.88',
+        entry:'/fixture/bootstrap.mjs', configPath:'/fixture/device.json',
+      });
+    }
+  };
+  await f.engine.workspace.scan(f.engine.workspace.index.profile,{catalogOnly:true});
+  assert(f.engine.workspace.index.profile.providers.includes('grok'));
+  // A later explicit provider restriction is still honored.
+  await f.engine.workspace.scan({...f.engine.workspace.index.profile,providers:['codex','claude']},{catalogOnly:true});
+  assert(!f.engine.workspace.index.profile.providers.includes('grok'));
+});
+test('Grok upgrades preserve loaded device credentials, approved runtimes and source sharing blocks', {skip:process.platform !== 'linux'}, async t => {
+  const f = fixture(t), configPath = join(f.root,'grok-device.json');
+  const options = {nativeExecutable:'/fixture/grok-1.0.88',nodeExecutable:'/fixture/node',nativeVersion:'1.0.88',entry:'/fixture/old/bootstrap.mjs',configPath};
+  const first = f.service.issueGrokDevice(options);
+  writeFileSync(configPath,JSON.stringify(first),{mode:0o600});
+  const id = 'grok@local:' + thread;
+  f.service.observeGrok = async ({nativeThreadId}) => ({nativeObserved:true,nativeThreadId,cwd:'/fixture/work',host:'local',provider:'grok'});
+  const proof = {nativeThreadId:thread,sourceProof:{kind:'grok-stdio',mcpPid:7}};
+  const bound = await f.service.register(first.token,proof);
+  const updated = f.service.issueGrokDevice({...options,nativeExecutable:'/fixture/grok-1.0.92',nativeVersion:'1.0.92',entry:'/fixture/new/bootstrap.mjs'});
+  assert.equal(updated.token,first.token);
+  const device = f.service.device(first.token);
+  assert.deepEqual(device.entries,['/fixture/new/bootstrap.mjs','/fixture/old/bootstrap.mjs']);
+  assert.equal(device.nativeRuntimes.length,2);
+  assert.equal((await f.service.register(first.token,proof)).token,bound.token);
+  f.engine.grant(id,{share:false});
+  f.service.issueGrokDevice(options);
+  await assert.rejects(f.service.register(first.token,proof),{code:'native_registration_source_revoked'});
+  // An explicit device revocation is never revived by finding an old private file.
+  delete f.engine.store.data.nativeRegistrationDevices[createHash('sha256').update(first.token).digest('hex')];
+  assert.notEqual(f.service.issueGrokDevice(options).token,first.token);
+  assert.throws(()=>f.service.device(first.token),{code:'native_registration_device_revoked'});
 });
 test("known native source creates private source-only configuration and idempotently reuses its connector", async t => {
   const f = fixture(t), input = { nativeThreadId: thread, cwd: f.source.cwd, observedProcess: 123 };

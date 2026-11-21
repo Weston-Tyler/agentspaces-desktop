@@ -269,6 +269,7 @@ export class NativeAutoInstaller {
       if (!['local', REMOTE_HOST].includes(host)) continue;
       try { await this.engine.probe(host); } catch { results.push({ host, status: 'native-host-unavailable' }); continue; }
       for (const provider of profile.providers) {
+        if (provider === "grok") continue; // Grok uses the explicit local setup.
         if (!this.engine.tools.some(tool => tool.host === host && tool.provider === provider && tool.installed)) { results.push({ host, provider, status: 'native-app-not-installed' }); continue; }
         try { const value = await this.install({ host, provider }); results.push({ host, provider, status: value.status, nativeRefresh: value.nativeRefresh, activeSessionReloaded: false, inboundChannelConnected: false }); }
         catch { results.push({ host, provider, status: 'native-setup-unavailable', activeSessionReloaded: false, inboundChannelConnected: false }); }

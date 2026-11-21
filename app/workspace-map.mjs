@@ -217,7 +217,7 @@ export class WorkspaceMap {
       !hosts.length ||
       hosts.some((h) => !["local", REMOTE_HOST].includes(h)) ||
       !providers.length ||
-      providers.some((p) => !["codex", "claude"].includes(p))
+      providers.some((p) => !["codex", "claude", "grok"].includes(p))
     )
       throw new Error("Choose supported hosts and native tools");
     if (!["metadata", "local-retrieval"].includes(input.policy ?? "metadata"))
@@ -259,6 +259,7 @@ export class WorkspaceMap {
     if (this.running)
       throw new Error("A workspace inventory is already running");
     const profile = this.validate(input);
+    const grokEnabledAtStart = this.index?.profile?.providers?.includes('grok');
     this.running = true;
     this.cancelled = false;
     this.progress = { stage: "native metadata", completed: 0 };
@@ -275,6 +276,7 @@ export class WorkspaceMap {
           throw new Error("Inventory cancelled; previous index preserved");
         await e.probe(host);
         for (const provider of profile.providers) {
+          if (provider === "grok") continue; // Grok registers from its live MCP session.
           const tool = e.tools.find(
             (t) => t.provider === provider && t.host === host,
           );
@@ -450,6 +452,15 @@ export class WorkspaceMap {
       }
       if (this.cancelled)
         throw new Error("Inventory cancelled; previous index preserved");
+      // Explicit local setup can complete while this scan is awaiting I/O.
+      // Carry that opt-in forward only if it happened during this scan and the
+      // committed workspace still covers the original scope and host.
+      const currentScope = this.index?.profile;
+      if (!grokEnabledAtStart && currentScope?.active && currentScope.id === profile.id &&
+          currentScope.account === profile.account && currentScope.providers.includes('grok') &&
+          profile.hosts.includes('local') && !profile.providers.includes('grok')) {
+        profile.providers.push('grok');
+      }
       // Registration can complete during any awaited discovery call. A paginated
       // catalog snapshot is not a revocation of that durable source binding.
       // Reconcile at commit, retaining only the current owning profile boundary.

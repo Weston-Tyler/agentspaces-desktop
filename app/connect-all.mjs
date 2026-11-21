@@ -18,7 +18,7 @@ export function connectAllOwnedWork(engine, { hosts, maxBatches = 32 } = {}) {
   engine.workspace.cancelled = false;
   const existing = index?.profile?.active && !index.fixture ? index.profile : null;
   const profile = {
-    ...(existing ?? {}), hosts, providers: ["codex", "claude"],
+    ...(existing ?? {}), hosts, providers: ["codex", "claude", ...(existing?.providers.includes("grok") ? ["grok"] : [])],
     account: existing?.account ?? "personal-local", policy: "local-retrieval", indexFiles: true,
     roots: existing?.roots ?? {}, exclusions: existing?.exclusions ?? {}, active: true,
   };

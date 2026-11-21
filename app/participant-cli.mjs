@@ -24,7 +24,7 @@ const STDIN_SCHEMAS = {
   "handoff-request": objectSchema({...handoffFields,proposalHash:string(64,{minLength:64,pattern:"^[a-f0-9]{64}$"}),deliveryId:delivery},[...Object.keys(handoffFields),"proposalHash","deliveryId"]),
   subscribe: objectSchema({id:uuid,mode:{enum:["wake","digest","off"]},topics:{type:"array",minItems:0,maxItems:12,items:string(80)},workEntryId:string(100)},["id","mode","topics"]),
   digest: objectSchema({since:string(40),query:string(200,{minLength:0}),limit:{type:"integer",minimum:1,maximum:200},discussionId:uuid},[]),
-  message: objectSchema({ ...MESSAGE_PROPERTIES, sessionId: string(300), nativeThreadId: uuid, host: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$" }, provider: { enum: ["codex", "claude"] }, title: string(80, { pattern: "\\S" }) }, Object.keys(MESSAGE_PROPERTIES), { oneOf: [{ required: ["sessionId"] }, { required: ["nativeThreadId"] }] }),
+  message: objectSchema({ ...MESSAGE_PROPERTIES, sessionId: string(300), nativeThreadId: uuid, host: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$" }, provider: { enum: ["codex", "claude", "grok"] }, title: string(80, { pattern: "\\S" }) }, Object.keys(MESSAGE_PROPERTIES), { oneOf: [{ required: ["sessionId"] }, { required: ["nativeThreadId"] }] }),
   broadcast: objectSchema({ ...MESSAGE_PROPERTIES, query: string(500, { minLength: 0 }), activeWithinDays: { type: "integer", minimum: 1, maximum: 3650 }, sessionIds: { type: "array", minItems: 1, maxItems: 200, items: string(300) }, nativeThreadIds: { type: "array", minItems: 1, maxItems: 200, items: uuid }, discussionId: uuid }, Object.keys(MESSAGE_PROPERTIES)),
   "verify-approval": objectSchema({ entryId: string(100), requestHash: string(64, { minLength: 64, pattern: "^[a-f0-9]{64}$" }), receiptId: string(100) }, ["entryId", "requestHash", "receiptId"]),
 };
@@ -92,7 +92,7 @@ async function configuration(path, source) {
   }
   let config;
   try { config = JSON.parse(await readFile(file, "utf8")); } catch { throw fail("invalid_private_config"); }
-  if (config.schema !== 1 || !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(config.address ?? "") || !/^127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(config.authority ?? "") || !/^[a-f0-9]{64}$/.test(config.token ?? "") || !UUID.test(config.nativeThreadId ?? "") || typeof config.sessionId !== "string" || !config.sessionId || config.sessionId.length > 300 || !["codex", "claude"].includes(config.provider) || typeof config.host !== "string" || !config.host || config.host.length > 100) throw fail("invalid_private_config");
+  if (config.schema !== 1 || !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(config.address ?? "") || !/^127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(config.authority ?? "") || !/^[a-f0-9]{64}$/.test(config.token ?? "") || !UUID.test(config.nativeThreadId ?? "") || typeof config.sessionId !== "string" || !config.sessionId || config.sessionId.length > 300 || !["codex", "claude", "grok"].includes(config.provider) || typeof config.host !== "string" || !config.host || config.host.length > 100) throw fail("invalid_private_config");
   if (+new URL(config.address).port > 65535 || +config.authority.split(":")[1] > 65535) throw fail("invalid_private_config");
   if (config.nativeThreadId.toLowerCase() !== source.toLowerCase()) throw fail("source_identity_mismatch");
   return config;

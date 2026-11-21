@@ -1,15 +1,51 @@
-import { conversationDestination } from './agent-message.mjs';
+import { conversationDestination, messageReference } from './agent-message.mjs';
 import { implicitRoomWake } from "./room-subscriptions.mjs";
 import { createHash } from "node:crypto";
 export function messageDelivery(message) {
   const targets = message?.targets ?? [];
   const blockedReason=message?.routing?.status==='forward-hop-limit-reached'?'Forward-hop limit reached. Start a new opening post without replyTo; earlier messages will not be replayed.':message?.routing?.status==='target-budget-exhausted'?'Exchange recipient budget exhausted. Start a new opening post for another exchange.':null;
   const sidePending = targets.length > 0 && targets.every(target=>target.status==='side-chat-unavailable');
+  const inboxOnly = targets.length > 0 && targets.every(target => target.status === 'available-in-native-inbox');
   return { ...(blockedReason?{routingStatus:message.routing.status}:{}),messageId: message?.id, roomPosted: !!message, selectedRecipients: targets.length,
     notificationStatus: blockedReason ? 'routing-limited' : !targets.length ? 'no-recipients' : sidePending ? 'side-chat-pending' : 'see-recipient-receipts',
     targets: targets.slice(0,32).map(t=>({sessionId:t.sessionId,status:t.status,deliveryMode:t.deliveryMode??null,reasonCode:t.reasonCode??null})),
-    ...(blockedReason ? {warning:'Posted to room. '+blockedReason} : targets.length ? {} : { warning: 'Posted to room; no agent notified. Mention a recipient to request another turn.' }),
+    ...(inboxOnly ? {warning:'Available in the recipient’s AgentSpaces inbox; no native turn was started.'} : blockedReason ? {warning:'Posted to room. '+blockedReason} : targets.length ? {} : { warning: 'Posted to room; no agent notified. Mention a recipient to request another turn.' }),
     nativeAnswerConfirmed: targets.some(target => ['native-agent-replied', 'native-participant-contributed'].includes(target.status)) };
+}
+export function readGrokInbox(engine, binding, options = {}) {
+  const { limit = 10, discussionId } = options;
+  const caller = engine.discussions.participant(binding);
+  if (caller.provider !== 'grok' || !Number.isInteger(limit) || limit < 1 || limit > 25 ||
+      Object.keys(options).some(key => !['limit', 'discussionId'].includes(key)) ||
+      discussionId !== undefined && (typeof discussionId !== 'string' || discussionId.length > 100))
+    throw new Error('Grok source and inbox limit of 1–25 required');
+  const items = [];
+  for (const room of engine.store.data.discussions) {
+    if (discussionId && room.id !== discussionId || !room.members.some(member => member.sessionId === caller.id)) continue;
+    const ownPosts = new Set(room.messages.filter(message => message.source?.sessionId === caller.id).map(message => message.id));
+    let count = 0;
+    for (let index = room.messages.length - 1; index >= 0 && count < limit + 1; index--) {
+      const message = room.messages[index];
+      const target = message.targets?.find(row => row.sessionId === caller.id && row.status === 'available-in-native-inbox');
+      const reply = ownPosts.has(message.replyTo) && message.source?.sessionId !== caller.id;
+      if ((!target && !reply) || message.synthetic) continue;
+      const permitted = !message.source || engine.discussions.allowed(message.source);
+      if (!permitted) continue;
+      if (count === 0) {
+        try { if (!engine.discussions.context(room.id, binding).available) break; }
+        catch { break; }
+      }
+      count++;
+      items.push({
+        ...messageReference(room, message), discussionTitle: room.title,
+        at: message.at, author: message.author, replyTo: message.replyTo ?? null, addressed:!!target,
+        preview: message.text.slice(0, 240), contentOmitted: message.text.length > 240,
+        destination: target?.destination ?? (message.nativeSideReply ? 'side' : conversationDestination(room, message)),
+      });
+    }
+  }
+  items.sort((a, b) => b.at.localeCompare(a.at) || b.messageId.localeCompare(a.messageId));
+  return { items: items.slice(0, limit), truncated: items.length > limit, transport: 'pull', nativeWake: false };
 }
 // Bounded direct room delivery only; no work claims, scheduler or idle models.
 export async function routeConversation(engine, { codexAgents, channels }, group, message) {
@@ -111,7 +147,11 @@ export async function routeConversation(engine, { codexAgents, channels }, group
       }
       const source = engine.session(target.sessionId);
       const destination = target.destination ??= conversationDestination(group, message);
-      if (!source.fixture && destination === 'side' && source.provider !== 'codex') {
+      if (!source.fixture && source.provider === 'grok') {
+        target.status = 'available-in-native-inbox';
+        target.deliveryMode = 'pull';
+        target.undispatched = true;
+      } else if (!source.fixture && destination === 'side' && source.provider !== 'codex') {
         target.status = 'side-chat-unavailable';
         target.deliveryMode = 'side';
         target.undispatched = true;

@@ -5,7 +5,7 @@ const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 const MAX_LOOKUPS = 200;
 const DAY_MS = 86400000;
 const fail = code => Object.assign(new Error(code), { code });
-const canonical = source => source && !source.fixture && ["codex", "claude"].includes(source.provider)
+const canonical = source => source && !source.fixture && ["codex", "claude", "grok"].includes(source.provider)
   && ["local", REMOTE_HOST].includes(source.host) && UUID.test(source.nativeThreadId ?? "")
   && source.id === source.provider + "@" + source.host + ":" + source.nativeThreadId;
 

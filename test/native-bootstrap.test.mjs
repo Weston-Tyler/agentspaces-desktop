@@ -21,6 +21,26 @@ async function setup(provider = "claude") {
 }
 const event = (extra = {}) => ({ session_id: UUID, cwd: "/fictional/project", hook_event_name: "SessionStart", ...extra });
 const request = (threadId = UUID, args = {}) => ({ params: { name: "discover_group_discussions", arguments: args, _meta: { threadId } } });
+test('a cached Grok catalog can prepare its monitor through ensure_native_connection', async t => {
+  const previous = process.env.GROK_SESSION_ID;
+  process.env.GROK_SESSION_ID = UUID;
+  t.after(() => {
+    if (previous === undefined) delete process.env.GROK_SESSION_ID;
+    else process.env.GROK_SESSION_ID = previous;
+  });
+  const {configPath, participantConfig} = await setup('grok');
+  const bootstrap = await createNativeBootstrap({configPath,requestImpl:async (_,path) =>
+    path === '/api/native/register' ? {participantConfig} : {readiness:{status:'native-inbox-pull'}}});
+  t.after(() => bootstrap.server.close());
+  const result = await bootstrap.callTool({params:{name:'ensure_native_connection',arguments:{}}});
+  const value = JSON.parse(result.content[0].text);
+  assert.equal(value.inboxMonitor.tool,'monitor');
+  assert.equal(value.inboxMonitor.arguments.persistent,true);
+  assert(value.inboxMonitor.arguments.command.includes(UUID));
+  assert(value.inboxMonitor.arguments.command.includes('grok-inbox-monitor.mjs'));
+  assert(!JSON.stringify(result).includes(deviceToken));
+  assert(!JSON.stringify(result).includes(scopedToken));
+});
 test("Codex resolves native request metadata per call and never delegates the device capability", async () => {
   const { configPath, participantConfig } = await setup("codex"), requests = [];
   const bootstrap = await createNativeBootstrap({ configPath, requestImpl: async (config, path, body) => {

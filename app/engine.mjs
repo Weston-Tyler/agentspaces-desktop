@@ -172,6 +172,8 @@ export class Engine {
       g = this.permissions(s);
     if (!g.enrolled || !g.content)
       throw new Error("Explicit source content grant required");
+    if (s.provider === 'grok')
+      throw new Error('Grok Build conversation history is unavailable. Use its shared room messages or published artifacts.');
     let value = this.cache.get(id);
     if (!value) {
       if (s.fixture) {

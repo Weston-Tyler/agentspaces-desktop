@@ -245,13 +245,14 @@ function stats() {
 function empty(title, text, button = "") {
   return `<div class="empty"><div class="empty-symbol">⌕</div><h2>${esc(title)}</h2><p>${esc(text)}</p>${button}</div>`;
 }
+const sessionProviderNames = { codex:"Codex", claude:"Claude Code", grok:"Grok Build" };
 function discovery() {
   const emptyLibrary = empty(
     state.workspace?.running ? "Finding your local threads…" : "Your thread library",
     state.workspace?.running ? "Codex and Claude thread discovery is running automatically." : "No native threads are available in the current connection. Check the installed tools and connection settings.",
     '<button class="secondary" data-page="settings">Connection settings</button>',
   );
-  return `${stats()}<div class="panel"><div class="panel-title"><div><h2>Your session library</h2><p>Find by topic, native tool, project or session state.</p></div><span class="tag">Metadata first</span></div>${state.projects.length ? `<div class="searchbar"><input id="search" aria-label="Search permitted work" placeholder="Search research, decisions, artifacts…" value="${esc(filters.query)}"><select id="provider" aria-label="Tool"><option value="all">All native tools</option><option value="codex" ${filters.provider === "codex" ? "selected" : ""}>Codex</option><option value="claude" ${filters.provider === "claude" ? "selected" : ""}>Claude Code</option></select><select id="status" aria-label="Session state">${["all", "current", "dormant", "archived"].map((v) => `<option value="${v}" ${filters.status === v ? "selected" : ""}>${v === "all" ? "All session states" : v[0].toUpperCase() + v.slice(1)}</option>`).join("")}</select><select id="project" aria-label="Project"><option value="all" ${filters.project === "all" ? "selected" : ""}>All projects</option>${state.projects.map((p) => `<option value="${esc(p.id)}" ${filters.project === p.id ? "selected" : ""}>${esc(p.id)}</option>`).join("")}</select></div><div class="suggestions">Try a topic <button data-action="topic" data-value="retry">retry</button><button data-action="topic" data-value="artifact">artifact</button><span>Content stays locked until you allow it.</span></div><div id="results"></div>` : emptyLibrary}<div class="info-line">Archived and dormant work can be retrieved without waking a session. Discovery does not grant access to private content or authorize execution.</div></div>`;
+  return `${stats()}<div class="panel"><div class="panel-title"><div><h2>Your session library</h2><p>Find by topic, native tool, project or session state.</p></div><span class="tag">Metadata first</span></div>${state.projects.length ? `<div class="searchbar"><input id="search" aria-label="Search permitted work" placeholder="Search research, decisions, artifacts…" value="${esc(filters.query)}"><select id="provider" aria-label="Tool"><option value="all">All native tools</option><option value="codex" ${filters.provider === "codex" ? "selected" : ""}>Codex</option><option value="claude" ${filters.provider === "claude" ? "selected" : ""}>Claude Code</option><option value="grok" ${filters.provider === "grok" ? "selected" : ""}>Grok Build</option></select><select id="status" aria-label="Session state">${["all", "current", "dormant", "archived"].map((v) => `<option value="${v}" ${filters.status === v ? "selected" : ""}>${v === "all" ? "All session states" : v[0].toUpperCase() + v.slice(1)}</option>`).join("")}</select><select id="project" aria-label="Project"><option value="all" ${filters.project === "all" ? "selected" : ""}>All projects</option>${state.projects.map((p) => `<option value="${esc(p.id)}" ${filters.project === p.id ? "selected" : ""}>${esc(p.id)}</option>`).join("")}</select></div><div class="suggestions">Try a topic <button data-action="topic" data-value="retry">retry</button><button data-action="topic" data-value="artifact">artifact</button><span>Content stays locked until you allow it.</span></div><div id="results"></div>` : emptyLibrary}<div class="info-line">Archived and dormant work can be retrieved without waking a session. Discovery does not grant access to private content or authorize execution.</div></div>`;
 }
 let searchRevision = 0;
 async function showResults() {
@@ -271,7 +272,7 @@ async function showResults() {
   }
 }
 function row(s) {
-  return `<div class="session-row"><div class="provider-mark ${s.provider === "claude" ? "claude" : ""}">${s.provider === "codex" ? "C" : "A"}</div><div class="row-text"><h3>${esc(s.title)}</h3><p>${s.provider === "codex" ? "Codex" : "Claude Code"} · ${esc(s.surface)} · ${esc(s.project)}</p><div class="row-meta"><span>${esc(date(s.updatedAt))}</span><span>${s.fixture ? "Synthetic fixture" : "Native metadata"}</span><span>${esc(s.topics.join(" · "))}</span></div></div><span class="tag ${esc(s.status)}">${esc(s.status)}</span><span class="tag permission">${s.grants.content ? "Content allowed" : "Content locked"}</span><button class="secondary" data-action="inspect" data-id="${esc(s.id)}">Inspect</button></div>`;
+  return `<div class="session-row"><div class="provider-mark ${s.provider === "claude" ? "claude" : ""}">${s.provider === "codex" ? "C" : s.provider === "grok" ? "G" : "A"}</div><div class="row-text"><h3>${esc(s.title)}</h3><p>${esc(sessionProviderNames[s.provider] ?? s.provider)} · ${esc(s.surface)} · ${esc(s.project)}</p><div class="row-meta"><span>${esc(date(s.updatedAt))}</span><span>${s.fixture ? "Synthetic fixture" : "Native metadata"}</span><span>${esc(s.topics.join(" · "))}</span></div></div><span class="tag ${esc(s.status)}">${esc(s.status)}</span><span class="tag permission">${s.grants.content ? "Content allowed" : "Content locked"}</span><button class="secondary" data-action="inspect" data-id="${esc(s.id)}">Inspect</button></div>`;
 }
 function activity() {
   return `<div class="panel"><div class="panel-title"><h2>Local activity</h2><span class="tag">${state.activity.length} recorded actions</span></div>${
@@ -350,7 +351,7 @@ function detail(id) {
   const s = state.sessions.find((s) => s.id === id);
   const g = s.grants;
   $("#detail-content").innerHTML =
-    `<h2>${esc(s.title)}</h2><p>${s.fixture ? "Synthetic fixture. No private native history has been accessed." : "Native metadata. Content access requires a separate permission."}</p><div class="detail-meta"><b>Native tool</b><span>${s.provider === "codex" ? "Codex" : "Claude Code"}</span><b>Session state</b><span>${esc(s.status)}</span><b>Source ID</b><span>${esc(s.id)}</span><b>Account / project</b><span>${esc(s.account)} / ${esc(s.project)}</span><b>Source version</b><span>${esc(s.sourceVersion)}</span></div><h3>Session permissions</h3><div class="permission-grid">${[
+    `<h2>${esc(s.title)}</h2><p>${s.fixture ? "Synthetic fixture. No private native history has been accessed." : "Native metadata. Content access requires a separate permission."}</p><div class="detail-meta"><b>Native tool</b><span>${esc(sessionProviderNames[s.provider] ?? s.provider)}</span><b>Session state</b><span>${esc(s.status)}</span><b>Source ID</b><span>${esc(s.id)}</span><b>Account / project</b><span>${esc(s.account)} / ${esc(s.project)}</span><b>Source version</b><span>${esc(s.sourceVersion)}</span></div><h3>Session permissions</h3><div class="permission-grid">${[
       ["enrolled", "Enroll as a participant"],
       ["content", "Allow bounded content read"],
       ["share", "Share approved findings"],
@@ -362,7 +363,7 @@ function detail(id) {
       )
       .join(
         "",
-      )}</div><div class="actions"><button class="secondary" data-action="read" data-id="${esc(id)}" ${g.content ? "" : "disabled"}>Inspect finding & artifact</button><button class="secondary" data-action="connector" data-id="${esc(id)}" ${g.retrieve ? "" : "disabled"}>Create scoped MCP connector</button></div><p class="fineprint">Retrieved material is untrusted data. Archived knowledge can be used without waking its native session.</p><div id="finding-result"></div>`;
+      )}</div><div class="actions"><button class="secondary" data-action="read" data-id="${esc(id)}" ${g.content && s.provider !== "grok" ? "" : "disabled"}>Inspect finding & artifact</button><button class="secondary" data-action="connector" data-id="${esc(id)}" ${g.retrieve ? "" : "disabled"}>Create scoped MCP connector</button></div><p class="fineprint">Retrieved material is untrusted data. Archived knowledge can be used without waking its native session.</p><div id="finding-result"></div>`;
   if (!$("#detail").open) $("#detail").showModal();
 }
 function findingResult(f) {

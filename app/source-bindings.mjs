@@ -1,18 +1,19 @@
 import { REMOTE_HOST } from "./remote-host.mjs";
 import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync, lstatSync, existsSync, renameSync } from "node:fs";
-import { join, isAbsolute } from "node:path";
+import { join, isAbsolute, dirname } from "node:path";
 import { assertUnlinkedParents } from "./native-connections.mjs";
 import { scopePathExcluded, mapSessions } from "./workspace-map.mjs";
 import { hostPaths, normalizeHostPath } from "./platform.mjs";
+import { GROK_QUALIFIED_VERSIONS, observeGrokSource } from './grok-source.mjs';
 
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 const hash = value => createHash("sha256").update(value).digest("hex");
 const failure = code => Object.assign(new Error(code), { code });
 export class SourceBindings {
-  constructor(engine, { root, address, resolveMetadata = async () => null } = {}) {
+  constructor(engine, { root, address, resolveMetadata = async () => null, observeGrok = observeGrokSource } = {}) {
     if (typeof root !== "string" || !isAbsolute(root) || !/^http:\/\/127\.0\.0\.1:\d+$/.test(address ?? "") || !new URL(address).port || typeof resolveMetadata !== "function") throw failure("invalid_registration_configuration");
-    Object.assign(this, { engine, root, address, resolveMetadata });
+    Object.assign(this, { engine, root, address, resolveMetadata, observeGrok });
     engine.store.data.nativeRegistrationDevices ??= {};
     engine.store.data.nativeSourceBindings ??= {};
     this.pending = new Map();
@@ -29,6 +30,57 @@ export class SourceBindings {
     this.engine.store.data.nativeRegistrationDevices[hash(token)] = { host, provider, scopeId: profile.id, account: profile.account, role: "native-registration-only", at: new Date().toISOString() };
     this.engine.store.save();
     return { token, host, provider };
+  }
+  issueGrokDevice({ nativeExecutable, nodeExecutable, nativeVersion, entry, configPath, recovery }) {
+    const profile = this.profile(), host = 'local';
+    if (process.platform !== 'linux' || !profile.hosts.includes(host) ||
+        !GROK_QUALIFIED_VERSIONS.includes(nativeVersion) || ![nativeExecutable, nodeExecutable, entry, configPath].every(isAbsolute))
+      throw failure('grok_device_setup_unavailable');
+    const provider = 'grok', devices = this.engine.store.data.nativeRegistrationDevices;
+    assertUnlinkedParents(dirname(configPath));
+    let previousConfig;
+    if (existsSync(configPath)) {
+      const stat = lstatSync(configPath);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16384 || (stat.mode & 0o777) !== 0o600 || stat.uid !== process.getuid())
+        throw failure('native_registration_private_config_unavailable');
+      previousConfig = JSON.parse(readFileSync(configPath,'utf8'));
+    }
+    const old = previousConfig?.provider === provider && previousConfig.host === host && /^[a-f0-9]{64}$/.test(previousConfig.token ?? '')
+      ? devices[hash(previousConfig.token)] : null;
+    const reusable = old?.role === 'native-registration-only' && old.provider === provider && old.host === host &&
+      old.scopeId === profile.id && old.account === profile.account && old.nodeExecutable === nodeExecutable;
+    const token = reusable ? previousConfig.token : randomBytes(32).toString('hex');
+    const entries = [...new Set([entry, ...(reusable ? [old.entry, ...(old.entries ?? [])] : [])])].filter(Boolean);
+    const runtimes = new Map((reusable ? [
+      {executable:old.nativeExecutable,version:old.nativeVersion}, ...(old.nativeRuntimes ?? []),
+    ] : []).map(runtime => [runtime.executable,runtime]));
+    runtimes.set(nativeExecutable,{executable:nativeExecutable,version:nativeVersion});
+    const retainedRecovery = recovery ?? (reusable ? old.recovery : undefined);
+    if (entries.length > 16 || runtimes.size > 16) throw failure('grok_runtime_maintenance_required');
+    // Grok joins the existing scope only through explicit local administration.
+    // The general native installer remains restricted to its supported clients.
+    if (!profile.providers.includes(provider)) {
+      profile.providers = [...profile.providers, provider];
+      this.engine.workspace.save();
+    }
+    for (const [key, device] of Object.entries(devices)) {
+      if (key !== hash(token) && device.provider === provider && device.host === host && device.scopeId === profile.id) delete devices[key];
+    }
+    devices[hash(token)] = { host, provider, scopeId: profile.id, account: profile.account,
+      role: 'native-registration-only', at: new Date().toISOString(), nativeExecutable, nodeExecutable, nativeVersion, entry, configPath,
+      entries, nativeRuntimes:[...runtimes.values()],
+      ...(retainedRecovery ? { recovery: retainedRecovery } : {}) };
+    this.engine.store.save();
+    return { schemaVersion: 1, token, host, provider, address: this.address, authority: new URL(this.address).host, entry, nodeExecutable };
+  }
+  grokRuntimeOptions(options) {
+    const profile = this.profile();
+    const prior = Object.values(this.engine.store.data.nativeRegistrationDevices).find(device =>
+      device.provider === 'grok' && device.host === 'local' && device.scopeId === profile.id && device.account === profile.account);
+    return {
+      ...options,
+      nativeRuntimes:prior ? [{executable:prior.nativeExecutable,version:prior.nativeVersion}, ...(prior.nativeRuntimes ?? [])] : [],
+    };
   }
   device(token) {
     if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) throw failure("native_registration_device_denied");
@@ -47,23 +99,34 @@ export class SourceBindings {
     const cwd = lifecycle ? undefined : input.cwd;
     const workingCwd = input.workingCwd !== undefined ? input.workingCwd : lifecycle ? input.cwd : undefined;
     try { this.validateWorkingCwd(workingCwd, device, this.profile()); } catch (error) { return Promise.reject(error); }
-    const key = hash(JSON.stringify([hash(token), input.nativeThreadId ?? null, input.nativeSessionId ?? null, cwd ?? null, workingCwd ?? null]));
+    const grokPid = device.provider === 'grok' ? input.sourceProof?.mcpPid : undefined;
+    if (device.provider === 'grok' && (input.sourceProof?.kind !== 'grok-stdio' || !Number.isSafeInteger(grokPid) ||
+        !input.nativeThreadId || input.nativeSessionId || cwd !== undefined || workingCwd !== undefined))
+      return Promise.reject(failure('grok_native_session_required'));
+    const key = hash(JSON.stringify([hash(token), input.nativeThreadId ?? null, input.nativeSessionId ?? null, cwd ?? null, workingCwd ?? null, grokPid ?? null]));
     if (this.pending.has(key)) return this.pending.get(key);
-    const operation = this.bind(token, { nativeThreadId: input.nativeThreadId, nativeSessionId: input.nativeSessionId, cwd, workingCwd, nativeClientSupplied: true });
+    const operation = this.bind(token, { nativeThreadId: input.nativeThreadId, nativeSessionId: input.nativeSessionId, cwd, workingCwd, grokPid });
     this.pending.set(key, operation);
     return operation.finally(() => { if (this.pending.get(key) === operation) this.pending.delete(key); });
   }
   async bind(token, input) {
     const device = this.device(token), profile = this.profile();
+    const grok = device.provider === 'grok' ? await this.observeGrok({ device, pid: input.grokPid, nativeThreadId: input.nativeThreadId }) : null;
+    if (device.provider === 'grok') {
+      this.device(token);
+      if (!grok?.nativeObserved || grok.nativeThreadId !== input.nativeThreadId) throw failure('grok_native_session_required');
+      this.validateWorkingCwd(grok.cwd, device, this.profile());
+    }
     let source = input.nativeThreadId ? this.engine.catalog.find(source => !source.fixture && source.host === device.host && source.provider === device.provider && source.nativeThreadId === input.nativeThreadId) : null;
     if (!source || input.nativeSessionId && source.nativeSessionId !== input.nativeSessionId) {
       let observed;
-      try { observed = await this.resolveMetadata({ host: device.host, provider: device.provider, nativeThreadId: input.nativeThreadId, nativeSessionId: input.nativeSessionId }); } catch { throw failure("source_pending"); }
+      try { observed = grok ?? await this.resolveMetadata({ host: device.host, provider: device.provider, nativeThreadId: input.nativeThreadId, nativeSessionId: input.nativeSessionId }); } catch { throw failure("source_pending"); }
       this.device(token); // The owner may revoke/change scope while observation runs.
       if (!observed || observed.nativeObserved !== true || !UUID.test(observed.nativeThreadId ?? "") || observed.host !== device.host || observed.provider !== device.provider || observed.fixture || input.nativeThreadId && observed.nativeThreadId !== input.nativeThreadId || input.nativeSessionId && observed.nativeSessionId !== input.nativeSessionId) throw failure("source_pending");
       if (observed.account !== undefined && observed.account !== profile.account) throw failure("native_registration_account_mismatch");
       source = { id: device.provider + "@" + device.host + ":" + observed.nativeThreadId, nativeThreadId: observed.nativeThreadId, nativeSessionId: observed.nativeSessionId ?? null,
         host: device.host, provider: device.provider, cwd: observed.cwd, account: profile.account, scopeId: profile.id, fixture: false,
+        ...(device.provider === 'grok' ? { surface:'Grok Build' } : {}),
         title: typeof observed.title === "string" ? observed.title.slice(0, 200) : "Native session", sourceVersion: String(observed.sourceVersion ?? "unknown").slice(0, 200), status: ["current", "dormant", "archived", "unknown"].includes(observed.status) ? observed.status : "unknown", topics: [],
         registrationProvenance: { nativeClientSupplied: true, metadataObserved: true, attribution: "locally bound; native caller not cryptographically verified" } };
       this.validateSource(source, device, this.profile(), input.cwd, false, input.workingCwd);
