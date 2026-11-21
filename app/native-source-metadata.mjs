@@ -1,4 +1,8 @@
 import { REMOTE_HOST } from "./remote-host.mjs";
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { hostPaths } from './platform.mjs';
+import { observeLocalClaudeDesktopSession } from './native-session-hook.mjs';
 import { CodexReadAdapter } from './native.mjs';
 import { ClaudeReadAdapter } from './claude-adapter.mjs';
 import { CodexQueueAdapter } from './codex-queue.mjs';
@@ -25,7 +29,10 @@ export function codexMetadataAdapter(host, { daemonFactory = options => new Code
 
 // Metadata observation only. A hook's shared session-tree ID never substitutes
 // for an exact Codex thread ID; an ambiguous tree remains unbound.
-export async function resolveNativeSourceMetadata(input, { codexFactory = codexMetadataAdapter, claudeFactory = host => new ClaudeReadAdapter({ host }) } = {}) {
+export async function resolveNativeSourceMetadata(input, {
+  codexFactory = codexMetadataAdapter,
+  claudeFactory = host => new ClaudeReadAdapter({ host }),
+} = {}) {
   const { host, provider, nativeThreadId, nativeSessionId, cwd } = input;
   if (!['local', REMOTE_HOST].includes(host) || !['codex', 'claude'].includes(provider)) return null;
   const adapter = provider === 'codex' ? codexFactory(host) : claudeFactory(host);
@@ -33,8 +40,13 @@ export async function resolveNativeSourceMetadata(input, { codexFactory = codexM
     await adapter.open();
     if (provider === 'claude') {
       if (!nativeThreadId) return null;
-      const info = await adapter.call({ action: 'info', nativeThreadId, project: { metadataGrant: true, allMetadataGrant: true, host } });
-      return info?.nativeThreadId === nativeThreadId ? { ...info, host, provider, nativeObserved: true } : null;
+      const info = await adapter.call({ action: 'info', nativeThreadId, project: { metadataGrant: true, allMetadataGrant: true, host } }).catch(() => null);
+      if (info?.nativeThreadId === nativeThreadId && typeof info.cwd === 'string' && hostPaths(host).isAbsolute(info.cwd)) {
+        return { ...info, host, provider, nativeObserved: true };
+      }
+      if (process.platform !== 'linux' || host !== 'local') return null;
+      const configPath = join(homedir(), '.agentspaces-desktop-native', 'automatic', 'claude', 'device.json');
+      return await observeLocalClaudeDesktopSession(configPath, { host, nativeThreadId });
     }
     let thread;
     if (nativeThreadId) thread = (await adapter.rpc('thread/read', { threadId: nativeThreadId, includeTurns: false })).thread;

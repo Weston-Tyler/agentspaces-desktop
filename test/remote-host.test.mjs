@@ -77,7 +77,10 @@ test('real saved workspace restarts with identities, grants, connectors, room me
       app=await startServer({root,port:0,engine,desktopDiscovery:true,codexAdapterFactory:denied,sourceMetadataResolver:denied});
       const runtime=JSON.parse(readFileSync(join(root,'runtime.json'),'utf8'));
       const state=await fetch(app.address+'/api/state',{headers:{Authorization:'Bearer '+runtime.admin}}).then(r=>r.json());
-      assert.equal(state.remoteHost,'legacy-lab');assert(scans.length>0);assert(scans.every(hosts=>hosts.join(',')==='local,legacy-lab'));
+      assert.equal(state.remoteHost,'legacy-lab');
+      assert.equal(state.desktopStartup.status,'cached-native-metadata');
+      assert.deepEqual(engine.workspace.index.profile.hosts,['local','legacy-lab']);
+      assert.deepEqual(scans,[]);
       for(const key of keys)assert.deepEqual(engine.store.data[key],before[key],key+' must not be rewritten');
       assert.equal(engine.discussions.view(engine.store.data.discussions[0]).available,true);
       assert.equal(engine.modelCalls,0);

@@ -1,5 +1,5 @@
 import test from "node:test";
-import { realpathSync } from "node:fs";
+import { realpathSync, rmSync } from "node:fs";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readdir, readFile, mkdir, symlink, unlink, rmdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import http from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createNativeBootstrap } from "../app/native-bootstrap-mcp.mjs";
-import { runNativeSessionHook, resolveClaudeSource, bootstrapConfigPath } from "../app/native-session-hook.mjs";
+import { runNativeSessionHook, resolveClaudeSource, observeLocalClaudeDesktopSession, bootstrapConfigPath } from "../app/native-session-hook.mjs";
 const UUID = "00000000-0000-4000-8000-000000000001", OTHER = "00000000-0000-4000-8000-000000000002";
 const deviceToken = "a".repeat(64), scopedToken = "b".repeat(64);
 const processRecord = { pid: 4242, parentPid: 1, exe: "/native/claude", startedAt: "fixture-start-1" };
@@ -41,6 +41,33 @@ test('a cached Grok catalog can prepare its monitor through ensure_native_connec
   assert(!JSON.stringify(result).includes(deviceToken));
   assert(!JSON.stringify(result).includes(scopedToken));
 });
+test("Desktop metadata recovery requires the exact live lifecycle identity", async t => {
+  const { root, configPath } = await setup();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  await runNativeSessionHook(event({ cwd: "/fictional/working-folder" }), {
+    configPath, ancestors: async () => [processRecord],
+    requestImpl: async () => { throw Object.assign(new Error("pending"), {code:"source_pending"}); },
+  });
+  const input = { host: "remote", nativeThreadId: UUID };
+  const row = { sessionId: UUID, pid: processRecord.pid, cwd: "/fictional/native-origin", kind: "interactive", startedAt: 1 };
+  const live = { listNativeSessions: async () => [row], inspectNative: async () => processRecord };
+  const observation = await observeLocalClaudeDesktopSession(configPath, input, live);
+  assert.equal(observation.cwd, row.cwd);
+  assert.equal(observation.nativeThreadId, UUID);
+  assert.equal(await observeLocalClaudeDesktopSession(configPath, { ...input, host: "local" }, live), null);
+  assert.equal(await observeLocalClaudeDesktopSession(configPath, input, { ...live, listNativeSessions: async () => [row, row] }), null);
+
+  let reads = 0;
+  const reusedPid = { ...live, inspectNative: async () => ({
+    ...processRecord, startedAt: ++reads === 1 ? processRecord.startedAt : "different-start",
+  }) };
+  assert.equal(await observeLocalClaudeDesktopSession(configPath, input, reusedPid), null);
+  await runNativeSessionHook(event({ hook_event_name: "SessionEnd" }), {
+    configPath, ancestors: async () => [processRecord],
+  });
+  await assert.rejects(observeLocalClaudeDesktopSession(configPath, input, live), /native_lifecycle_binding_stale_or_missing/);
+});
+
 test("Codex resolves native request metadata per call and never delegates the device capability", async () => {
   const { configPath, participantConfig } = await setup("codex"), requests = [];
   const bootstrap = await createNativeBootstrap({ configPath, requestImpl: async (config, path, body) => {

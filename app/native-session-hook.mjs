@@ -153,7 +153,7 @@ async function observeNativeClaudeSource(config,chain,{listNativeSessions=listNa
   }
   return null;
 }
-export async function resolveClaudeSource(configPath, { ancestors = processAncestors, readRecord = privateFile, listNativeSessions, inspectNative } = {}) {
+export async function resolveClaudeSource(configPath, { ancestors = processAncestors, readRecord = privateFile, listNativeSessions, inspectNative, allowMetadataFallback = true } = {}) {
   const config = await readDeviceConfig(configPath);
   if (config.provider !== "claude") throw fail("claude_device_required");
   const chain = await ancestors(), matchesExecutable = await nativeExecutableMatcher(config, chain), root = join(dirname(resolve(configPath)), "bindings");
@@ -170,10 +170,39 @@ export async function resolveClaudeSource(configPath, { ancestors = processAnces
       else unqualified = true;
     }
   }
-  if(matches.length!==1){const observed=await observeNativeClaudeSource(config,chain,{listNativeSessions,inspectNative});if(observed&&!ended.includes(observed.nativeThreadId))return observed;}
+  if(allowMetadataFallback&&matches.length!==1){const observed=await observeNativeClaudeSource(config,chain,{listNativeSessions,inspectNative});if(observed&&!ended.includes(observed.nativeThreadId))return observed;}
   if (matches.length !== 1) throw fail(matches.length ? "native_lifecycle_binding_ambiguous" : unqualified ? 'native_lifecycle_executable_not_qualified' : "native_lifecycle_binding_stale_or_missing");
   return matches[0];
 }
+// Resolve an exact same-host Desktop session independently of the caller's
+// working folder. The native catalog supplies the original cwd. A separate
+// verified lifecycle record binds the session to the live process identity.
+export async function observeLocalClaudeDesktopSession(configPath, {host, nativeThreadId}, {
+  listNativeSessions = listNativeClaudeSessions, inspectNative = inspectProcess,
+} = {}) {
+  const config = await readDeviceConfig(configPath);
+  if (config.provider !== 'claude' || config.host !== host || !nativeUuid.test(nativeThreadId ?? '')) return null;
+  const catalog = await listNativeSessions(config);
+  if (!Array.isArray(catalog) || catalog.length > 500) return null;
+  const matches = catalog.filter(row => row?.sessionId === nativeThreadId);
+  if (matches.length !== 1 || !Number.isSafeInteger(matches[0].pid) || matches[0].pid < 2) return null;
+  const process = await inspectNative(matches[0].pid);
+  if (process.pid !== matches[0].pid) return null;
+  const record = await resolveClaudeSource(configPath, {
+    ancestors: async () => [process],
+    allowMetadataFallback: false,
+  });
+  if (record.nativeThreadId !== nativeThreadId) return null;
+  const observed = await observeNativeClaudeSource(config, [process], {
+    listNativeSessions: async () => catalog, inspectNative,
+  });
+  if (observed?.nativeThreadId !== nativeThreadId) return null;
+  return {
+    nativeThreadId, cwd: observed.cwd, host, provider: 'claude', nativeObserved: true,
+    sourceVersion: String(matches[0].startedAt), surface: 'Claude live session metadata',
+  };
+}
+
 async function currentDiscussionContext(device, participant, requestImpl) {
   const scoped = { ...participant, address: device.address, authority: device.authority, requestTimeoutMs: 1500 };
   let groups;

@@ -111,6 +111,39 @@ test("wrong host/provider/cwd and excluded or account-mismatched sources cannot 
   await assert.rejects(f.service.register(f.device.token, { nativeThreadId: thread }), { code: "native_registration_source_scope_denied" });
   assert.equal(Object.keys(f.engine.store.data.connectors).length, 0);
 });
+test("incomplete Claude catalog rows recover through owning native metadata", async t => {
+  const observations = [];
+  const f = fixture(t, { resolveMetadata: async input => {
+    observations.push(input);
+    return { nativeThreadId: thread, cwd: "/home", host: "remote", provider: "claude", nativeObserved: true };
+  } });
+  f.source.cwd = null;
+  f.engine.workspace.index.sessions[0].cwd = null;
+  const registered = await f.service.register(f.device.token, {
+    nativeThreadId: thread,
+    workingCwd: "/home/owner/working-folder",
+    sourceProof: { kind: "claude-lifecycle" },
+  });
+  assert.equal(registered.sourceCwd, "/home");
+  assert.equal(f.engine.session(f.source.id).cwd, "/home");
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].cwd, undefined);
+  assert.equal((await f.service.register(f.device.token, { nativeThreadId: thread })).cached, true);
+  assert.equal(observations.length, 1);
+
+  f.engine.probe = async () => {};
+  f.engine.tools = [{host:"remote",provider:"claude",adapterCompatible:true}];
+  f.engine.nativeFactory = () => ({
+    open: async () => {},
+    close() {},
+    discover: async () => ({ sessions: [{ nativeThreadId: thread, cwd: null }], nextCursor: null }),
+  });
+  await f.engine.workspace.scan(f.engine.workspace.index.profile, {catalogOnly:true});
+  assert.equal(f.engine.session(f.source.id).cwd, "/home");
+  assert.equal((await f.service.register(f.device.token, { nativeThreadId: thread })).cached, true);
+  assert.equal(observations.length, 1);
+});
+
 test("unknown, missing or client-only observation remains pending with no source/grant promotion", async t => {
   for (const resolveMetadata of [async () => null, async () => ({ nativeThreadId: thread, cwd: "/home/owner/work", host: "remote", provider: "claude" }), async () => { throw new Error("PRIVATE provider diagnostic"); }]) {
     const f = fixture(t, { known: false, resolveMetadata });

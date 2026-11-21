@@ -469,11 +469,14 @@ export class WorkspaceMap {
         if (!identity || !connector || connector.sessionId !== identity.sessionId ||
           identity.scopeId !== profile.id || identity.account !== profile.account ||
           !profile.hosts.includes(identity.host) || !profile.providers.includes(identity.provider) ||
-          identity.sessionId !== identity.provider + '@' + identity.host + ':' + identity.nativeThreadId ||
-          collected.has(identity.sessionId)) continue;
+          identity.sessionId !== identity.provider + '@' + identity.host + ':' + identity.nativeThreadId) continue;
+        const discovered = collected.get(identity.sessionId);
+        if (typeof discovered?.cwd === 'string' && hostPaths(identity.host).isAbsolute(discovered.cwd)) continue;
         const denied = e.store.data.grants[identity.sessionId] ?? {};
         if (['enrolled','content','retrieve','share'].some(key => denied[key] === false)) continue;
-        const retained = this.index?.sessions?.find(source => source.id === identity.sessionId);
+        const retained = this.index?.sessions?.find(source =>
+          source.id === identity.sessionId && typeof source.cwd === 'string' &&
+          normalizeHostPath(source.cwd, identity.host) === identity.cwd);
         const cwd = e.store.data.projects[identity.project]?.targets?.[identity.host + ':' + identity.provider]?.path ?? identity.cwd;
         if (!cwd || normalizeHostPath(cwd,identity.host) !== identity.cwd) continue;
         const source = retained ?? { ...identity, id:identity.sessionId, cwd, fixture:false,

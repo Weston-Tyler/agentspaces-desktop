@@ -88,6 +88,36 @@ test("cached active nonfixture native discovery is reused without scanning or na
   assert.equal(engine.catalog[0].nativeThreadId, "native-thread-uuid"); assert.equal(engine.modelCalls, 0);
 });
 
+test("a saved Connect all scope serves native requests after restart without rebuilding the inventory", async t => {
+  const { root, engine, terminals } = make();
+  scope(engine);
+  engine.workspace.index.profile.policy = "local-retrieval";
+  engine.workspace.index.profile.indexFiles = true;
+  engine.store.data.desktopPreferences = { connectAll: true, hosts: ["local"], indexFiles: true };
+  nativeCatalog(engine);
+  const savedIndex = engine.workspace.index;
+  const scans = [];
+  engine.workspace.scan = async (...args) => { scans.push(args); throw new Error("No startup inventory"); };
+
+  const app = await startServer({ root, engine, terminals, port: 0, desktopDiscovery: true });
+  t.after(() => app.close());
+  const headers = await owner(app);
+  const response = await fetch(app.address + "/api/state", { headers });
+  assert.equal(response.status, 200);
+  const state = await response.json();
+  assert.equal(state.desktopStartup.status, "cached-native-metadata");
+  assert.equal(state.desktopPreferences.connectAll, true);
+  assert.equal(state.sessions[0].id, "native-thread-reference");
+  assert.equal(engine.workspace.index, savedIndex);
+  assert.deepEqual(scans, []);
+
+  const refresh = await fetch(app.address + "/api/desktop/connect-all", {
+    method: "POST", headers, body: JSON.stringify({ hosts: ["local"] }),
+  });
+  assert.equal(refresh.status, 200);
+  assert.equal(scans.length, 1);
+});
+
 test("a revoked native metadata scope is preserved and never silently reenrolled on desktop startup", async t => {
   const { root, engine, terminals } = make(); scope(engine, false); nativeCatalog(engine);
   const before = JSON.stringify(engine.workspace.index); let scans = 0;

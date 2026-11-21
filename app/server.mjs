@@ -97,7 +97,10 @@ export async function startServer({
   if (!provided) await engine.initialize();
   const desktopStartup = desktopDiscovery ? ensureDesktopDiscovery(engine) : null;
   let connectedWork = null;
-  if (desktopDiscovery && store.data.desktopPreferences?.connectAll) {
+  // A restart already has the owner's saved workspace. Reconnect using it
+  // without repeating the filesystem inventory and its resource spikes.
+  if (desktopStartup && desktopStartup.status !== "cached-native-metadata" &&
+      store.data.desktopPreferences?.connectAll) {
     if (engine.workspace.running) desktopStartup.promise.then(() => { connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts }); });
     else connectedWork = connectAllOwnedWork(engine, { hosts: store.data.desktopPreferences.hosts });
   }
