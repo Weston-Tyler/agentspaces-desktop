@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,readFile,writeFile,symlink} from 'node:fs/promises';
+import {mkdtemp,rm,readFile,writeFile,symlink,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {loadMonitorCursor,saveMonitorCursor,renewalNotice,MONITOR_RENEW_AFTER_MS} from '../app/grok-inbox-monitor.mjs';
@@ -15,7 +15,7 @@ test('monitor renewal is bounded local maintenance, never peer work or an interr
   assert(!text.includes('BUILDER-INBOX'));
 });
 test('monitor cursor survives renewal without replay or cross-session reuse',async t=>{
-  const root=await mkdtemp(join(tmpdir(),'monitor-renewal-'));
+  const root=await mkdtemp(join(await realpath(tmpdir()),'monitor-renewal-'));
   t.after(()=>rm(root,{recursive:true,force:true}));
   const file=join(root,'cursor.json'),identity='a'.repeat(64),now=Date.now();
   const cursor=await loadMonitorCursor(file,identity,now);
@@ -29,7 +29,7 @@ test('monitor cursor survives renewal without replay or cross-session reuse',asy
   assert(!String(await readFile(file)).includes('token'));
 });
 test('linked or corrupt checkpoint fails closed instead of replaying messages',async t=>{
-  const root=await mkdtemp(join(tmpdir(),'monitor-renewal-'));
+  const root=await mkdtemp(join(await realpath(tmpdir()),'monitor-renewal-'));
   t.after(()=>rm(root,{recursive:true,force:true}));
   const file=join(root,'cursor.json');
   await writeFile(file,'corrupt',{mode:0o600});
