@@ -118,7 +118,11 @@ export class SourceBindings {
       this.validateWorkingCwd(grok.cwd, device, this.profile());
     }
     let source = input.nativeThreadId ? this.engine.catalog.find(source => !source.fixture && source.host === device.host && source.provider === device.provider && source.nativeThreadId === input.nativeThreadId) : null;
-    if (!source || input.nativeSessionId && source.nativeSessionId !== input.nativeSessionId) {
+    const incompleteClaudeSource = device.provider === 'claude' && source &&
+      (typeof source.cwd !== 'string' || !hostPaths(device.host).isAbsolute(source.cwd));
+    if (incompleteClaudeSource && (source.scopeId !== profile.id || source.account !== profile.account))
+      throw failure("native_registration_source_scope_denied");
+    if (!source || incompleteClaudeSource || input.nativeSessionId && source.nativeSessionId !== input.nativeSessionId) {
       let observed;
       try { observed = grok ?? await this.resolveMetadata({ host: device.host, provider: device.provider, nativeThreadId: input.nativeThreadId, nativeSessionId: input.nativeSessionId }); } catch { throw failure("source_pending"); }
       this.device(token); // The owner may revoke/change scope while observation runs.
@@ -126,8 +130,8 @@ export class SourceBindings {
       if (observed.account !== undefined && observed.account !== profile.account) throw failure("native_registration_account_mismatch");
       source = { id: device.provider + "@" + device.host + ":" + observed.nativeThreadId, nativeThreadId: observed.nativeThreadId, nativeSessionId: observed.nativeSessionId ?? null,
         host: device.host, provider: device.provider, cwd: observed.cwd, account: profile.account, scopeId: profile.id, fixture: false,
-        ...(device.provider === 'grok' ? { surface:'Grok Build' } : {}),
-        title: typeof observed.title === "string" ? observed.title.slice(0, 200) : "Native session", sourceVersion: String(observed.sourceVersion ?? "unknown").slice(0, 200), status: ["current", "dormant", "archived", "unknown"].includes(observed.status) ? observed.status : "unknown", topics: [],
+        ...(device.provider === 'grok' ? { surface:'Grok Build' } : observed.surface ? { surface:observed.surface } : {}),
+        title: typeof observed.title === "string" ? observed.title.slice(0, 200) : source?.title ?? "Native session", sourceVersion: String(observed.sourceVersion ?? "unknown").slice(0, 200), status: ["current", "dormant", "archived", "unknown"].includes(observed.status) ? observed.status : "unknown", topics: [],
         registrationProvenance: { nativeClientSupplied: true, metadataObserved: true, attribution: "locally bound; native caller not cryptographically verified" } };
       this.validateSource(source, device, this.profile(), input.cwd, false, input.workingCwd);
       const overrides = this.engine.store.data.grants[source.id] ?? {};

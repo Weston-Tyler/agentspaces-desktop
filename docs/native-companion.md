@@ -2,7 +2,7 @@
 
 The application opens on one Ask home. General questions use the available native Codex service; work questions include matching permitted threads and artifacts automatically. Sources and coverage remain inspectable. Codex owns authentication, including normal ChatGPT sign-in; that native path needs no API key. Asking starts inference; discovery and UI refresh do not.
 
-Saved native metadata restores immediately. Fresh startup discovers local catalogs before Git/filesystem inventory. Connect all persists local and remote selection, local retrieval and file indexing, preserving account labels, roots, exclusions and per-thread refusals. Inventory continues for at most 32 progress batches and stops on a stall. Partial coverage stays labeled; revoked scopes stay revoked. Normal runtimes cannot be replaced by samples.
+Saved workspaces restore their metadata and file index on restart. A valid saved index keeps the companion available without replaying a full filesystem inventory. Use Connect all to refresh that inventory explicitly. Fresh startup discovers local catalogs before Git/filesystem inventory. Connect all persists local and remote selection, local retrieval and file indexing, preserving account labels, roots, exclusions and per-thread refusals. Inventory continues for at most 32 progress batches and stops on a stall. Partial coverage stays labeled; revoked scopes stay revoked. Normal runtimes cannot be replaced by samples.
 
 Each native thread is a logical agent, not a permanently running model. Create a group with several threads. Any member may start a conversation in enabled rooms. Opening posts address the room; mentions or selected recipients address specific members.
 
